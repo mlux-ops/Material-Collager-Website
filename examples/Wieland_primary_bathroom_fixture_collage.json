@@ -1,0 +1,49 @@
+﻿{
+  "collage_type": "bathroom_fixture_collage",
+  "orientation": "landscape",
+  "quality": "high",
+  "output_path": "out/wieland primary bathroom_fixture_collage.png",
+  "items": [
+    {
+      "id": "vanity_faucet",
+      "role": "wide spread vanity faucet",
+      "image_paths": ["F:/My Drive/Work 20260530/Reference Images/Primary Bath Sink Faucet.png"],
+      "finish": "brizo brilliance black onyx",
+      "required": true
+    },
+    {
+      "id": "shower_head",
+      "role": "shower head and wall arm",
+      "image_paths": ["F:/My Drive/Work 20260530/Reference Images/w5TfoCRlIXeio0ponA4gikif4QwIYh4HHg1HsA5FAwY.png"],
+      "finish": "brizo brilliance black onyx",
+      "required": true
+    },
+    {
+      "id": "valve_trim",
+      "role": "shower valve trim",
+      "image_paths": ["F:/My Drive/Work 20260530/Reference Images/Primary Bath Shower Temp. Valve.png"],
+      "finish": "brizo brilliance black onyx",
+      "required": true
+    },
+
+    {
+      "id": "vanity_wood",
+      "role": "wood vanity sample",
+      "image_paths": ["F:/My Drive/Work 20260530/Reference Images/Cabinet Wood Material Reference Zoomed In - Tone, Texture, Pattern, Grain.png"],
+      "required": true
+    },
+    {
+      "id": "main_tile",
+      "role": "main bathroom tile",
+      "image_paths": ["F:/My Drive/Work 20260530/Reference Images/Floor and Wall Tile.jpg"],
+      "required": true
+    },
+    {
+      "id": "countertop",
+      "role": "vanity countertop stone",
+      "image_paths": ["F:/My Drive/Work 20260530/Countertop Reference - Color, pattern, tone, veining.jpg"],
+      "required": true
+    }
+  ]
+}
+
