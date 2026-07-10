@@ -7,16 +7,30 @@ export const COLLAGE_TYPES = [
 
 export const QUALITIES = ["low", "medium", "high", "auto"] as const;
 export const ORIENTATIONS = ["default", "landscape", "portrait", "square"] as const;
+export const OUTPUT_RESOLUTIONS = ["standard", "studio"] as const;
+export const COMPOSITIONS = ["editorial", "structured", "catalog"] as const;
+export const DENSITIES = ["airy", "balanced", "layered"] as const;
+export const STYLING_OPTIONS = ["materials_only", "botanical_linen"] as const;
+export const LIGHTING_OPTIONS = ["soft_daylight", "crisp_studio"] as const;
+
+export const MAX_REFERENCE_IMAGES = 16;
+export const MAX_REFERENCE_FILE_BYTES = 50 * 1024 * 1024;
 
 export type CollageType = (typeof COLLAGE_TYPES)[number];
 export type Quality = (typeof QUALITIES)[number];
 export type Orientation = (typeof ORIENTATIONS)[number];
+export type OutputResolution = (typeof OUTPUT_RESOLUTIONS)[number];
+export type Composition = (typeof COMPOSITIONS)[number];
+export type Density = (typeof DENSITIES)[number];
+export type StylingOption = (typeof STYLING_OPTIONS)[number];
+export type LightingOption = (typeof LIGHTING_OPTIONS)[number];
 
 export type CollageItemInput = {
   id: string;
   role: string;
   imageKeys?: string[];
   imageNames?: string[];
+  imageFileIds?: string[];
   brand?: string;
   name?: string;
   finish?: string;
@@ -28,15 +42,16 @@ export type CollageRequestInput = {
   collageType: CollageType;
   orientation: Orientation;
   quality: Quality;
+  outputResolution?: OutputResolution;
+  composition?: Composition;
+  density?: Density;
+  styling?: StylingOption;
+  lighting?: LightingOption;
+  heroItemId?: string;
   outputFilename?: string;
   apiKey?: string;
   runQa?: boolean;
   items: CollageItemInput[];
-};
-
-export type UploadedReference = {
-  key: string;
-  file: File;
 };
 
 export const ITEM_PRESETS: Record<CollageType, CollageItemInput[]> = {
@@ -74,55 +89,45 @@ export const ITEM_PRESETS: Record<CollageType, CollageItemInput[]> = {
 };
 
 const TYPE_PROMPTS: Record<CollageType, string> = {
-  kitchen_material_palette: `Collage type: Kitchen Material Palette.
-Create an elegant interior design flat-lay mood board photograph on a clean white surface.
-Arrange only the referenced materials and fixtures in a curated overhead composition.
-No subway tile. No ceramic tile of any kind. No full appliances. Use materials and samples only.
-Include subtle olive or eucalyptus sprigs and a natural linen or waffle-weave towel corner.
-Style should feel warm, luxurious, residential, and magazine-quality.`,
-  appliance_collage: `Collage type: Appliance Collage.
-Create a clean editorial appliance product collage on a pure white background.
-Use only the appliances from the reference images. Remove source-image backgrounds.
-No styling greenery, plants, towels, material samples, labels, annotations, or decorative extras.
-Each appliance must remain clearly visible and recognizable as the exact product shown in its source image.
-Preserve the product form, door configuration, handle shape, surface finish, proportions, and edge details.
-Arrange dynamically like a luxury appliance advertisement, with subtle drop shadows and clean edges.`,
-  bathroom_fixture_collage: `Collage type: Bathroom Fixture Collage.
-Create a high-end bathroom fixture flat-lay product collage on a clean white background.
-Include only the referenced bathroom fixtures, finishes, tile, wood, stone, and hardware items listed in the reference mapping.
-Do not include any toilet, bathtub, sink basin, large porcelain fixture, or unrequested plumbing piece.
-Include olive or eucalyptus sprigs and a natural linen or waffle-weave towel corner.
-Let the fixture finish, wood, tile, and stone samples fill the frame naturally while keeping breathing room.`,
-  bathroom_tile_collage: `Collage type: Bathroom Tile Collage.
-Create an interior design tile and finish mood board collage for a luxury bathroom.
-Arrange only the referenced tile, material, stone, wood, and metal finish samples in an editorial flat-lay.
-Items may extend slightly beyond the frame.
-Include subtle olive or eucalyptus sprigs and a natural linen or waffle-weave towel corner.
-The result should feel warm, curated, tactile, and magazine-quality.`,
+  kitchen_material_palette: `Purpose: a luxury residential kitchen material palette for an architecture and interiors editorial.
+Use only the referenced materials and fixtures. Do not add tile, appliances, or substitute samples unless they are referenced.`,
+  appliance_collage: `Purpose: a luxury appliance product composition for an architecture and interiors editorial.
+Use only the referenced appliances. Isolate them cleanly from their source backgrounds and preserve exact product identity.`,
+  bathroom_fixture_collage: `Purpose: a luxury bathroom fixture and finish board for an architecture and interiors editorial.
+Use only the referenced fixtures, finishes, tile, wood, stone, and hardware. Do not add sanitaryware or plumbing pieces that are not referenced.`,
+  bathroom_tile_collage: `Purpose: a luxury bathroom tile and finish palette for an architecture and interiors editorial.
+Use only the referenced tile, stone, wood, and metal finish samples. Preserve their real scale relationships and tactile character.`,
 };
 
-const UNIVERSAL_STYLE_RULES = `Universal style rules:
-- Pure white background, no exceptions.
-- Editorial overhead flat-lay composition with an organic curated arrangement, not a grid.
-- Soft natural light from the upper-left with subtle drop shadows so items float on the white surface.
-- Photorealistic product photography quality, never illustrated or cartoon.
-- Leave breathing room; do not crowd items.
-- Slight overlap between items is encouraged when it feels natural.
-- The hero item should be the most prominent item.
-- No text, labels, annotations, watermarks, or callouts in the generated image.
-- No colored background.
-- Do not add placeholder materials, fixtures, hardware, wood, tile, stone, appliances, or samples that are not present in the reference mapping.
-- Do not include unrequested objects.`;
+const COMPOSITION_PROMPTS: Record<Composition, string> = {
+  editorial:
+    "Asymmetrical overhead flat lay with a clear visual anchor, calm editorial rhythm, intentional negative space, and a few natural overlaps.",
+  structured:
+    "Disciplined architectural sample-board composition with aligned axes, measured spacing, clean hierarchy, and restrained overlap.",
+  catalog:
+    "Polished luxury product arrangement with every item fully legible, clean separation, balanced scale, and minimal overlap.",
+};
 
-const METAL_FINISH_RULES = `Metal finish reference:
-- Brushed Moderne Brass: warm, matte, slightly amber-toned brass; not shiny gold and not yellow.
-- Polished Chrome: bright, mirror-like, cool silver.
-- Matte Black: flat black with zero sheen.
-- Brilliance Stainless Steel: cool-toned brushed stainless; not brass, not gold, not warm.
-- Brushed Nickel: warmer than chrome, satin finish.
-- Polished Nickel: bright but slightly warmer than chrome.`;
+const DENSITY_PROMPTS: Record<Density, string> = {
+  airy: "Keep generous white space around the group; approximately one third of the canvas should remain open.",
+  balanced: "Use comfortable breathing room with a satisfyingly full but uncluttered frame.",
+  layered: "Build a richer tactile composition with controlled overlap while keeping every referenced item identifiable.",
+};
 
-export function validateCollageRequest(request: CollageRequestInput, filesByKey?: Map<string, File>) {
+const STYLING_PROMPTS: Record<StylingOption, string> = {
+  materials_only: "Use no decorative props. Every visible object must come from a reference image.",
+  botanical_linen:
+    "Allow only one restrained olive or eucalyptus sprig and one small natural linen corner as secondary editorial styling. They must never replace, cover, or visually compete with a referenced item.",
+};
+
+const LIGHTING_PROMPTS: Record<LightingOption, string> = {
+  soft_daylight:
+    "Soft, neutral daylight from the upper left, realistic contact shadows, controlled highlights, accurate whites, and true material color.",
+  crisp_studio:
+    "Large diffused studio source from the upper left, crisp but soft-edged shadows, clean specular control, accurate whites, and true material color.",
+};
+
+export function validateCollageRequest(request: CollageRequestInput) {
   if (!COLLAGE_TYPES.includes(request.collageType)) {
     throw new Error("Choose a supported collage type.");
   }
@@ -132,32 +137,52 @@ export function validateCollageRequest(request: CollageRequestInput, filesByKey?
   if (!ORIENTATIONS.includes(request.orientation)) {
     throw new Error("Choose a supported orientation.");
   }
+  if (!OUTPUT_RESOLUTIONS.includes(resolvedOutputResolution(request))) {
+    throw new Error("Choose a supported output resolution.");
+  }
+  if (!COMPOSITIONS.includes(resolvedComposition(request))) {
+    throw new Error("Choose a supported composition.");
+  }
+  if (!DENSITIES.includes(resolvedDensity(request))) {
+    throw new Error("Choose a supported spacing option.");
+  }
+  if (!STYLING_OPTIONS.includes(resolvedStyling(request))) {
+    throw new Error("Choose a supported styling option.");
+  }
+  if (!LIGHTING_OPTIONS.includes(resolvedLighting(request))) {
+    throw new Error("Choose a supported lighting option.");
+  }
 
   const items = activeItems(request);
   if (!items.length) {
-    throw new Error("Add at least one item.");
+    throw new Error("Add at least one item with a reference image.");
   }
 
+  const ids = new Set<string>();
   for (const item of items) {
+    const id = item.id.trim();
+    if (!id) {
+      throw new Error(`Give ${item.role || "each item"} a unique ID.`);
+    }
+    if (ids.has(id)) {
+      throw new Error(`Item ID \"${id}\" is used more than once.`);
+    }
+    ids.add(id);
+
     if (!item.role.trim()) {
-      throw new Error(`Item ${item.id || "without an id"} needs a role.`);
+      throw new Error(`Item ${id} needs a role.`);
     }
-    const imageKeys = item.imageKeys ?? [];
-    const imageNames = item.imageNames ?? [];
-    if (!imageKeys.length && !imageNames.length) {
-      throw new Error(`Add at least one reference image for ${item.id || item.role}.`);
+    if (referenceCount(item) === 0) {
+      throw new Error(`Add at least one reference image for ${id}.`);
     }
-    if (filesByKey) {
-      for (const key of imageKeys) {
-        const file = filesByKey.get(key);
-        if (!file) {
-          throw new Error(`Missing uploaded file for ${item.id || item.role}.`);
-        }
-        if (!file.type.startsWith("image/")) {
-          throw new Error(`${file.name} is not an image file.`);
-        }
-      }
-    }
+  }
+
+  if (totalReferenceCount(request) > MAX_REFERENCE_IMAGES) {
+    throw new Error(`Use no more than ${MAX_REFERENCE_IMAGES} reference images in one collage.`);
+  }
+
+  if (request.heroItemId && !ids.has(request.heroItemId)) {
+    throw new Error("Choose a hero item that is still in the board.");
   }
 
   if (request.collageType === "bathroom_tile_collage" && resolvedOrientation(request) !== "portrait") {
@@ -168,8 +193,16 @@ export function validateCollageRequest(request: CollageRequestInput, filesByKey?
   }
 }
 
+export function referenceCount(item: CollageItemInput) {
+  return Math.max(item.imageFileIds?.length ?? 0, item.imageKeys?.length ?? 0, item.imageNames?.length ?? 0);
+}
+
+export function totalReferenceCount(request: CollageRequestInput) {
+  return request.items.reduce((total, item) => total + referenceCount(item), 0);
+}
+
 export function activeItems(request: CollageRequestInput) {
-  return request.items.filter((item) => item.required !== false || (item.imageKeys?.length ?? item.imageNames?.length ?? 0) > 0);
+  return request.items.filter((item) => item.required !== false || referenceCount(item) > 0);
 }
 
 export function resolvedOrientation(request: CollageRequestInput) {
@@ -178,72 +211,112 @@ export function resolvedOrientation(request: CollageRequestInput) {
   return "landscape";
 }
 
+export function resolvedOutputResolution(request: CollageRequestInput): OutputResolution {
+  return request.outputResolution ?? "studio";
+}
+
+export function resolvedComposition(request: CollageRequestInput): Composition {
+  return request.composition ?? "editorial";
+}
+
+export function resolvedDensity(request: CollageRequestInput): Density {
+  return request.density ?? "balanced";
+}
+
+export function resolvedStyling(request: CollageRequestInput): StylingOption {
+  if (request.collageType === "appliance_collage") return "materials_only";
+  return request.styling ?? "botanical_linen";
+}
+
+export function resolvedLighting(request: CollageRequestInput): LightingOption {
+  return request.lighting ?? "soft_daylight";
+}
+
 export function resolvedSize(request: CollageRequestInput) {
   const orientation = resolvedOrientation(request);
-  if (orientation === "portrait") return "1024x1536";
-  if (orientation === "square") return "1024x1024";
-  return "1536x1024";
+  if (resolvedOutputResolution(request) === "standard") {
+    if (orientation === "portrait") return "1024x1536";
+    if (orientation === "square") return "1024x1024";
+    return "1536x1024";
+  }
+
+  if (orientation === "portrait") return "1360x2048";
+  if (orientation === "square") return "2048x2048";
+  return "2048x1360";
 }
 
 export function buildGenerationPrompt(request: CollageRequestInput) {
+  const items = activeItems(request);
   const labels: string[] = [];
   let nextIndex = 1;
-  for (const item of activeItems(request)) {
-    const count = Math.max(item.imageKeys?.length ?? 0, item.imageNames?.length ?? 0);
+  for (const item of items) {
+    const count = referenceCount(item);
     const start = nextIndex;
     const end = nextIndex + count - 1;
     const imageRange = start === end ? `Image ${start}` : `Images ${start}-${end}`;
     nextIndex += count;
     const details = [
-      item.role,
+      `role: ${item.role}`,
       item.brand ? `brand: ${item.brand}` : null,
-      item.name ? `name: ${item.name}` : null,
-      item.finish ? `finish: ${item.finish}` : null,
-      item.notes ? `notes: ${item.notes}` : null,
+      item.name ? `product: ${item.name}` : null,
+      item.finish ? `finish name: ${item.finish}` : null,
+      item.notes ? `specific instruction: ${item.notes}` : null,
     ].filter(Boolean);
-    labels.push(`- ${imageRange}: item \`${item.id || slugify(item.role)}\` (${details.join("; ")})`);
+    labels.push(`${imageRange} -> item \"${item.id}\" (${details.join("; ")})`);
   }
 
-  const parts = [
-    "Create one finished high-end interior design material collage board.",
+  const hero = request.heroItemId
+    ? `Make item \"${request.heroItemId}\" the visual anchor. It may be largest, but it must remain faithful to its reference.`
+    : "Choose the most visually substantial referenced item as the anchor without diminishing any other requested item.";
+
+  return [
+    "GOAL",
+    "Create one finished, photorealistic interior-design material collage that feels art-directed, restrained, and publication-ready for a leading architecture and interiors magazine.",
     TYPE_PROMPTS[request.collageType],
-    UNIVERSAL_STYLE_RULES,
-    METAL_FINISH_RULES,
-    "Reference image mapping. The image model can see these actual uploaded image files; use them directly as visual references:",
+    "ART DIRECTION",
+    COMPOSITION_PROMPTS[resolvedComposition(request)],
+    DENSITY_PROMPTS[resolvedDensity(request)],
+    LIGHTING_PROMPTS[resolvedLighting(request)],
+    STYLING_PROMPTS[resolvedStyling(request)],
+    hero,
+    "REFERENCE MAP",
+    "Use the uploaded images by their exact order below. The images, not the text labels, are the visual source of truth.",
     labels.join("\n"),
-    `Reference handling rules:
-- Preserve each referenced item's exact visible material, finish tone, proportions, geometry, texture, grain, veining, and physical style.
-- Do not invent alternate products when a reference image is provided.
-- Do not rely on the item labels as visual descriptions; the uploaded images are the visual source of truth.
-- Use metadata only to clarify item role, brand, finish name, and placement priority.
-- If an item was removed from the request or has no reference image in the mapping, omit it entirely.
-- If multiple images belong to one item, treat them as alternate views of the same item unless notes say otherwise.`,
-    `Output requirements:
-- Orientation: ${resolvedOrientation(request)}.
-- Canvas size target: ${resolvedSize(request)}.
-- Background must be pure white.
-- Photorealistic overhead product photography.`,
-  ];
-
-  if (request.collageType === "appliance_collage") {
-    parts.push("Appliance collage exception: no greenery, no towel, no botanical styling.");
-  }
-
-  return parts.join("\n\n");
+    "REFERENCE FIDELITY - NON-NEGOTIABLE",
+    `- Include every mapped item exactly once as a distinct collage element. Multiple images mapped to one item are alternate views of that same item, not extra objects.
+- For a multi-image item, use the first image as the primary identity view and use every remaining view to resolve geometry, finish, and details.
+- Preserve recognizable product identity, silhouette, component count, proportions, edge profile, hardware geometry, finish temperature, sheen, grain direction, veining, pattern scale, texture, and color.
+- Remove source backgrounds cleanly, but do not redesign, simplify, mirror, recolor, or substitute the referenced item.
+- Metadata clarifies identity and role. If metadata and a visible reference appear to conflict, preserve the visible reference and do not invent a compromise.
+- Do not create generic stand-ins. Do not add a material, fixture, appliance, sample, or placeholder that is absent from the reference map.
+- Keep each item readable. Overlap may crop only a small nonessential edge; never cover a defining product feature or most of a sample.
+- Do not repeat an item unless separate mapped item IDs explicitly request it.`,
+    "PHOTOGRAPHY AND FINISH",
+    `- True overhead camera with corrected perspective; no oblique room scene and no rendered interior.
+- Seamless pure white background (#FFFFFF) with no gray cast, vignette, border, frame, or colored surface.
+- Realistic material thickness, contact shadows, reflective behavior, and edge detail. Avoid CGI gloss, plastic-looking stone, fake wood grain, warped fixtures, and impossible shadows.
+- Sophisticated scale hierarchy, quiet negative space, clean cutout edges, and a cohesive editorial color balance.
+- No text, labels, annotations, dimensions, logos added by the model, watermarks, people, hands, packaging, swatch names, or unrequested objects. The selected editorial styling option, if any, is the only exception.`,
+    "OUTPUT",
+    `Orientation: ${resolvedOrientation(request)}. Canvas: ${resolvedSize(request)}. Deliver one complete collage, not a contact sheet, presentation page, or set of alternatives.`,
+  ].join("\n\n");
 }
 
 export function buildSummary(request: CollageRequestInput) {
   const lines = [
     `Collage type: ${labelFor(request.collageType)}`,
-    `Orientation: ${labelFor(resolvedOrientation(request))}`,
-    `Size: ${resolvedSize(request)}`,
+    `Canvas: ${resolvedSize(request)}`,
+    `Composition: ${labelFor(resolvedComposition(request))}`,
+    `Spacing: ${labelFor(resolvedDensity(request))}`,
+    `Styling: ${labelFor(resolvedStyling(request))}`,
     `Quality: ${labelFor(request.quality)}`,
+    `References: ${totalReferenceCount(request)}/${MAX_REFERENCE_IMAGES}`,
     "Items:",
   ];
 
   for (const item of activeItems(request)) {
-    const count = Math.max(item.imageKeys?.length ?? 0, item.imageNames?.length ?? 0);
-    lines.push(`- ${item.id || slugify(item.role)}: ${item.role} (${count} image${count === 1 ? "" : "s"})`);
+    const count = referenceCount(item);
+    lines.push(`- ${item.id}: ${item.role} (${count} image${count === 1 ? "" : "s"})`);
   }
 
   return lines.join("\n");

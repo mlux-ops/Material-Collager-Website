@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Material Collager",
-  description: "Generate high-end interior design collage boards from image references.",
+  description: "Create publication-ready interior material collages with high-fidelity product and finish references.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

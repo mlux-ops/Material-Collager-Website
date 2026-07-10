@@ -1,16 +1,18 @@
 import {
+  activeItems,
   buildGenerationPrompt,
   buildSummary,
   resolvedSize,
   type CollageRequestInput,
   validateCollageRequest,
 } from "@/app/lib/collage";
+import { errorResponse, readOpenAIResponse, resolveOpenAIKey } from "@/app/lib/openai-server";
 
 export const runtime = "edge";
 
 type OpenAIImageResponse = {
   data?: Array<{ b64_json?: string }>;
-  error?: { message?: string; code?: string };
+  usage?: Record<string, unknown>;
 };
 
 type OpenAIResponseOutput = {
@@ -22,67 +24,46 @@ type OpenAIResponseOutput = {
 
 export async function POST(request: Request) {
   try {
-    const incoming = await request.formData();
-    const payloadText = incoming.get("payload");
-    if (typeof payloadText !== "string") {
-      throw new Error("Missing generation payload.");
+    const payload = (await request.json()) as CollageRequestInput;
+    validateCollageRequest(payload);
+
+    const referenceFileIds = activeItems(payload).flatMap((item) => item.imageFileIds ?? []);
+    const expectedReferences = activeItems(payload).reduce(
+      (total, item) => total + Math.max(item.imageNames?.length ?? 0, item.imageFileIds?.length ?? 0),
+      0,
+    );
+    if (!referenceFileIds.length || referenceFileIds.length !== expectedReferences) {
+      throw new Error("One or more reference images are not ready. Generate again to finish preparing them.");
     }
 
-    const payload = JSON.parse(payloadText) as CollageRequestInput;
-    const filesByKey = new Map<string, File>();
-    for (const [key, value] of incoming.entries()) {
-      if (key.startsWith("file:") && value instanceof File) {
-        filesByKey.set(key.slice(5), value);
-      }
-    }
-
-    validateCollageRequest(payload, filesByKey);
-
-    const apiKey = payload.apiKey?.trim() || process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      throw new Error("OPENAI_API_KEY is not configured.");
-    }
-
+    const apiKey = resolveOpenAIKey(payload.apiKey);
     const prompt = buildGenerationPrompt(payload);
-    const openaiForm = new FormData();
-    openaiForm.append("model", "gpt-image-2");
-    openaiForm.append("prompt", prompt);
-    openaiForm.append("size", resolvedSize(payload));
-    openaiForm.append("quality", payload.quality);
-    openaiForm.append("background", "opaque");
-    openaiForm.append("output_format", "png");
-
-    const referenceFiles: File[] = [];
-    for (const item of payload.items) {
-      for (const key of item.imageKeys ?? []) {
-        const file = filesByKey.get(key);
-        if (file) {
-          referenceFiles.push(file);
-          openaiForm.append("image[]", file, file.name);
-        }
-      }
-    }
-
     const imageResponse = await fetch("https://api.openai.com/v1/images/edits", {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: openaiForm,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-image-2",
+        prompt,
+        images: referenceFileIds.map((fileId) => ({ file_id: fileId })),
+        input_fidelity: "high",
+        size: resolvedSize(payload),
+        quality: payload.quality,
+        background: "opaque",
+        output_format: "png",
+      }),
     });
-
-    const imageJson = (await imageResponse.json()) as OpenAIImageResponse;
-    if (!imageResponse.ok) {
-      throw new Error(imageJson.error?.message || "OpenAI image generation failed.");
-    }
-
+    const imageJson = await readOpenAIResponse<OpenAIImageResponse>(imageResponse);
     const imageBase64 = imageJson.data?.[0]?.b64_json;
     if (!imageBase64) {
       throw new Error("OpenAI did not return image data.");
     }
 
-    let qa: { passed: boolean; findings: string[]; recommendation: string; raw: string } | null = null;
-    if (payload.runQa) {
-      qa = await reviewGeneratedImage(apiKey, payload, imageBase64, referenceFiles);
-    }
+    const qa = payload.runQa
+      ? await reviewGeneratedImage(apiKey, payload, imageBase64, referenceFileIds)
+      : null;
 
     return Response.json({
       ok: true,
@@ -92,12 +73,10 @@ export async function POST(request: Request) {
       mimeType: "image/png",
       filename: safeOutputFilename(payload.outputFilename),
       qa,
+      usage: imageJson.usage,
     });
   } catch (error) {
-    return Response.json(
-      { ok: false, error: error instanceof Error ? error.message : "Generation failed." },
-      { status: 400 },
-    );
+    return errorResponse(error);
   }
 }
 
@@ -105,24 +84,40 @@ async function reviewGeneratedImage(
   apiKey: string,
   payload: CollageRequestInput,
   imageBase64: string,
-  referenceFiles: File[],
+  referenceFileIds: string[],
 ) {
+  const itemMap = activeItems(payload)
+    .map((item) => `${item.id}: ${item.role} (${item.imageFileIds?.length ?? 0} reference image(s))`)
+    .join("\n");
   const content: Array<Record<string, unknown>> = [
     {
       type: "input_text",
-      text: `The first image is the generated collage. The following images are the original references. Evaluate reference match, pure white background, organic flat-lay composition, no labels/text, and no unrequested items. Collage type: ${payload.collageType}. Return compact JSON with keys passed, findings, recommendation.`,
+      text: `Act as a meticulous architecture-magazine art director and product-reference checker.
+
+The first image is the generated collage. Every following image is an original reference, in the same order used by the reference map below.
+
+${itemMap}
+
+Evaluate:
+1. Every requested item is present exactly once and no unrequested material, fixture, appliance, or placeholder was added.
+2. Each item preserves recognizable identity, geometry, finish, color, texture, grain, veining, pattern scale, and defining details from its references.
+3. The collage is photorealistic, cleanly isolated, pure white, professionally lit, and editorially composed.
+4. No item is badly warped, duplicated, mislabeled, recolored, hidden, or replaced by a generic substitute.
+
+Return JSON only with: passed (boolean), score (integer 0-100), findings (array of concise strings naming item IDs when relevant), recommendation (one concise corrective instruction). Pass only at 90 or above with no major reference mismatch.`,
     },
     {
       type: "input_image",
       image_url: `data:image/png;base64,${imageBase64}`,
+      detail: "original",
     },
   ];
 
-  for (const file of referenceFiles) {
-    const base64 = await fileToBase64(file);
+  for (const fileId of referenceFileIds) {
     content.push({
       type: "input_image",
-      image_url: `data:${file.type || "image/png"};base64,${base64}`,
+      file_id: fileId,
+      detail: "original",
     });
   }
 
@@ -133,44 +128,38 @@ async function reviewGeneratedImage(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: process.env.MATERIAL_COLLAGER_QA_MODEL || "gpt-5.5",
+      model: process.env.MATERIAL_COLLAGER_QA_MODEL || "gpt-5.6",
+      reasoning: { effort: "low" },
       input: [{ role: "user", content }],
     }),
   });
 
-  const json = (await response.json()) as OpenAIResponseOutput & { error?: { message?: string } };
-  if (!response.ok) {
-    return {
-      passed: false,
-      findings: [json.error?.message || "QA review failed."],
-      recommendation: "Review the generated collage manually.",
-      raw: "",
-    };
-  }
-
-  const raw = extractOutputText(json);
   try {
+    const json = await readOpenAIResponse<OpenAIResponseOutput>(response);
+    const raw = extractOutputText(json);
     const parsed = JSON.parse(raw.replace(/^```json\s*/i, "").replace(/```$/i, "").trim()) as {
       passed?: boolean;
+      score?: number;
       findings?: string[] | string;
       recommendation?: string;
     };
+    const score = Math.max(0, Math.min(100, Math.round(Number(parsed.score) || 0)));
     return {
-      passed: Boolean(parsed.passed),
+      passed: Boolean(parsed.passed) && score >= 90,
+      score,
       findings: Array.isArray(parsed.findings)
         ? parsed.findings.map(String)
         : parsed.findings
           ? [String(parsed.findings)]
           : [],
       recommendation: String(parsed.recommendation || ""),
-      raw,
     };
-  } catch {
+  } catch (error) {
     return {
       passed: false,
-      findings: ["QA response was not valid JSON."],
-      recommendation: "Review the generated collage manually.",
-      raw,
+      score: 0,
+      findings: [error instanceof Error ? error.message : "Accuracy review failed."],
+      recommendation: "Review the collage manually before using it.",
     };
   }
 }
@@ -186,14 +175,8 @@ function extractOutputText(response: OpenAIResponseOutput) {
   return chunks.join("\n");
 }
 
-async function fileToBase64(file: File) {
-  const buffer = await file.arrayBuffer();
-  return Buffer.from(buffer).toString("base64");
-}
-
 function safeOutputFilename(value?: string) {
   const raw = value?.trim() || "material-collage.png";
   const withExtension = raw.toLowerCase().endsWith(".png") ? raw : `${raw}.png`;
   return withExtension.replace(/[<>:"/\\|?*]+/g, "_");
 }
-
