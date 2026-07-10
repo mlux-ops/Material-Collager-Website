@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   COLLAGE_TYPES,
   ITEM_PRESETS,
@@ -20,6 +20,20 @@ type UiItem = CollageItemInput & {
   previews: string[];
 };
 
+type DraftItem = CollageItemInput & {
+  files: File[];
+};
+
+type SavedDraft = {
+  collageType: CollageType;
+  orientation: Orientation;
+  quality: Quality;
+  outputFilename: string;
+  runQa: boolean;
+  items: DraftItem[];
+  savedAt: number;
+};
+
 type GenerateResponse = {
   ok: boolean;
   error?: string;
@@ -37,6 +51,73 @@ type GenerateResponse = {
 
 const MAX_TOTAL_UPLOAD_BYTES = 22 * 1024 * 1024;
 const MAX_SINGLE_UPLOAD_BYTES = 8 * 1024 * 1024;
+const DRAFT_DB_NAME = "material-collager-drafts";
+const DRAFT_STORE_NAME = "drafts";
+const CURRENT_DRAFT_KEY = "current";
+
+function openDraftDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DRAFT_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(DRAFT_STORE_NAME)) {
+        db.createObjectStore(DRAFT_STORE_NAME);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("Could not open saved drafts."));
+  });
+}
+
+async function readSavedDraft() {
+  const db = await openDraftDatabase();
+  return new Promise<SavedDraft | null>((resolve, reject) => {
+    const transaction = db.transaction(DRAFT_STORE_NAME, "readonly");
+    const store = transaction.objectStore(DRAFT_STORE_NAME);
+    const request = store.get(CURRENT_DRAFT_KEY);
+    request.onsuccess = () => resolve((request.result as SavedDraft | undefined) ?? null);
+    request.onerror = () => reject(request.error || new Error("Could not read saved draft."));
+    transaction.oncomplete = () => db.close();
+    transaction.onerror = () => {
+      db.close();
+      reject(transaction.error || new Error("Could not read saved draft."));
+    };
+  });
+}
+
+async function writeSavedDraft(draft: SavedDraft) {
+  const db = await openDraftDatabase();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(DRAFT_STORE_NAME, "readwrite");
+    const store = transaction.objectStore(DRAFT_STORE_NAME);
+    store.put(draft, CURRENT_DRAFT_KEY);
+    transaction.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    transaction.onerror = () => {
+      db.close();
+      reject(transaction.error || new Error("Could not save draft."));
+    };
+  });
+}
+
+async function removeSavedDraft() {
+  const db = await openDraftDatabase();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(DRAFT_STORE_NAME, "readwrite");
+    const store = transaction.objectStore(DRAFT_STORE_NAME);
+    store.delete(CURRENT_DRAFT_KEY);
+    transaction.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    transaction.onerror = () => {
+      db.close();
+      reject(transaction.error || new Error("Could not clear saved draft."));
+    };
+  });
+}
 
 function presetItems(type: CollageType): UiItem[] {
   return ITEM_PRESETS[type].map((item) => ({
@@ -61,8 +142,45 @@ export default function Home() {
   const [panelText, setPanelText] = useState("Ready.");
   const [isWorking, setIsWorking] = useState(false);
   const [result, setResult] = useState<{ dataUrl: string; filename: string } | null>(null);
+  const hasLoadedDraft = useRef(false);
 
   const hasFiles = useMemo(() => items.some((item) => item.files.length > 0), [items]);
+
+  useEffect(() => {
+    let cancelled = false;
+    readSavedDraft()
+      .then((draft) => {
+        if (cancelled) return;
+        if (draft) {
+          restoreDraft(draft);
+          setPanelText(`Restored saved draft from ${new Date(draft.savedAt).toLocaleString()}.`);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setPanelText(`Draft save is unavailable: ${error instanceof Error ? error.message : "Could not read saved draft."}`);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          hasLoadedDraft.current = true;
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedDraft.current) return;
+
+    const timeout = window.setTimeout(() => {
+      void saveDraft(false);
+    }, 900);
+
+    return () => window.clearTimeout(timeout);
+  }, [collageType, orientation, quality, outputFilename, runQa, items]);
 
   function changeType(nextType: CollageType) {
     setCollageType(nextType);
@@ -101,6 +219,65 @@ export default function Home() {
     const files = Array.from(fileList ?? []);
     const previews = files.map((file) => URL.createObjectURL(file));
     updateItem(index, { files, previews });
+  }
+
+  function makeDraft(): SavedDraft {
+    return {
+      collageType,
+      orientation,
+      quality,
+      outputFilename,
+      runQa,
+      savedAt: Date.now(),
+      items: items.map(({ previews, ...item }) => item),
+    };
+  }
+
+  function restoreDraft(draft: SavedDraft) {
+    setCollageType(draft.collageType);
+    setOrientation(draft.orientation);
+    setQuality(draft.quality);
+    setOutputFilename(draft.outputFilename);
+    setRunQa(draft.runQa);
+    setItems(
+      draft.items.map((item) => ({
+        ...item,
+        files: item.files ?? [],
+        previews: (item.files ?? []).map((file) => URL.createObjectURL(file)),
+      })),
+    );
+    setResult(null);
+  }
+
+  async function saveDraft(showMessage: boolean) {
+    await writeSavedDraft(makeDraft());
+    if (showMessage) {
+      setPanelText("Draft saved. Your text fields and reference images are stored in this browser.");
+    }
+  }
+
+  async function restoreSavedDraft() {
+    try {
+      const draft = await readSavedDraft();
+      if (!draft) {
+        setPanelText("No saved draft found in this browser.");
+        return;
+      }
+
+      restoreDraft(draft);
+      setPanelText(`Restored saved draft from ${new Date(draft.savedAt).toLocaleString()}.`);
+    } catch (error) {
+      setPanelText(`Error: ${error instanceof Error ? error.message : "Could not restore saved draft."}`);
+    }
+  }
+
+  async function clearSavedDraft() {
+    try {
+      await removeSavedDraft();
+      setPanelText("Saved draft cleared from this browser.");
+    } catch (error) {
+      setPanelText(`Error: ${error instanceof Error ? error.message : "Could not clear saved draft."}`);
+    }
   }
 
   async function readApiResponse<T>(response: Response): Promise<T> {
@@ -285,6 +462,15 @@ export default function Home() {
               </button>
               <button type="button" className="secondary-button" onClick={addItem}>
                 Add Item
+              </button>
+              <button type="button" className="secondary-button" onClick={() => void saveDraft(true)}>
+                Save Draft
+              </button>
+              <button type="button" className="secondary-button" onClick={() => void restoreSavedDraft()}>
+                Restore Draft
+              </button>
+              <button type="button" className="secondary-button" onClick={() => void clearSavedDraft()}>
+                Clear Draft
               </button>
             </div>
 
