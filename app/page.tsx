@@ -90,7 +90,39 @@ type GenerateResponse = {
   filename?: string;
   notice?: string;
   qa?: QaResult | null;
+  diagnostics?: GenerationDiagnostics;
 };
+
+type GenerationDiagnostics = {
+  model: string;
+  transport: string;
+  quality: string;
+  referenceCount: number;
+  totalReferenceBytes: number;
+  largestReferenceBytes: number;
+  references: Array<{ filename: string; bytes: number; mimeType: string }>;
+  attempts: Array<{
+    stage: string;
+    outcome: string;
+    attempt: number;
+    durationMs: number;
+    size?: string;
+    status?: number;
+    code?: string;
+    requestId?: string;
+    error?: string;
+  }>;
+};
+
+class ApiResponseError extends Error {
+  payload: Record<string, unknown>;
+
+  constructor(message: string, payload: Record<string, unknown>) {
+    super(message);
+    this.name = "ApiResponseError";
+    this.payload = payload;
+  }
+}
 
 const REFERENCE_CHUNK_BYTES = 4 * 1024 * 1024;
 const DRAFT_DB_NAME = "material-collager-drafts";
@@ -204,7 +236,10 @@ async function readApiResponse<T extends { ok: boolean; error?: string }>(respon
   if (contentType.includes("application/json")) {
     const payload = (await response.json()) as T;
     if (!response.ok || !payload.ok) {
-      throw new Error(payload.error || `Request failed with status ${response.status}.`);
+      throw new ApiResponseError(
+        payload.error || `Request failed with status ${response.status}.`,
+        payload as Record<string, unknown>,
+      );
     }
     return payload;
   }
@@ -288,6 +323,7 @@ export default function Home() {
   const [runQa, setRunQa] = useState(true);
   const [items, setItems] = useState<UiItem[]>(() => presetItems("bathroom_fixture_collage"));
   const [panelText, setPanelText] = useState("Board ready.");
+  const [diagnostics, setDiagnostics] = useState<GenerationDiagnostics | null>(null);
   const [promptPreview, setPromptPreview] = useState("");
   const [isWorking, setIsWorking] = useState(false);
   const [workingStage, setWorkingStage] = useState("");
@@ -373,6 +409,7 @@ export default function Home() {
     setStyling(nextType === "appliance_collage" ? "materials_only" : "botanical_linen");
     setHeroItemId("");
     setResult(null);
+    setDiagnostics(null);
     setPromptPreview("");
     setPanelText("Board ready.");
   }
@@ -738,11 +775,15 @@ export default function Home() {
       });
       setPromptPreview(response.prompt || "");
       setPanelText(`${response.summary || "Collage generated."}${response.notice ? `\n\n${response.notice}` : ""}`);
+      setDiagnostics(response.diagnostics ?? null);
       await saveDraft(false);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         setPanelText("Generation cancelled. Your board and references are still saved.");
       } else {
+        if (error instanceof ApiResponseError && error.payload.diagnostics) {
+          setDiagnostics(error.payload.diagnostics as GenerationDiagnostics);
+        }
         setPanelText(`Generation failed: ${error instanceof Error ? error.message : "Unknown error."}`);
       }
     } finally {
@@ -1102,6 +1143,25 @@ export default function Home() {
             )}
 
             <div className="activity-log" aria-live="polite">{panelText}</div>
+
+            {diagnostics && (
+              <details className="diagnostic-report" open>
+                <summary>Diagnostic report</summary>
+                <div className="diagnostic-summary">
+                  <span>{diagnostics.referenceCount} references checked</span>
+                  <span>{formatBytes(diagnostics.totalReferenceBytes)} total</span>
+                  <span>{diagnostics.attempts.filter((attempt) => attempt.stage === "image_edit").length} generation attempts</span>
+                </div>
+                <pre>{JSON.stringify(diagnostics, null, 2)}</pre>
+                <button
+                  type="button"
+                  className="quiet-button"
+                  onClick={() => void navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2))}
+                >
+                  Copy report
+                </button>
+              </details>
+            )}
 
             {promptPreview && (
               <details className="prompt-drawer">

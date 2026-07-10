@@ -43,9 +43,45 @@ type PreparedReference = {
   filename: string;
 };
 
+type AttemptDiagnostic = {
+  stage: "reference_fetch" | "image_edit";
+  outcome: "succeeded" | "failed";
+  attempt: number;
+  durationMs: number;
+  size?: string;
+  status?: number;
+  code?: string;
+  requestId?: string;
+  error?: string;
+};
+
+type GenerationDiagnostics = {
+  model: "gpt-image-2";
+  transport: "multipart";
+  quality: CollageRequestInput["quality"];
+  referenceCount: number;
+  totalReferenceBytes: number;
+  largestReferenceBytes: number;
+  references: Array<{ filename: string; bytes: number; mimeType: string }>;
+  attempts: AttemptDiagnostic[];
+};
+
+class DiagnosedGenerationError extends Error {
+  causeError: unknown;
+  diagnostics: GenerationDiagnostics;
+
+  constructor(error: unknown, diagnostics: GenerationDiagnostics) {
+    super(error instanceof Error ? error.message : "OpenAI image generation failed.");
+    this.name = "DiagnosedGenerationError";
+    this.causeError = error;
+    this.diagnostics = diagnostics;
+  }
+}
+
 const IMAGE_RETRY_DELAYS_MS = [1500];
 
 export async function POST(request: Request) {
+  let diagnostics: GenerationDiagnostics | undefined;
   try {
     const payload = (await request.json()) as CollageRequestInput;
     validateCollageRequest(payload);
@@ -62,6 +98,17 @@ export async function POST(request: Request) {
 
     const apiKey = resolveOpenAIKey(payload.apiKey);
     const prompt = buildGenerationPrompt(payload);
+    const attempts: AttemptDiagnostic[] = [];
+    diagnostics = {
+      model: "gpt-image-2",
+      transport: "multipart",
+      quality: payload.quality,
+      referenceCount: referenceFileIds.length,
+      totalReferenceBytes: 0,
+      largestReferenceBytes: 0,
+      references: [],
+      attempts,
+    };
     const preparedReferences = await retrieveReferences(
       apiKey,
       items.flatMap((item) =>
@@ -70,7 +117,15 @@ export async function POST(request: Request) {
           filename: item.imageNames?.[index] || `${item.id}-reference-${index + 1}.png`,
         })),
       ),
+      attempts,
     );
+    diagnostics.totalReferenceBytes = preparedReferences.reduce((sum, reference) => sum + reference.blob.size, 0);
+    diagnostics.largestReferenceBytes = Math.max(...preparedReferences.map((reference) => reference.blob.size), 0);
+    diagnostics.references = preparedReferences.map((reference) => ({
+      filename: reference.filename,
+      bytes: reference.blob.size,
+      mimeType: reference.blob.type,
+    }));
     const requestedSize = resolvedSize(payload);
     const imageRequest: ImageEditRequest = {
       model: "gpt-image-2",
@@ -84,14 +139,14 @@ export async function POST(request: Request) {
     let imageResult: Awaited<ReturnType<typeof createImageEdit>>;
     let usedStandardFallback = false;
     try {
-      imageResult = await createImageEdit(apiKey, imageRequest);
+      imageResult = await createImageEdit(apiKey, imageRequest, diagnostics.attempts);
     } catch (error) {
       const standardSize = standardSizeFor(payload);
       if (!isRetryableImageError(error) || standardSize === requestedSize) throw error;
       usedStandardFallback = true;
-      imageResult = await createImageEdit(apiKey, { ...imageRequest, size: standardSize });
+      imageResult = await createImageEdit(apiKey, { ...imageRequest, size: standardSize }, diagnostics.attempts);
     }
-    const { data: imageJson, attempts } = imageResult;
+    const { data: imageJson, attempts: imageAttempts } = imageResult;
     const imageBase64 = imageJson.data?.[0]?.b64_json;
     if (!imageBase64) {
       throw new Error("OpenAI did not return image data.");
@@ -112,19 +167,28 @@ export async function POST(request: Request) {
       usage: imageJson.usage,
       notice: usedStandardFallback
         ? "OpenAI could not complete the Studio 2K render, so the board was generated at the standard resolution without changing reference fidelity or render quality."
-        : attempts > 1
-          ? `OpenAI completed the collage after ${attempts} attempts.`
+        : imageAttempts > 1
+          ? `OpenAI completed the collage after ${imageAttempts} attempts.`
           : undefined,
+      diagnostics,
     });
   } catch (error) {
-    return errorResponse(error);
+    const diagnosed = error instanceof DiagnosedGenerationError ? error : undefined;
+    const rootError = diagnosed?.causeError ?? error;
+    const base = await errorResponse(rootError).json() as Record<string, unknown>;
+    const status = rootError instanceof OpenAIRequestError ? rootError.status : 400;
+    return Response.json(
+      { ...base, diagnostics: diagnosed?.diagnostics ?? diagnostics },
+      { status: status >= 400 && status < 600 ? status : 500 },
+    );
   }
 }
 
-async function createImageEdit(apiKey: string, body: ImageEditRequest) {
+async function createImageEdit(apiKey: string, body: ImageEditRequest, diagnostics: AttemptDiagnostic[]) {
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= IMAGE_RETRY_DELAYS_MS.length; attempt += 1) {
+    const startedAt = Date.now();
     try {
       const form = new FormData();
       form.append("model", body.model);
@@ -143,10 +207,23 @@ async function createImageEdit(apiKey: string, body: ImageEditRequest) {
         body: form,
       });
       const data = await readOpenAIResponse<OpenAIImageResponse>(response);
+      diagnostics.push({ stage: "image_edit", outcome: "succeeded", attempt: attempt + 1, durationMs: Date.now() - startedAt, size: body.size });
       return { data, attempts: attempt + 1 };
     } catch (error) {
+      diagnostics.push(diagnosticFor(error, "image_edit", attempt + 1, Date.now() - startedAt, body.size));
       lastError = error;
-      if (!isRetryableImageError(error) || attempt === IMAGE_RETRY_DELAYS_MS.length) throw error;
+      if (!isRetryableImageError(error) || attempt === IMAGE_RETRY_DELAYS_MS.length) {
+        throw new DiagnosedGenerationError(error, {
+          model: body.model,
+          transport: "multipart",
+          quality: body.quality,
+          referenceCount: body.references.length,
+          totalReferenceBytes: body.references.reduce((sum, reference) => sum + reference.blob.size, 0),
+          largestReferenceBytes: Math.max(...body.references.map((reference) => reference.blob.size), 0),
+          references: body.references.map((reference) => ({ filename: reference.filename, bytes: reference.blob.size, mimeType: reference.blob.type })),
+          attempts: diagnostics,
+        });
+      }
       await new Promise((resolve) => setTimeout(resolve, IMAGE_RETRY_DELAYS_MS[attempt]));
     }
   }
@@ -157,16 +234,26 @@ async function createImageEdit(apiKey: string, body: ImageEditRequest) {
 async function retrieveReferences(
   apiKey: string,
   references: Array<{ fileId: string; filename: string }>,
+  diagnostics: AttemptDiagnostic[],
 ) {
   const prepared: PreparedReference[] = [];
 
   for (const reference of references) {
-    const response = await fetch(`https://api.openai.com/v1/files/${encodeURIComponent(reference.fileId)}/content`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-    if (!response.ok) await readOpenAIResponse<never>(response);
-    const source = await response.blob();
-    if (!source.size) throw new Error(`Reference ${reference.filename} could not be read.`);
+    const startedAt = Date.now();
+    let source: Blob;
+    let response: Response;
+    try {
+      response = await fetch(`https://api.openai.com/v1/files/${encodeURIComponent(reference.fileId)}/content`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      if (!response.ok) await readOpenAIResponse<never>(response);
+      source = await response.blob();
+      if (!source.size) throw new Error(`Reference ${reference.filename} could not be read.`);
+      diagnostics.push({ stage: "reference_fetch", outcome: "succeeded", attempt: prepared.length + 1, durationMs: Date.now() - startedAt });
+    } catch (error) {
+      diagnostics.push(diagnosticFor(error, "reference_fetch", prepared.length + 1, Date.now() - startedAt));
+      throw error;
+    }
     const contentType = referenceContentType(response.headers.get("content-type"), reference.filename);
     prepared.push({
       blob: source.type === contentType ? source : source.slice(0, source.size, contentType),
@@ -175,6 +262,21 @@ async function retrieveReferences(
   }
 
   return prepared;
+}
+
+function diagnosticFor(error: unknown, stage: AttemptDiagnostic["stage"], attempt: number, durationMs: number, size?: string): AttemptDiagnostic {
+  const openAIError = error instanceof OpenAIRequestError ? error : undefined;
+  return {
+    stage,
+    outcome: "failed",
+    attempt,
+    durationMs,
+    size,
+    status: openAIError?.status,
+    code: openAIError?.code,
+    requestId: openAIError?.requestId,
+    error: error instanceof Error ? error.message.slice(0, 500) : "Unknown error.",
+  };
 }
 
 function referenceContentType(header: string | null, filename: string) {
@@ -198,6 +300,7 @@ function standardSizeFor(payload: CollageRequestInput) {
 }
 
 function isRetryableImageError(error: unknown) {
+  if (error instanceof DiagnosedGenerationError) return isRetryableImageError(error.causeError);
   if (error instanceof TypeError) return true;
   if (!(error instanceof OpenAIRequestError)) return false;
   if (error.status === 408 || error.status === 409 || error.status >= 500) return true;
