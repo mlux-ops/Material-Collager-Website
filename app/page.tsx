@@ -16,6 +16,7 @@ import {
 } from "@/app/lib/collage";
 
 type UiItem = CollageItemInput & {
+  uiKey: string;
   files: File[];
   previews: string[];
 };
@@ -57,6 +58,10 @@ const MIN_PREPARED_IMAGE_BYTES = 520 * 1024;
 const DRAFT_DB_NAME = "material-collager-drafts";
 const DRAFT_STORE_NAME = "drafts";
 const CURRENT_DRAFT_KEY = "current";
+
+function createUiKey() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+}
 
 function openDraftDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -125,6 +130,7 @@ async function removeSavedDraft() {
 function presetItems(type: CollageType): UiItem[] {
   return ITEM_PRESETS[type].map((item) => ({
     ...item,
+    uiKey: createUiKey(),
     brand: "",
     name: "",
     finish: "",
@@ -208,6 +214,7 @@ export default function Home() {
         finish: "",
         notes: "",
         required: true,
+        uiKey: createUiKey(),
         files: [],
         previews: [],
       },
@@ -232,7 +239,7 @@ export default function Home() {
       outputFilename,
       runQa,
       savedAt: Date.now(),
-      items: items.map(({ previews, ...item }) => item),
+      items: items.map(({ previews, uiKey, ...item }) => item),
     };
   }
 
@@ -245,6 +252,7 @@ export default function Home() {
     setItems(
       draft.items.map((item) => ({
         ...item,
+        uiKey: createUiKey(),
         files: item.files ?? [],
         previews: (item.files ?? []).map((file) => URL.createObjectURL(file)),
       })),
@@ -551,7 +559,7 @@ export default function Home() {
 
             <div className="items-list">
               {items.map((item, index) => (
-                <article className="item-row" key={`${item.id}-${index}`}>
+                <article className="item-row" key={item.uiKey}>
                   <div className="item-row-head">
                     <div>
                       <strong>{item.id || `Item ${index + 1}`}</strong>

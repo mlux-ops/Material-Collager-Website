@@ -76,7 +76,7 @@ export const ITEM_PRESETS: Record<CollageType, CollageItemInput[]> = {
 const TYPE_PROMPTS: Record<CollageType, string> = {
   kitchen_material_palette: `Collage type: Kitchen Material Palette.
 Create an elegant interior design flat-lay mood board photograph on a clean white surface.
-Arrange the referenced materials and fixtures in a curated overhead composition: wood, countertop stone, faucet or fixture, cabinet hardware, and flooring samples.
+Arrange only the referenced materials and fixtures in a curated overhead composition.
 No subway tile. No ceramic tile of any kind. No full appliances. Use materials and samples only.
 Include subtle olive or eucalyptus sprigs and a natural linen or waffle-weave towel corner.
 Style should feel warm, luxurious, residential, and magazine-quality.`,
@@ -89,13 +89,13 @@ Preserve the product form, door configuration, handle shape, surface finish, pro
 Arrange dynamically like a luxury appliance advertisement, with subtle drop shadows and clean edges.`,
   bathroom_fixture_collage: `Collage type: Bathroom Fixture Collage.
 Create a high-end bathroom fixture flat-lay product collage on a clean white background.
-Include the referenced bathroom fixtures, cabinet hardware, vanity wood, main tile, and countertop/stone sample.
+Include only the referenced bathroom fixtures, finishes, tile, wood, stone, and hardware items listed in the reference mapping.
 Do not include any toilet, bathtub, sink basin, large porcelain fixture, or unrequested plumbing piece.
 Include olive or eucalyptus sprigs and a natural linen or waffle-weave towel corner.
 Let the fixture finish, wood, tile, and stone samples fill the frame naturally while keeping breathing room.`,
   bathroom_tile_collage: `Collage type: Bathroom Tile Collage.
 Create an interior design tile and finish mood board collage for a luxury bathroom.
-Arrange overlapping tile and material samples in an editorial flat-lay: wall tile, floor tile, accent or mosaic tile, vanity wood, countertop stone, and metal finish sample or hardware.
+Arrange only the referenced tile, material, stone, wood, and metal finish samples in an editorial flat-lay.
 Items may extend slightly beyond the frame.
 Include subtle olive or eucalyptus sprigs and a natural linen or waffle-weave towel corner.
 The result should feel warm, curated, tactile, and magazine-quality.`,
@@ -111,6 +111,7 @@ const UNIVERSAL_STYLE_RULES = `Universal style rules:
 - The hero item should be the most prominent item.
 - No text, labels, annotations, watermarks, or callouts in the generated image.
 - No colored background.
+- Do not add placeholder materials, fixtures, hardware, wood, tile, stone, appliances, or samples that are not present in the reference mapping.
 - Do not include unrequested objects.`;
 
 const METAL_FINISH_RULES = `Metal finish reference:
@@ -215,6 +216,7 @@ export function buildGenerationPrompt(request: CollageRequestInput) {
 - Do not invent alternate products when a reference image is provided.
 - Do not rely on the item labels as visual descriptions; the uploaded images are the visual source of truth.
 - Use metadata only to clarify item role, brand, finish name, and placement priority.
+- If an item was removed from the request or has no reference image in the mapping, omit it entirely.
 - If multiple images belong to one item, treat them as alternate views of the same item unless notes say otherwise.`,
     `Output requirements:
 - Orientation: ${resolvedOrientation(request)}.
@@ -254,4 +256,3 @@ export function labelFor(value: string) {
 export function slugify(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "item";
 }
-
