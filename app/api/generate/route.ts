@@ -2,6 +2,7 @@ import {
   activeItems,
   buildGenerationPrompt,
   buildSummary,
+  resolvedOrientation,
   resolvedSize,
   type CollageRequestInput,
   validateCollageRequest,
@@ -30,22 +31,28 @@ type OpenAIResponseOutput = {
 type ImageEditRequest = {
   model: "gpt-image-2";
   prompt: string;
-  images: Array<{ file_id: string }>;
+  references: PreparedReference[];
   size: string;
   quality: CollageRequestInput["quality"];
   background: "opaque";
   output_format: "png";
 };
 
-const IMAGE_RETRY_DELAYS_MS = [1200, 3000];
+type PreparedReference = {
+  blob: Blob;
+  filename: string;
+};
+
+const IMAGE_RETRY_DELAYS_MS = [1500];
 
 export async function POST(request: Request) {
   try {
     const payload = (await request.json()) as CollageRequestInput;
     validateCollageRequest(payload);
 
-    const referenceFileIds = activeItems(payload).flatMap((item) => item.imageFileIds ?? []);
-    const expectedReferences = activeItems(payload).reduce(
+    const items = activeItems(payload);
+    const referenceFileIds = items.flatMap((item) => item.imageFileIds ?? []);
+    const expectedReferences = items.reduce(
       (total, item) => total + Math.max(item.imageNames?.length ?? 0, item.imageFileIds?.length ?? 0),
       0,
     );
@@ -55,16 +62,36 @@ export async function POST(request: Request) {
 
     const apiKey = resolveOpenAIKey(payload.apiKey);
     const prompt = buildGenerationPrompt(payload);
+    const preparedReferences = await retrieveReferences(
+      apiKey,
+      items.flatMap((item) =>
+        (item.imageFileIds ?? []).map((fileId, index) => ({
+          fileId,
+          filename: item.imageNames?.[index] || `${item.id}-reference-${index + 1}.png`,
+        })),
+      ),
+    );
+    const requestedSize = resolvedSize(payload);
     const imageRequest: ImageEditRequest = {
       model: "gpt-image-2",
       prompt,
-      images: referenceFileIds.map((fileId) => ({ file_id: fileId })),
-      size: resolvedSize(payload),
+      references: preparedReferences,
+      size: requestedSize,
       quality: payload.quality,
       background: "opaque",
       output_format: "png",
     };
-    const { data: imageJson, attempts } = await createImageEdit(apiKey, imageRequest);
+    let imageResult: Awaited<ReturnType<typeof createImageEdit>>;
+    let usedStandardFallback = false;
+    try {
+      imageResult = await createImageEdit(apiKey, imageRequest);
+    } catch (error) {
+      const standardSize = standardSizeFor(payload);
+      if (!isRetryableImageError(error) || standardSize === requestedSize) throw error;
+      usedStandardFallback = true;
+      imageResult = await createImageEdit(apiKey, { ...imageRequest, size: standardSize });
+    }
+    const { data: imageJson, attempts } = imageResult;
     const imageBase64 = imageJson.data?.[0]?.b64_json;
     if (!imageBase64) {
       throw new Error("OpenAI did not return image data.");
@@ -83,7 +110,11 @@ export async function POST(request: Request) {
       filename: safeOutputFilename(payload.outputFilename),
       qa,
       usage: imageJson.usage,
-      notice: attempts > 1 ? `OpenAI completed the collage after ${attempts} attempts.` : undefined,
+      notice: usedStandardFallback
+        ? "OpenAI could not complete the Studio 2K render, so the board was generated at the standard resolution without changing reference fidelity or render quality."
+        : attempts > 1
+          ? `OpenAI completed the collage after ${attempts} attempts.`
+          : undefined,
     });
   } catch (error) {
     return errorResponse(error);
@@ -95,13 +126,21 @@ async function createImageEdit(apiKey: string, body: ImageEditRequest) {
 
   for (let attempt = 0; attempt <= IMAGE_RETRY_DELAYS_MS.length; attempt += 1) {
     try {
+      const form = new FormData();
+      form.append("model", body.model);
+      form.append("prompt", body.prompt);
+      form.append("size", body.size);
+      form.append("quality", body.quality);
+      form.append("background", body.background);
+      form.append("output_format", body.output_format);
+      for (const reference of body.references) {
+        form.append("image[]", reference.blob, reference.filename);
+      }
+
       const response = await fetch("https://api.openai.com/v1/images/edits", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: form,
       });
       const data = await readOpenAIResponse<OpenAIImageResponse>(response);
       return { data, attempts: attempt + 1 };
@@ -113,6 +152,49 @@ async function createImageEdit(apiKey: string, body: ImageEditRequest) {
   }
 
   throw lastError instanceof Error ? lastError : new Error("OpenAI image generation failed.");
+}
+
+async function retrieveReferences(
+  apiKey: string,
+  references: Array<{ fileId: string; filename: string }>,
+) {
+  const prepared: PreparedReference[] = [];
+
+  for (const reference of references) {
+    const response = await fetch(`https://api.openai.com/v1/files/${encodeURIComponent(reference.fileId)}/content`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!response.ok) await readOpenAIResponse<never>(response);
+    const source = await response.blob();
+    if (!source.size) throw new Error(`Reference ${reference.filename} could not be read.`);
+    const contentType = referenceContentType(response.headers.get("content-type"), reference.filename);
+    prepared.push({
+      blob: source.type === contentType ? source : source.slice(0, source.size, contentType),
+      filename: safeReferenceFilename(reference.filename),
+    });
+  }
+
+  return prepared;
+}
+
+function referenceContentType(header: string | null, filename: string) {
+  if (header?.toLowerCase().startsWith("image/")) return header.split(";")[0].trim();
+  const lower = filename.toLowerCase();
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".webp")) return "image/webp";
+  return "image/png";
+}
+
+function safeReferenceFilename(value: string) {
+  const safe = value.replace(/[\r\n"\\/]+/g, "_").trim();
+  return safe || "reference.png";
+}
+
+function standardSizeFor(payload: CollageRequestInput) {
+  const orientation = resolvedOrientation(payload);
+  if (orientation === "portrait") return "1024x1536";
+  if (orientation === "square") return "1024x1024";
+  return "1536x1024";
 }
 
 function isRetryableImageError(error: unknown) {

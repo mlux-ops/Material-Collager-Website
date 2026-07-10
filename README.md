@@ -2,7 +2,7 @@
 
 A browser app for creating high-end interior design material collage boards from real image references.
 
-The app preserves selected source files in a browser draft, transfers each original reference in small request-safe chunks, and sends OpenAI file IDs to the Image API as actual `gpt-image-2` inputs. References are not reduced to text descriptions or silently compressed into a small combined request.
+The app preserves selected source files in a browser draft and transfers each original reference in small request-safe chunks. Generation then retrieves those prepared files and sends them through the documented multipart Image API workflow as actual `gpt-image-2` inputs. References are not reduced to text descriptions or silently compressed into a small combined browser request.
 
 Generation uses high input fidelity, item-by-item image mapping, explicit editorial art direction, and optional post-generation vision review. A board can use up to 16 PNG, JPEG, or WebP references, each under 50 MB.
 
