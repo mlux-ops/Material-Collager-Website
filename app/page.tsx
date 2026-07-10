@@ -49,10 +49,11 @@ type GenerateResponse = {
   } | null;
 };
 
-const UPLOAD_REQUEST_TARGET_BYTES = 22 * 1024 * 1024;
-const MAX_UPLOAD_IMAGE_DIMENSION = 2400;
-const MAX_PREPARED_IMAGE_BYTES = 4 * 1024 * 1024;
-const MIN_PREPARED_IMAGE_BYTES = 900 * 1024;
+const UPLOAD_REQUEST_TARGET_BYTES = 8 * 1024 * 1024;
+const UPLOAD_FORM_HEADROOM_BYTES = 700 * 1024;
+const MAX_UPLOAD_IMAGE_DIMENSION = 1800;
+const MAX_PREPARED_IMAGE_BYTES = 1600 * 1024;
+const MIN_PREPARED_IMAGE_BYTES = 520 * 1024;
 const DRAFT_DB_NAME = "material-collager-drafts";
 const DRAFT_STORE_NAME = "drafts";
 const CURRENT_DRAFT_KEY = "current";
@@ -290,7 +291,7 @@ export default function Home() {
 
     const text = (await response.text()).trim();
     if (response.status === 413 || /payload too large/i.test(text)) {
-      throw new Error("The upload is still too large for the host to accept. Try removing a few low-priority references from this run.");
+      throw new Error("The host rejected this upload before generation could start. I prepared smaller upload copies, but this batch still crossed the request limit.");
     }
 
     throw new Error(text || `Request failed with status ${response.status}.`);
@@ -298,9 +299,10 @@ export default function Home() {
 
   async function prepareFilesForUpload() {
     const allFiles = items.flatMap((item) => item.files);
+    const uploadBudget = Math.max(MIN_PREPARED_IMAGE_BYTES, UPLOAD_REQUEST_TARGET_BYTES - UPLOAD_FORM_HEADROOM_BYTES);
     const targetBytes = Math.max(
       MIN_PREPARED_IMAGE_BYTES,
-      Math.min(MAX_PREPARED_IMAGE_BYTES, Math.floor(UPLOAD_REQUEST_TARGET_BYTES / Math.max(allFiles.length, 1))),
+      Math.min(MAX_PREPARED_IMAGE_BYTES, Math.floor(uploadBudget / Math.max(allFiles.length, 1))),
     );
     const prepared = new Map<string, File>();
     let originalBytes = 0;
@@ -321,35 +323,32 @@ export default function Home() {
   }
 
   async function prepareImageForUpload(file: File, targetBytes: number) {
-    if (file.size <= targetBytes && largestAllowedDimension(file)) {
+    const bitmap = await createImageBitmap(file);
+    if (file.size <= targetBytes && file.type !== "image/png" && Math.max(bitmap.width, bitmap.height) <= MAX_UPLOAD_IMAGE_DIMENSION) {
+      bitmap.close();
       return file;
     }
 
-    const bitmap = await createImageBitmap(file);
     const scale = Math.min(1, MAX_UPLOAD_IMAGE_DIMENSION / Math.max(bitmap.width, bitmap.height));
     let width = Math.max(1, Math.round(bitmap.width * scale));
     let height = Math.max(1, Math.round(bitmap.height * scale));
-    let quality = 0.92;
+    let quality = 0.88;
     let best = await renderImageUploadCopy(file, bitmap, width, height, quality);
 
-    while (best.size > targetBytes && quality > 0.72) {
+    while (best.size > targetBytes && quality > 0.62) {
       quality -= 0.06;
       best = await renderImageUploadCopy(file, bitmap, width, height, quality);
     }
 
-    while (best.size > targetBytes && Math.max(width, height) > 1400) {
+    while (best.size > targetBytes && Math.max(width, height) > 950) {
       width = Math.round(width * 0.86);
       height = Math.round(height * 0.86);
-      quality = Math.max(0.76, quality);
+      quality = Math.max(0.68, quality);
       best = await renderImageUploadCopy(file, bitmap, width, height, quality);
     }
 
     bitmap.close();
     return best;
-  }
-
-  function largestAllowedDimension(file: File) {
-    return file.type !== "image/png";
   }
 
   async function renderImageUploadCopy(file: File, bitmap: ImageBitmap, width: number, height: number, quality: number) {
