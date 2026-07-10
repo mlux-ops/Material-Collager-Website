@@ -17,6 +17,7 @@ const eslintConfig = defineConfig([
     ".test-work/**",
     ".vinext/**",
     ".wrangler/**",
+    ".sites-package-stage*/**",
     "tmp*/**",
     "grabbed-references/**",
     "next-env.d.ts",

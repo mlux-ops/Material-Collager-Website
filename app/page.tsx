@@ -88,6 +88,7 @@ type GenerateResponse = {
   imageBase64?: string;
   mimeType?: string;
   filename?: string;
+  notice?: string;
   qa?: QaResult | null;
 };
 
@@ -736,7 +737,7 @@ export default function Home() {
         qa: response.qa ?? null,
       });
       setPromptPreview(response.prompt || "");
-      setPanelText(response.summary || "Collage generated.");
+      setPanelText(`${response.summary || "Collage generated."}${response.notice ? `\n\n${response.notice}` : ""}`);
       await saveDraft(false);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {

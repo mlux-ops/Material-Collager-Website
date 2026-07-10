@@ -6,7 +6,12 @@ import {
   type CollageRequestInput,
   validateCollageRequest,
 } from "@/app/lib/collage";
-import { errorResponse, readOpenAIResponse, resolveOpenAIKey } from "@/app/lib/openai-server";
+import {
+  OpenAIRequestError,
+  errorResponse,
+  readOpenAIResponse,
+  resolveOpenAIKey,
+} from "@/app/lib/openai-server";
 
 export const runtime = "edge";
 
@@ -21,6 +26,18 @@ type OpenAIResponseOutput = {
     content?: Array<{ text?: string }>;
   }>;
 };
+
+type ImageEditRequest = {
+  model: "gpt-image-2";
+  prompt: string;
+  images: Array<{ file_id: string }>;
+  size: string;
+  quality: CollageRequestInput["quality"];
+  background: "opaque";
+  output_format: "png";
+};
+
+const IMAGE_RETRY_DELAYS_MS = [1200, 3000];
 
 export async function POST(request: Request) {
   try {
@@ -38,24 +55,16 @@ export async function POST(request: Request) {
 
     const apiKey = resolveOpenAIKey(payload.apiKey);
     const prompt = buildGenerationPrompt(payload);
-    const imageResponse = await fetch("https://api.openai.com/v1/images/edits", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-image-2",
-        prompt,
-        images: referenceFileIds.map((fileId) => ({ file_id: fileId })),
-        input_fidelity: "high",
-        size: resolvedSize(payload),
-        quality: payload.quality,
-        background: "opaque",
-        output_format: "png",
-      }),
-    });
-    const imageJson = await readOpenAIResponse<OpenAIImageResponse>(imageResponse);
+    const imageRequest: ImageEditRequest = {
+      model: "gpt-image-2",
+      prompt,
+      images: referenceFileIds.map((fileId) => ({ file_id: fileId })),
+      size: resolvedSize(payload),
+      quality: payload.quality,
+      background: "opaque",
+      output_format: "png",
+    };
+    const { data: imageJson, attempts } = await createImageEdit(apiKey, imageRequest);
     const imageBase64 = imageJson.data?.[0]?.b64_json;
     if (!imageBase64) {
       throw new Error("OpenAI did not return image data.");
@@ -74,10 +83,43 @@ export async function POST(request: Request) {
       filename: safeOutputFilename(payload.outputFilename),
       qa,
       usage: imageJson.usage,
+      notice: attempts > 1 ? `OpenAI completed the collage after ${attempts} attempts.` : undefined,
     });
   } catch (error) {
     return errorResponse(error);
   }
+}
+
+async function createImageEdit(apiKey: string, body: ImageEditRequest) {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= IMAGE_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const response = await fetch("https://api.openai.com/v1/images/edits", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await readOpenAIResponse<OpenAIImageResponse>(response);
+      return { data, attempts: attempt + 1 };
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableImageError(error) || attempt === IMAGE_RETRY_DELAYS_MS.length) throw error;
+      await new Promise((resolve) => setTimeout(resolve, IMAGE_RETRY_DELAYS_MS[attempt]));
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("OpenAI image generation failed.");
+}
+
+function isRetryableImageError(error: unknown) {
+  if (error instanceof TypeError) return true;
+  if (!(error instanceof OpenAIRequestError)) return false;
+  if (error.status === 408 || error.status === 409 || error.status >= 500) return true;
+  return error.status === 429 && !/quota|billing|credit/i.test(error.message);
 }
 
 async function reviewGeneratedImage(
