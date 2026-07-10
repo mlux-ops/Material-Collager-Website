@@ -35,6 +35,9 @@ type GenerateResponse = {
   } | null;
 };
 
+const MAX_TOTAL_UPLOAD_BYTES = 22 * 1024 * 1024;
+const MAX_SINGLE_UPLOAD_BYTES = 8 * 1024 * 1024;
+
 function presetItems(type: CollageType): UiItem[] {
   return ITEM_PRESETS[type].map((item) => ({
     ...item,
@@ -100,6 +103,33 @@ export default function Home() {
     updateItem(index, { files, previews });
   }
 
+  async function readApiResponse<T>(response: Response): Promise<T> {
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      return (await response.json()) as T;
+    }
+
+    const text = (await response.text()).trim();
+    if (response.status === 413 || /payload too large/i.test(text)) {
+      throw new Error("The reference images are too large to send together. Use fewer images, or resize/compress them and try again.");
+    }
+
+    throw new Error(text || `Request failed with status ${response.status}.`);
+  }
+
+  function validateUploadSize() {
+    const allFiles = items.flatMap((item) => item.files);
+    const largeFile = allFiles.find((file) => file.size > MAX_SINGLE_UPLOAD_BYTES);
+    if (largeFile) {
+      throw new Error(`${largeFile.name} is too large. Please resize it below 8 MB and try again.`);
+    }
+
+    const totalBytes = allFiles.reduce((total, file) => total + file.size, 0);
+    if (totalBytes > MAX_TOTAL_UPLOAD_BYTES) {
+      throw new Error("The reference images are too large to send together. Use fewer images, or resize/compress them and try again.");
+    }
+  }
+
   function makePayload(includeApiKey: boolean): CollageRequestInput {
     return {
       collageType,
@@ -130,7 +160,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(makePayload(false)),
-      }).then((res) => res.json());
+      }).then((res) => readApiResponse<{ ok: boolean; error?: string; summary?: string; prompt?: string }>(res));
 
       if (!response.ok) throw new Error(response.error || "Dry run failed.");
       setPanelText(`${response.summary}\n\n--- Prompt ---\n\n${response.prompt}`);
@@ -147,6 +177,7 @@ export default function Home() {
     setPanelText("Generating...");
     try {
       const payload = makePayload(true);
+      validateUploadSize();
       const form = new FormData();
       form.append("payload", JSON.stringify(payload));
       items.forEach((item, itemIndex) => {
@@ -155,9 +186,9 @@ export default function Home() {
         });
       });
 
-      const response = (await fetch("/api/generate", { method: "POST", body: form }).then((res) =>
-        res.json(),
-      )) as GenerateResponse;
+      const response = await fetch("/api/generate", { method: "POST", body: form }).then((res) =>
+        readApiResponse<GenerateResponse>(res),
+      );
 
       if (!response.ok || !response.imageBase64) throw new Error(response.error || "Generation failed.");
       const dataUrl = `data:${response.mimeType || "image/png"};base64,${response.imageBase64}`;
@@ -346,4 +377,3 @@ export default function Home() {
     </main>
   );
 }
-
