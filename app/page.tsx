@@ -49,8 +49,10 @@ type GenerateResponse = {
   } | null;
 };
 
-const MAX_TOTAL_UPLOAD_BYTES = 22 * 1024 * 1024;
-const MAX_SINGLE_UPLOAD_BYTES = 8 * 1024 * 1024;
+const UPLOAD_REQUEST_TARGET_BYTES = 22 * 1024 * 1024;
+const MAX_UPLOAD_IMAGE_DIMENSION = 2400;
+const MAX_PREPARED_IMAGE_BYTES = 4 * 1024 * 1024;
+const MIN_PREPARED_IMAGE_BYTES = 900 * 1024;
 const DRAFT_DB_NAME = "material-collager-drafts";
 const DRAFT_STORE_NAME = "drafts";
 const CURRENT_DRAFT_KEY = "current";
@@ -288,23 +290,89 @@ export default function Home() {
 
     const text = (await response.text()).trim();
     if (response.status === 413 || /payload too large/i.test(text)) {
-      throw new Error("The reference images are too large to send together. Use fewer images, or resize/compress them and try again.");
+      throw new Error("The upload is still too large for the host to accept. Try removing a few low-priority references from this run.");
     }
 
     throw new Error(text || `Request failed with status ${response.status}.`);
   }
 
-  function validateUploadSize() {
+  async function prepareFilesForUpload() {
     const allFiles = items.flatMap((item) => item.files);
-    const largeFile = allFiles.find((file) => file.size > MAX_SINGLE_UPLOAD_BYTES);
-    if (largeFile) {
-      throw new Error(`${largeFile.name} is too large. Please resize it below 8 MB and try again.`);
+    const targetBytes = Math.max(
+      MIN_PREPARED_IMAGE_BYTES,
+      Math.min(MAX_PREPARED_IMAGE_BYTES, Math.floor(UPLOAD_REQUEST_TARGET_BYTES / Math.max(allFiles.length, 1))),
+    );
+    const prepared = new Map<string, File>();
+    let originalBytes = 0;
+    let uploadBytes = 0;
+    let optimizedCount = 0;
+
+    for (const [itemIndex, item] of items.entries()) {
+      for (const [fileIndex, file] of item.files.entries()) {
+        originalBytes += file.size;
+        const uploadFile = await prepareImageForUpload(file, targetBytes);
+        uploadBytes += uploadFile.size;
+        if (uploadFile !== file) optimizedCount += 1;
+        prepared.set(`${itemIndex}:${fileIndex}`, uploadFile);
+      }
     }
 
-    const totalBytes = allFiles.reduce((total, file) => total + file.size, 0);
-    if (totalBytes > MAX_TOTAL_UPLOAD_BYTES) {
-      throw new Error("The reference images are too large to send together. Use fewer images, or resize/compress them and try again.");
+    return { filesByKey: prepared, optimizedCount, originalBytes, uploadBytes };
+  }
+
+  async function prepareImageForUpload(file: File, targetBytes: number) {
+    if (file.size <= targetBytes && largestAllowedDimension(file)) {
+      return file;
     }
+
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, MAX_UPLOAD_IMAGE_DIMENSION / Math.max(bitmap.width, bitmap.height));
+    let width = Math.max(1, Math.round(bitmap.width * scale));
+    let height = Math.max(1, Math.round(bitmap.height * scale));
+    let quality = 0.92;
+    let best = await renderImageUploadCopy(file, bitmap, width, height, quality);
+
+    while (best.size > targetBytes && quality > 0.72) {
+      quality -= 0.06;
+      best = await renderImageUploadCopy(file, bitmap, width, height, quality);
+    }
+
+    while (best.size > targetBytes && Math.max(width, height) > 1400) {
+      width = Math.round(width * 0.86);
+      height = Math.round(height * 0.86);
+      quality = Math.max(0.76, quality);
+      best = await renderImageUploadCopy(file, bitmap, width, height, quality);
+    }
+
+    bitmap.close();
+    return best;
+  }
+
+  function largestAllowedDimension(file: File) {
+    return file.type !== "image/png";
+  }
+
+  async function renderImageUploadCopy(file: File, bitmap: ImageBitmap, width: number, height: number, quality: number) {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Could not prepare reference images for upload.");
+    context.drawImage(bitmap, 0, 0, width, height);
+
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (value) => {
+          if (value) resolve(value);
+          else reject(new Error("Could not prepare reference images for upload."));
+        },
+        "image/jpeg",
+        quality,
+      );
+    });
+
+    const name = file.name.replace(/\.[^.]+$/, "") || "reference";
+    return new File([blob], `${name}.jpg`, { type: "image/jpeg", lastModified: file.lastModified });
   }
 
   function makePayload(includeApiKey: boolean): CollageRequestInput {
@@ -351,17 +419,21 @@ export default function Home() {
   async function generate() {
     setIsWorking(true);
     setResult(null);
-    setPanelText("Generating...");
+    setPanelText("Preparing references...");
     try {
       const payload = makePayload(true);
-      validateUploadSize();
+      const prepared = await prepareFilesForUpload();
       const form = new FormData();
       form.append("payload", JSON.stringify(payload));
-      items.forEach((item, itemIndex) => {
-        item.files.forEach((file, fileIndex) => {
-          form.append(`file:${itemIndex}:${fileIndex}`, file, file.name);
-        });
-      });
+      for (const [key, file] of prepared.filesByKey.entries()) {
+        form.append(`file:${key}`, file, file.name);
+      }
+
+      const prepText =
+        prepared.optimizedCount > 0
+          ? `Prepared ${prepared.optimizedCount} large reference image${prepared.optimizedCount === 1 ? "" : "s"} for upload. Originals remain saved in your draft.`
+          : "References are ready.";
+      setPanelText(`${prepText}\nGenerating...`);
 
       const response = await fetch("/api/generate", { method: "POST", body: form }).then((res) =>
         readApiResponse<GenerateResponse>(res),
@@ -377,7 +449,11 @@ export default function Home() {
             response.qa.recommendation ? `\n${response.qa.recommendation}` : ""
           }`
         : "";
-      setPanelText(`${response.summary || "Generated."}${qaText}`);
+      const uploadNote =
+        prepared.optimizedCount > 0
+          ? `\n\nReference upload copies: ${(prepared.uploadBytes / (1024 * 1024)).toFixed(1)} MB sent from ${(prepared.originalBytes / (1024 * 1024)).toFixed(1)} MB of source images.`
+          : "";
+      setPanelText(`${response.summary || "Generated."}${qaText}${uploadNote}`);
     } catch (error) {
       setPanelText(`Error: ${error instanceof Error ? error.message : "Generation failed."}`);
     } finally {
