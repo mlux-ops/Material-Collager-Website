@@ -138,7 +138,8 @@ export async function POST(request: Request) {
       output_format: "png",
     };
     if (diagnosticMode) {
-      const counts = [...new Set([1, Math.min(5, preparedReferences.length), preparedReferences.length])];
+      const requestedCount = Number(new URL(request.url).searchParams.get("count") || 1);
+      const counts = [Math.max(1, Math.min(preparedReferences.length, requestedCount))];
       const isolationResults: Array<{ referenceCount: number; outcome: "succeeded" | "failed"; requestId?: string; error?: string }> = [];
       for (const count of counts) {
         const before = diagnostics.attempts.length;

@@ -691,7 +691,7 @@ export default function Home() {
     }
   }
 
-  async function generate(diagnosticMode = false) {
+  async function generate(diagnosticMode = false, diagnosticCount = 1) {
     const controller = new AbortController();
     abortRef.current = controller;
     setIsWorking(true);
@@ -761,7 +761,7 @@ export default function Home() {
       setOverallProgress(100);
       setWorkingStage(runQa ? "Composing and reviewing collage" : "Composing collage");
       const payload = makePayload(true, fileIdsByReference);
-      const response = await fetch(diagnosticMode ? "/api/generate?diagnostic=isolation" : "/api/generate", {
+      const response = await fetch(diagnosticMode ? `/api/generate?diagnostic=isolation&count=${diagnosticCount}` : "/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
@@ -773,7 +773,7 @@ export default function Home() {
         const resultText = (response.isolationResults ?? [])
           .map((entry) => `${entry.referenceCount} reference${entry.referenceCount === 1 ? "" : "s"}: ${entry.outcome}`)
           .join("\n");
-        setPanelText(`Isolation test complete.\n${resultText}`);
+        setPanelText(`Isolation test complete.\n${resultText}${diagnosticCount < totalReferences ? `\nNext: test ${Math.min(diagnosticCount === 1 ? 5 : totalReferences, totalReferences)} references.` : ""}`);
         await saveDraft(false);
         return;
       }
@@ -800,8 +800,8 @@ export default function Home() {
           setDiagnostics({
             model: "gpt-image-2",
             transport: "multipart",
-            quality,
-            referenceCount: totalReferences,
+            quality: diagnosticMode ? "low" : quality,
+            referenceCount: diagnosticMode ? Math.min(diagnosticCount, totalReferences) : totalReferences,
             totalReferenceBytes,
             largestReferenceBytes: Math.max(
               ...items.flatMap((item) => item.references.map((reference) => reference.file.size)),
@@ -822,11 +822,11 @@ export default function Home() {
               status: typeof payload.status === "number" ? payload.status : undefined,
               code: typeof payload.code === "string" ? payload.code : undefined,
               requestId: typeof payload.requestId === "string" ? payload.requestId : undefined,
-              error: error instanceof Error ? error.message : "Unknown error.",
+              error: `${diagnosticMode ? "Isolation test" : "Generation"}: ${error instanceof Error ? error.message : "Unknown error."}`,
             }],
           });
         }
-        setPanelText(`Generation failed: ${error instanceof Error ? error.message : "Unknown error."}`);
+        setPanelText(`${diagnosticMode ? "Isolation test" : "Generation"} failed: ${error instanceof Error ? error.message : "Unknown error."}`);
       }
     } finally {
       setIsWorking(false);
@@ -1167,8 +1167,8 @@ export default function Home() {
                 </button>
               )}
               {!isWorking && (
-                <button type="button" className="quiet-button" onClick={() => void generate(true)} disabled={!hasFiles}>
-                  Run isolation test
+                <button type="button" className="quiet-button" onClick={() => void generate(true, 1)} disabled={!hasFiles}>
+                  Test 1 reference
                 </button>
               )}
               {result && (
