@@ -40,11 +40,39 @@ type UiReference = {
   file: File;
   preview: string;
   remote?: ReferenceUploadCache;
+  primary?: boolean;
+  sourceUrl?: string;
+  sourceLabel?: string;
+  provenance?: "upload" | "investigation";
+};
+
+type AnalysisField = { value: string; confidence: number };
+type ReferenceAnalysis = {
+  itemType: AnalysisField;
+  brand: AnalysisField;
+  product: AnalysisField;
+  finish: AnalysisField;
+  notes: AnalysisField;
+  searchQuery: string;
+};
+
+type ReferenceCandidate = {
+  title: string;
+  pageUrl: string;
+  imageUrl: string;
+  sourceLabel: string;
+  official: boolean;
+  confidence: number;
+  reason: string;
 };
 
 type UiItem = Omit<CollageItemInput, "imageKeys" | "imageNames" | "imageFileIds"> & {
   uiKey: string;
   references: UiReference[];
+  analysis?: ReferenceAnalysis;
+  analysisStatus?: "idle" | "analyzing" | "ready" | "error";
+  matchStatus?: "idle" | "searching" | "ready" | "error";
+  candidates?: ReferenceCandidate[];
 };
 
 type DraftReference = Omit<UiReference, "preview">;
@@ -53,6 +81,7 @@ type DraftItem = Omit<CollageItemInput, "imageKeys" | "imageNames" | "imageFileI
   uiKey?: string;
   references?: DraftReference[];
   files?: File[];
+  analysis?: ReferenceAnalysis;
 };
 
 type SavedDraft = {
@@ -140,13 +169,28 @@ function fileFingerprint(file: File) {
   return `${file.name}:${file.size}:${file.lastModified}:${file.type}`;
 }
 
-function createReference(file: File, remote?: ReferenceUploadCache): UiReference {
+function createReference(file: File, remote?: ReferenceUploadCache, metadata?: Partial<UiReference>): UiReference {
   return {
     uiKey: createUiKey(),
     file,
     preview: URL.createObjectURL(file),
     remote,
+    primary: false,
+    provenance: "upload",
+    ...metadata,
   };
+}
+
+function FieldLabel({ text, help }: { text: string; help: string }) {
+  return (
+    <span className="field-label">
+      {text}
+      <span className="help-wrap">
+        <button type="button" className="help-button" aria-label={`${text}: ${help}`}>?</button>
+        <span className="field-help" role="tooltip">{help}</span>
+      </span>
+    </span>
+  );
 }
 
 function formatBytes(bytes: number) {
@@ -487,6 +531,94 @@ export default function Home() {
     setItems((current) => current.map((item) => (item.uiKey === itemKey ? { ...item, ...patch } : item)));
   }
 
+  function applyAnalysisSuggestion(itemKey: string, field: "role" | "brand" | "name" | "finish" | "notes", value: string) {
+    setItems((current) => current.map((item) => {
+      if (item.uiKey !== itemKey || item[field]?.trim()) return item;
+      return { ...item, [field]: value };
+    }));
+  }
+
+  async function analyzePrimaryReference(itemKey: string, file: File) {
+    const currentItem = items.find((item) => item.uiKey === itemKey);
+    if (!currentItem) return;
+    updateItem(itemKey, { analysisStatus: "analyzing", candidates: [], matchStatus: "idle" });
+    try {
+      const optimized = await optimizeReferenceForTransport(file, 450 * 1024);
+      const form = new FormData();
+      form.append("apiKey", apiKey);
+      form.append("itemType", currentItem.role);
+      form.append("image", optimized, optimized.name);
+      const response = await fetch("/api/references/analyze", { method: "POST", body: form })
+        .then((value) => readApiResponse<{ ok: boolean; error?: string; analysis: ReferenceAnalysis }>(value));
+      setItems((current) => current.map((item) => item.uiKey === itemKey ? {
+        ...item,
+        role: item.role.trim() || (response.analysis.itemType.confidence >= 70 ? response.analysis.itemType.value : ""),
+        brand: item.brand?.trim() ? item.brand : (response.analysis.brand.confidence >= 70 ? response.analysis.brand.value : ""),
+        name: item.name?.trim() ? item.name : (response.analysis.product.confidence >= 70 ? response.analysis.product.value : ""),
+        finish: item.finish?.trim() ? item.finish : (response.analysis.finish.confidence >= 70 ? response.analysis.finish.value : ""),
+        notes: item.notes?.trim() ? item.notes : (response.analysis.notes.confidence >= 70 ? response.analysis.notes.value : ""),
+        analysis: response.analysis,
+        analysisStatus: "ready",
+      } : item));
+      setPanelText(`Reference analyzed for ${currentItem.role || "this item"}. Review the suggested details before generating.`);
+    } catch (error) {
+      updateItem(itemKey, { analysisStatus: "error" });
+      setPanelText(`Reference analysis failed: ${error instanceof Error ? error.message : "Could not analyze image."}`);
+    }
+  }
+
+  async function findReferenceMatches(itemKey: string) {
+    const item = items.find((candidate) => candidate.uiKey === itemKey);
+    if (!item?.analysis?.searchQuery) return;
+    updateItem(itemKey, { matchStatus: "searching", candidates: [] });
+    try {
+      const response = await fetch("/api/references/matches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey, query: item.analysis.searchQuery, itemType: item.role }),
+      }).then((value) => readApiResponse<{ ok: boolean; error?: string; candidates: ReferenceCandidate[] }>(value));
+      updateItem(itemKey, { matchStatus: "ready", candidates: response.candidates });
+      setPanelText(response.candidates.length ? "Possible references found. Review each source before adding it." : "No reliable matching references were found.");
+    } catch (error) {
+      updateItem(itemKey, { matchStatus: "error" });
+      setPanelText(`Reference search failed: ${error instanceof Error ? error.message : "Could not search references."}`);
+    }
+  }
+
+  async function acceptReferenceCandidate(itemKey: string, candidate: ReferenceCandidate) {
+    if (!candidate.imageUrl) return;
+    if (totalReferences >= MAX_REFERENCE_IMAGES) {
+      setPanelText(`This board can use up to ${MAX_REFERENCE_IMAGES} reference images. Remove one before adding this suggestion.`);
+      return;
+    }
+    try {
+      const response = await fetch("/api/references/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrl: candidate.imageUrl }),
+      });
+      if (!response.ok) {
+        const payload = await response.json() as { error?: string };
+        throw new Error(payload.error || "Could not import suggested image.");
+      }
+      const blob = await response.blob();
+      const extension = blob.type === "image/png" ? "png" : blob.type === "image/webp" ? "webp" : "jpg";
+      const file = new File([blob], `${slugify(candidate.title)}.${extension}`, { type: blob.type, lastModified: Date.now() });
+      setItems((current) => current.map((item) => item.uiKey === itemKey ? {
+        ...item,
+        references: [...item.references, createReference(file, undefined, {
+          sourceUrl: candidate.pageUrl,
+          sourceLabel: candidate.sourceLabel,
+          provenance: "investigation",
+        })],
+        candidates: item.candidates?.filter((entry) => entry.pageUrl !== candidate.pageUrl),
+      } : item));
+      setPanelText(`${candidate.title} added as a supporting reference.`);
+    } catch (error) {
+      setPanelText(`Suggested reference could not be added: ${error instanceof Error ? error.message : "Import failed."}`);
+    }
+  }
+
   function addItem() {
     setItems((current) => [
       ...current,
@@ -528,25 +660,59 @@ export default function Home() {
       return;
     }
 
+    const currentItem = items.find((item) => item.uiKey === itemKey);
+    const isPrimaryUpload = !currentItem?.references.length;
     setItems((current) =>
       current.map((item) =>
         item.uiKey === itemKey
-          ? { ...item, references: [...item.references, ...files.map((file) => createReference(file))] }
+          ? {
+              ...item,
+              references: [...item.references, ...files.map((file, index) => createReference(file, undefined, {
+                primary: isPrimaryUpload && index === 0,
+              }))],
+            }
           : item,
       ),
     );
     setPanelText(`${files.length} reference image${files.length === 1 ? "" : "s"} added.`);
+    if (isPrimaryUpload) void analyzePrimaryReference(itemKey, files[0]);
+  }
+
+  function replaceReference(itemKey: string, referenceKey: string, fileList: FileList | null) {
+    const file = fileList?.[0];
+    if (!file) return;
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type) || file.size >= MAX_REFERENCE_FILE_BYTES) {
+      setPanelText(`${file.name} must be a PNG, JPEG, or WebP image under 50 MB.`);
+      return;
+    }
+    const item = items.find((candidate) => candidate.uiKey === itemKey);
+    const existing = item?.references.find((reference) => reference.uiKey === referenceKey);
+    if (!existing) return;
+    URL.revokeObjectURL(existing.preview);
+    const replacement = createReference(file, undefined, { primary: existing.primary, provenance: "upload" });
+    setItems((current) => current.map((candidate) => candidate.uiKey === itemKey ? {
+      ...candidate,
+      references: candidate.references.map((reference) => reference.uiKey === referenceKey ? replacement : reference),
+    } : candidate));
+    if (existing.primary || item?.references[0]?.uiKey === referenceKey) void analyzePrimaryReference(itemKey, file);
   }
 
   function removeReference(itemKey: string, referenceKey: string) {
     const item = items.find((candidate) => candidate.uiKey === itemKey);
     if (item?.id === heroItemId && item.references.length === 1) setHeroItemId("");
+    const removedPrimary = item?.references[0]?.uiKey === referenceKey;
+    const nextPrimary = removedPrimary ? item?.references.find((reference) => reference.uiKey !== referenceKey) : undefined;
     setItems((current) =>
       current.map((item) => {
         if (item.uiKey !== itemKey) return item;
         const reference = item.references.find((candidate) => candidate.uiKey === referenceKey);
         if (reference) URL.revokeObjectURL(reference.preview);
-        return { ...item, references: item.references.filter((candidate) => candidate.uiKey !== referenceKey) };
+        const references = item.references.filter((candidate) => candidate.uiKey !== referenceKey);
+        return {
+          ...item,
+          references: references.map((candidate, index) => ({ ...candidate, primary: index === 0 })),
+          ...(references.length ? {} : { analysis: undefined, analysisStatus: "idle" as const, candidates: [], matchStatus: "idle" as const }),
+        };
       }),
     );
     setReferenceProgress((current) => {
@@ -554,9 +720,13 @@ export default function Home() {
       delete next[referenceKey];
       return next;
     });
+    if (nextPrimary) void analyzePrimaryReference(itemKey, nextPrimary.file);
   }
 
   function makePrimary(itemKey: string, referenceKey: string) {
+    const selectedFile = items
+      .find((item) => item.uiKey === itemKey)
+      ?.references.find((reference) => reference.uiKey === referenceKey)?.file;
     setItems((current) =>
       current.map((item) => {
         if (item.uiKey !== itemKey) return item;
@@ -564,10 +734,14 @@ export default function Home() {
         if (!selected) return item;
         return {
           ...item,
-          references: [selected, ...item.references.filter((reference) => reference.uiKey !== referenceKey)],
+          references: [
+            { ...selected, primary: true },
+            ...item.references.filter((reference) => reference.uiKey !== referenceKey).map((reference) => ({ ...reference, primary: false })),
+          ],
         };
       }),
     );
+    if (selectedFile) void analyzePrimaryReference(itemKey, selectedFile);
   }
 
   function updateReferenceRemote(itemKey: string, referenceKey: string, remote: ReferenceUploadCache) {
@@ -583,6 +757,7 @@ export default function Home() {
           : item,
       ),
     );
+    if (selectedFile) void analyzePrimaryReference(itemKey, selectedFile);
   }
 
   function makeDraft(): SavedDraft {
@@ -609,10 +784,15 @@ export default function Home() {
         notes: item.notes,
         required: item.required,
         uiKey: item.uiKey,
+        analysis: item.analysis,
         references: item.references.map((reference) => ({
           uiKey: reference.uiKey,
           file: reference.file,
           remote: reference.remote,
+          primary: reference.primary,
+          sourceUrl: reference.sourceUrl,
+          sourceLabel: reference.sourceLabel,
+          provenance: reference.provenance,
         })),
       })),
     };
@@ -634,11 +814,16 @@ export default function Home() {
           notes: item.notes ?? "",
           required: item.required,
           uiKey: item.uiKey || createUiKey(),
-          references: savedReferences.map((reference) => ({
-            ...reference,
-            uiKey: reference.uiKey || createUiKey(),
-            preview: URL.createObjectURL(reference.file),
-          })),
+          analysis: item.analysis,
+          analysisStatus: item.analysis ? "ready" : "idle",
+          references: savedReferences
+            .sort((left, right) => Number(Boolean(right.primary)) - Number(Boolean(left.primary)))
+            .map((reference, index) => ({
+              ...reference,
+              primary: index === 0,
+              uiKey: reference.uiKey || createUiKey(),
+              preview: URL.createObjectURL(reference.file),
+            })),
         };
       });
     });
@@ -1015,7 +1200,7 @@ export default function Home() {
                     <span className="item-number">{String(index + 1).padStart(2, "0")}</span>
                     <div>
                       <strong>{item.role || item.id || `Item ${index + 1}`}</strong>
-                      <span>{item.id || "Unassigned ID"}{item.required === false ? " / Optional" : ""}</span>
+                      <span>{item.references.length ? `${item.references.length} reference${item.references.length === 1 ? "" : "s"}` : "Primary reference needed"}{item.required === false ? " / Optional" : ""}</span>
                     </div>
                   </div>
                   <button type="button" className="text-button danger" onClick={() => removeItem(item.uiKey)}>
@@ -1040,6 +1225,11 @@ export default function Home() {
                             <span title={reference.file.name}>{reference.file.name}</span>
                             <small>{formatBytes(reference.file.size)}</small>
                           </figcaption>
+                          {reference.sourceLabel && (
+                            <a className="reference-source" href={reference.sourceUrl} target="_blank" rel="noreferrer">
+                              {reference.sourceLabel}
+                            </a>
+                          )}
                           <div className="reference-actions">
                             {referenceIndex > 0 && (
                               <button type="button" onClick={() => makePrimary(item.uiKey, reference.uiKey)}>
@@ -1049,6 +1239,17 @@ export default function Home() {
                             <button type="button" onClick={() => removeReference(item.uiKey, reference.uiKey)}>
                               Remove
                             </button>
+                            <label className="replace-reference">
+                              <input
+                                type="file"
+                                accept="image/png,image/jpeg,image/webp"
+                                onChange={(event) => {
+                                  replaceReference(item.uiKey, reference.uiKey, event.target.files);
+                                  event.currentTarget.value = "";
+                                }}
+                              />
+                              <span>Replace</span>
+                            </label>
                           </div>
                         </figure>
                       );
@@ -1068,49 +1269,94 @@ export default function Home() {
                     <input
                       type="file"
                       accept="image/png,image/jpeg,image/webp"
-                      multiple
                       onChange={(event) => {
                         addReferences(item.uiKey, event.target.files);
                         event.currentTarget.value = "";
                       }}
                     />
-                    <span>Add references</span>
+                    <span>{item.references.length ? "Add another view" : "Upload primary image"}</span>
                   </label>
-                  <span>PNG, JPEG, or WebP / under 50 MB each</span>
+                  <span>One PNG, JPEG, or WebP / original preserved</span>
                 </div>
 
+                {item.analysisStatus === "analyzing" && <div className="investigation-status">Analyzing primary image...</div>}
+                {item.analysisStatus === "ready" && item.analysis && (
+                  <section className="investigation-panel">
+                    <div className="investigation-heading">
+                      <div>
+                        <strong>Reference investigation</strong>
+                        <span>Suggestions fill blank fields only.</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="quiet-button"
+                        onClick={() => void findReferenceMatches(item.uiKey)}
+                        disabled={item.matchStatus === "searching" || !item.analysis.searchQuery}
+                      >
+                        {item.matchStatus === "searching" ? "Searching..." : "Find matches"}
+                      </button>
+                    </div>
+                    <div className="analysis-evidence">
+                      {([
+                        ["Item type", "role", item.analysis.itemType],
+                        ["Brand", "brand", item.analysis.brand],
+                        ["Product", "name", item.analysis.product],
+                        ["Finish", "finish", item.analysis.finish],
+                        ["Notes", "notes", item.analysis.notes],
+                      ] as Array<[string, "role" | "brand" | "name" | "finish" | "notes", AnalysisField]>).filter(([, , field]) => field.value).map(([label, key, field]) => (
+                        <span key={label} className={field.confidence < 70 ? "uncertain" : ""}>
+                          {label}: {field.value} / {field.confidence}%
+                          {field.confidence < 70 && !item[key]?.trim() && (
+                            <button type="button" onClick={() => applyAnalysisSuggestion(item.uiKey, key, field.value)}>Use</button>
+                          )}
+                        </span>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {item.candidates && item.candidates.length > 0 && (
+                  <div className="candidate-list">
+                    {item.candidates.map((candidate) => (
+                      <article className="candidate-item" key={candidate.pageUrl}>
+                        {candidate.imageUrl ? <img src={candidate.imageUrl} alt="" /> : <div className="candidate-no-image">No preview</div>}
+                        <div>
+                          <strong>{candidate.title}</strong>
+                          <span>{candidate.sourceLabel}{candidate.official ? " / Official" : ""} / {candidate.confidence}%</span>
+                          {candidate.reason && <p>{candidate.reason}</p>}
+                          <div className="candidate-actions">
+                            <a href={candidate.pageUrl} target="_blank" rel="noreferrer">Review source</a>
+                            <button type="button" onClick={() => void acceptReferenceCandidate(item.uiKey, candidate)} disabled={!candidate.imageUrl}>
+                              Add reference
+                            </button>
+                          </div>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+
                 <details className="item-details">
-                  <summary>Product details</summary>
+                  <summary>Item details</summary>
                   <div className="item-fields">
                     <label>
-                      <span>ID</span>
-                      <input
-                        value={item.id}
-                        onChange={(event) => {
-                          const nextId = event.target.value;
-                          if (heroItemId === item.id) setHeroItemId(nextId);
-                          updateItem(item.uiKey, { id: nextId });
-                        }}
-                      />
-                    </label>
-                    <label>
-                      <span>Role</span>
+                      <FieldLabel text="Item type" help="What this object contributes to the collage, such as main bathroom tile, vanity faucet, or countertop stone." />
                       <input value={item.role} onChange={(event) => updateItem(item.uiKey, { role: event.target.value })} />
                     </label>
                     <label>
-                      <span>Product name</span>
+                      <FieldLabel text="Product / model" help="The exact collection, model number, or SKU when known. Leave blank when the image does not prove it." />
                       <input value={item.name || ""} onChange={(event) => updateItem(item.uiKey, { name: event.target.value })} />
                     </label>
                     <label>
-                      <span>Brand</span>
+                      <FieldLabel text="Brand" help="The manufacturer name, not the retailer or showroom." />
                       <input value={item.brand || ""} onChange={(event) => updateItem(item.uiKey, { brand: event.target.value })} />
                     </label>
                     <label className="wide-field">
-                      <span>Finish</span>
+                      <FieldLabel text="Finish / color" help="Use the manufacturer finish name when known, or describe the visible material color and sheen." />
                       <input value={item.finish || ""} onChange={(event) => updateItem(item.uiKey, { finish: event.target.value })} />
                     </label>
                     <label className="wide-field">
-                      <span>Specific instructions</span>
+                      <FieldLabel text="Generation notes" help="Add exceptions the image cannot communicate, such as which face to show, details to preserve, or objects that must not appear." />
                       <textarea value={item.notes || ""} onChange={(event) => updateItem(item.uiKey, { notes: event.target.value })} />
                     </label>
                   </div>
