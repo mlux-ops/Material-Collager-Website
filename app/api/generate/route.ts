@@ -84,17 +84,20 @@ export async function POST(request: Request) {
   let diagnostics: GenerationDiagnostics | undefined;
   try {
     const diagnosticMode = new URL(request.url).searchParams.get("diagnostic") === "isolation";
-    const payload = (await request.json()) as CollageRequestInput;
+    const incoming = await request.formData();
+    const payloadText = incoming.get("payload");
+    if (typeof payloadText !== "string") throw new Error("Missing generation payload.");
+    const payload = JSON.parse(payloadText) as CollageRequestInput;
     validateCollageRequest(payload);
 
     const items = activeItems(payload);
-    const referenceFileIds = items.flatMap((item) => item.imageFileIds ?? []);
+    const directFiles = incoming.getAll("image[]").filter((value): value is File => value instanceof File);
     const expectedReferences = items.reduce(
       (total, item) => total + Math.max(item.imageNames?.length ?? 0, item.imageFileIds?.length ?? 0),
       0,
     );
-    if (!referenceFileIds.length || referenceFileIds.length !== expectedReferences) {
-      throw new Error("One or more reference images are not ready. Generate again to finish preparing them.");
+    if (!directFiles.length || directFiles.length !== expectedReferences) {
+      throw new Error("One or more reference images were missing from the direct generation request.");
     }
 
     const apiKey = resolveOpenAIKey(payload.apiKey);
@@ -104,22 +107,13 @@ export async function POST(request: Request) {
       model: "gpt-image-2",
       transport: "multipart",
       quality: payload.quality,
-      referenceCount: referenceFileIds.length,
+      referenceCount: directFiles.length,
       totalReferenceBytes: 0,
       largestReferenceBytes: 0,
       references: [],
       attempts,
     };
-    const preparedReferences = await retrieveReferences(
-      apiKey,
-      items.flatMap((item) =>
-        (item.imageFileIds ?? []).map((fileId, index) => ({
-          fileId,
-          filename: item.imageNames?.[index] || `${item.id}-reference-${index + 1}.png`,
-        })),
-      ),
-      attempts,
-    );
+    const preparedReferences = directFiles.map((file) => ({ blob: file, filename: safeReferenceFilename(file.name) }));
     diagnostics.totalReferenceBytes = preparedReferences.reduce((sum, reference) => sum + reference.blob.size, 0);
     diagnostics.largestReferenceBytes = Math.max(...preparedReferences.map((reference) => reference.blob.size), 0);
     diagnostics.references = preparedReferences.map((reference) => ({
@@ -183,7 +177,7 @@ export async function POST(request: Request) {
     }
 
     const qa = payload.runQa
-      ? await reviewGeneratedImage(apiKey, payload, imageBase64, referenceFileIds)
+      ? await reviewGeneratedImage(apiKey, payload, imageBase64, preparedReferences)
       : null;
 
     return Response.json({
@@ -342,7 +336,7 @@ async function reviewGeneratedImage(
   apiKey: string,
   payload: CollageRequestInput,
   imageBase64: string,
-  referenceFileIds: string[],
+  references: PreparedReference[],
 ) {
   const itemMap = activeItems(payload)
     .map((item) => `${item.id}: ${item.role} (${item.imageFileIds?.length ?? 0} reference image(s))`)
@@ -371,10 +365,10 @@ Return JSON only with: passed (boolean), score (integer 0-100), findings (array 
     },
   ];
 
-  for (const fileId of referenceFileIds) {
+  for (const reference of references) {
     content.push({
       type: "input_image",
-      file_id: fileId,
+      image_url: await blobDataUrl(reference.blob),
       detail: "original",
     });
   }
@@ -420,6 +414,16 @@ Return JSON only with: passed (boolean), score (integer 0-100), findings (array 
       recommendation: "Review the collage manually before using it.",
     };
   }
+}
+
+async function blobDataUrl(blob: Blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return `data:${blob.type || "image/png"};base64,${btoa(binary)}`;
 }
 
 function extractOutputText(response: OpenAIResponseOutput) {

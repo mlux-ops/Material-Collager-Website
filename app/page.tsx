@@ -703,69 +703,19 @@ export default function Home() {
     try {
       const validationPayload = makePayload(false);
       validateCollageRequest(validationPayload);
-      const keyFingerprint = await credentialFingerprint(apiKey);
       const references = items.flatMap((item) =>
         item.references.map((reference) => ({ itemKey: item.uiKey, itemId: item.id, reference })),
       );
-      const fileIdsByReference = new Map<string, string>();
-      const progress = new Map<string, number>();
-
-      for (const entry of references) {
-        const fingerprint = fileFingerprint(entry.reference.file);
-        const cached = entry.reference.remote;
-        if (
-          cached &&
-          cached.credentialFingerprint === keyFingerprint &&
-          cached.fileFingerprint === fingerprint
-        ) {
-          fileIdsByReference.set(entry.reference.uiKey, cached.fileId);
-          progress.set(entry.reference.uiKey, 1);
-        } else {
-          progress.set(entry.reference.uiKey, 0);
-        }
-      }
-
-      const updateProgress = (referenceKey: string, value: number) => {
-        progress.set(referenceKey, value);
-        const weighted = references.reduce(
-          (sum, entry) => sum + entry.reference.file.size * (progress.get(entry.reference.uiKey) ?? 0),
-          0,
-        );
-        setOverallProgress(Math.round((weighted / Math.max(totalReferenceBytes, 1)) * 100));
-        setReferenceProgress(Object.fromEntries(progress));
-      };
-
-      const pending = references.filter((entry) => !fileIdsByReference.has(entry.reference.uiKey));
-      for (let batchStart = 0; batchStart < pending.length; batchStart += 2) {
-        const batch = pending.slice(batchStart, batchStart + 2);
-        setWorkingStage(`Preparing references ${batchStart + 1}-${Math.min(batchStart + 2, pending.length)} of ${pending.length}`);
-        await Promise.all(
-          batch.map(async (entry) => {
-            const fileId = await uploadReferenceFile(
-              entry.reference.file,
-              apiKey,
-              controller.signal,
-              (value) => updateProgress(entry.reference.uiKey, value),
-            );
-            const remote = {
-              fileId,
-              credentialFingerprint: keyFingerprint,
-              fileFingerprint: fileFingerprint(entry.reference.file),
-            };
-            fileIdsByReference.set(entry.reference.uiKey, fileId);
-            updateReferenceRemote(entry.itemKey, entry.reference.uiKey, remote);
-          }),
-        );
-      }
-
       setOverallProgress(100);
       setWorkingStage(runQa ? "Composing and reviewing collage" : "Composing collage");
-      const payload = makePayload(true, fileIdsByReference);
+      const payload = makePayload(true);
+      const form = new FormData();
+      form.append("payload", JSON.stringify(payload));
+      for (const entry of references) form.append("image[]", entry.reference.file, entry.reference.file.name);
       const response = await fetch(diagnosticMode ? `/api/generate?diagnostic=isolation&count=${diagnosticCount}` : "/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         signal: controller.signal,
-        body: JSON.stringify(payload),
+        body: form,
       }).then((value) => readApiResponse<GenerateResponse>(value));
 
       if (diagnosticMode && response.diagnosticComplete) {
@@ -900,7 +850,7 @@ export default function Home() {
               <span>Resolution</span>
               <select value={outputResolution} onChange={(event) => setOutputResolution(event.target.value as OutputResolution)}>
                 {OUTPUT_RESOLUTIONS.map((option) => (
-                  <option key={option} value={option}>{option === "studio" ? "Studio quality / standard canvas" : "Standard"}</option>
+                  <option key={option} value={option}>{option === "studio" ? "Studio 2K" : "Standard"}</option>
                 ))}
               </select>
             </label>
