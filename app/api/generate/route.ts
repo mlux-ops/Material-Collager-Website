@@ -2,6 +2,7 @@ import {
   activeItems,
   buildGenerationPrompt,
   buildSummary,
+  referenceCount,
   resolvedOrientation,
   resolvedSize,
   type CollageRequestInput,
@@ -352,9 +353,15 @@ async function reviewGeneratedImage(
   imageBase64: string,
   references: PreparedReference[],
 ) {
-  const itemMap = activeItems(payload)
-    .map((item) => `${item.id}: ${item.role} (${item.imageFileIds?.length ?? 0} reference image(s))`)
-    .join("\n");
+  let nextReference = 1;
+  const itemMap = activeItems(payload).map((item) => {
+    const count = referenceCount(item);
+    const start = nextReference;
+    const end = nextReference + count - 1;
+    nextReference += count;
+    const range = start === end ? `reference ${start}` : `references ${start}-${end}`;
+    return `${range} -> ${item.id}: ${item.role}`;
+  }).join("\n");
   const content: Array<Record<string, unknown>> = [
     {
       type: "input_text",
@@ -419,6 +426,7 @@ Return JSON only with: passed (boolean), score (integer 0-100), findings (array 
           ? [String(parsed.findings)]
           : [],
       recommendation: String(parsed.recommendation || ""),
+      reviewFailed: false,
     };
   } catch (error) {
     return {
@@ -426,6 +434,7 @@ Return JSON only with: passed (boolean), score (integer 0-100), findings (array 
       score: 0,
       findings: [error instanceof Error ? error.message : "Accuracy review failed."],
       recommendation: "Review the collage manually before using it.",
+      reviewFailed: true,
     };
   }
 }

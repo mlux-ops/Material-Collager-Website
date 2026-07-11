@@ -106,6 +106,7 @@ type QaResult = {
   score: number;
   findings: string[];
   recommendation: string;
+  reviewFailed?: boolean;
 };
 
 type GenerateResponse = {
@@ -773,7 +774,7 @@ export default function Home() {
       lighting,
       heroItemId,
       outputFilename,
-      runQa,
+      runQa: qaFeedback ? true : runQa,
       savedAt: Date.now(),
       items: items.map((item) => ({
         id: item.id,
@@ -878,7 +879,11 @@ export default function Home() {
     }
   }
 
-  function makePayload(includeApiKey: boolean, fileIdsByReference?: Map<string, string>): CollageRequestInput {
+  function makePayload(
+    includeApiKey: boolean,
+    fileIdsByReference?: Map<string, string>,
+    qaFeedback?: QaResult,
+  ): CollageRequestInput {
     return {
       collageType,
       orientation,
@@ -892,6 +897,11 @@ export default function Home() {
       outputFilename,
       apiKey: includeApiKey ? apiKey : "",
       runQa,
+      qaFeedback: qaFeedback ? {
+        score: qaFeedback.score,
+        findings: qaFeedback.findings,
+        recommendation: qaFeedback.recommendation,
+      } : undefined,
       items: items.map((item, index) => ({
         id: item.id || slugify(item.role || `item_${index + 1}`),
         role: item.role,
@@ -931,25 +941,25 @@ export default function Home() {
     }
   }
 
-  async function generate(diagnosticMode = false, diagnosticCount = 1) {
+  async function generate(diagnosticMode = false, diagnosticCount = 1, qaFeedback?: QaResult) {
     const controller = new AbortController();
     abortRef.current = controller;
     setIsWorking(true);
-    setResult(null);
+    if (!qaFeedback) setResult(null);
     setPromptPreview("");
     setOverallProgress(0);
-    setWorkingStage("Checking references");
+    setWorkingStage(qaFeedback ? "Preparing QA correction pass" : "Checking references");
     let transportFilesForReport: File[] | null = null;
 
     try {
-      const validationPayload = makePayload(false);
+      const validationPayload = makePayload(false, undefined, qaFeedback);
       validateCollageRequest(validationPayload);
       const references = items.flatMap((item) =>
         item.references.map((reference) => ({ itemKey: item.uiKey, itemId: item.id, reference })),
       );
       setOverallProgress(100);
-      setWorkingStage(runQa ? "Composing and reviewing collage" : "Composing collage");
-      const payload = makePayload(true);
+      setWorkingStage(qaFeedback ? "Re-creating with QA corrections" : runQa ? "Composing and reviewing collage" : "Composing collage");
+      const payload = makePayload(true, undefined, qaFeedback);
       const form = new FormData();
       form.append("payload", JSON.stringify(payload));
       const referencesToSend = diagnosticMode ? references.slice(0, diagnosticCount) : references;
@@ -959,7 +969,7 @@ export default function Home() {
       );
       transportFilesForReport = transportFiles;
       for (const file of transportFiles) form.append("image[]", file, file.name);
-      setWorkingStage(runQa ? "Composing and reviewing collage" : "Composing collage");
+      setWorkingStage(qaFeedback ? "Re-creating with QA corrections" : runQa ? "Composing and reviewing collage" : "Composing collage");
       const response = await fetch(diagnosticMode ? `/api/generate?diagnostic=isolation&count=${diagnosticCount}` : "/api/generate", {
         method: "POST",
         signal: controller.signal,
@@ -991,7 +1001,7 @@ export default function Home() {
         qa: response.qa ?? null,
       });
       setPromptPreview(response.prompt || "");
-      setPanelText(`${response.summary || "Collage generated."}${response.notice ? `\n\n${response.notice}` : ""}`);
+      setPanelText(`${response.summary || "Collage generated."}${qaFeedback ? "\n\nQA findings were integrated into this correction pass." : ""}${response.notice ? `\n\n${response.notice}` : ""}`);
       setDiagnostics(response.diagnostics ?? null);
       await saveDraft(false);
     } catch (error) {
@@ -1475,6 +1485,16 @@ export default function Home() {
                   <ul>{result.qa.findings.map((finding) => <li key={finding}>{finding}</li>)}</ul>
                 )}
                 {result.qa.recommendation && <p>{result.qa.recommendation}</p>}
+                {!result.qa.passed && !result.qa.reviewFailed && (
+                  <button
+                    type="button"
+                    className="qa-recreate-button"
+                    onClick={() => void generate(false, 1, result.qa || undefined)}
+                    disabled={isWorking}
+                  >
+                    {isWorking ? "Re-creating with QA fixes..." : "Re-create with QA fixes"}
+                  </button>
+                )}
               </section>
             )}
 

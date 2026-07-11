@@ -38,6 +38,12 @@ export type CollageItemInput = {
   required?: boolean;
 };
 
+export type QaFeedbackInput = {
+  score: number;
+  findings: string[];
+  recommendation?: string;
+};
+
 export type CollageRequestInput = {
   collageType: CollageType;
   orientation: Orientation;
@@ -51,6 +57,7 @@ export type CollageRequestInput = {
   outputFilename?: string;
   apiKey?: string;
   runQa?: boolean;
+  qaFeedback?: QaFeedbackInput;
   items: CollageItemInput[];
 };
 
@@ -267,6 +274,7 @@ export function buildGenerationPrompt(request: CollageRequestInput) {
   const hero = request.heroItemId
     ? `Make item \"${request.heroItemId}\" the visual anchor. It may be largest, but it must remain faithful to its reference.`
     : "Choose the most visually substantial referenced item as the anchor without diminishing any other requested item.";
+  const qaCorrection = buildQaCorrection(request.qaFeedback);
 
   return [
     "GOAL",
@@ -281,6 +289,7 @@ export function buildGenerationPrompt(request: CollageRequestInput) {
     "REFERENCE MAP",
     "Use the uploaded images by their exact order below. The images, not the text labels, are the visual source of truth.",
     labels.join("\n"),
+    ...(qaCorrection ? ["QA CORRECTION PASS", qaCorrection] : []),
     "REFERENCE FIDELITY - NON-NEGOTIABLE",
     `- Include every mapped item exactly once as a distinct collage element. Multiple images mapped to one item are alternate views of that same item, not extra objects.
 - For a multi-image item, use the first image as the primary identity view and use every remaining view to resolve geometry, finish, and details.
@@ -299,6 +308,24 @@ export function buildGenerationPrompt(request: CollageRequestInput) {
     "OUTPUT",
     `Orientation: ${resolvedOrientation(request)}. Canvas: ${resolvedSize(request)}. Deliver one complete collage, not a contact sheet, presentation page, or set of alternatives.`,
   ].join("\n\n");
+}
+
+function buildQaCorrection(feedback?: QaFeedbackInput) {
+  if (!feedback) return "";
+  const findings = (feedback.findings ?? [])
+    .map((finding) => String(finding).trim().slice(0, 400))
+    .filter(Boolean)
+    .slice(0, 10);
+  const recommendation = String(feedback.recommendation || "").trim().slice(0, 600);
+  if (!findings.length && !recommendation) return "";
+
+  const score = Math.max(0, Math.min(100, Math.round(Number(feedback.score) || 0)));
+  return [
+    `This is a fresh re-creation informed by a ${score}/100 QA review of the previous collage. Regenerate from the original references and correct every issue below; do not use the previous collage as a visual reference.`,
+    ...findings.map((finding, index) => `${index + 1}. ${finding}`),
+    recommendation ? `Art-director recommendation: ${recommendation}` : "",
+    "Preserve every element that was already accurate. Resolve these corrections without introducing new objects, substitutions, duplicates, labels, or styling exceptions.",
+  ].filter(Boolean).join("\n");
 }
 
 export function buildSummary(request: CollageRequestInput) {
