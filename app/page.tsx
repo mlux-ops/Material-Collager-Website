@@ -127,6 +127,7 @@ class ApiResponseError extends Error {
 }
 
 const REFERENCE_CHUNK_BYTES = 4 * 1024 * 1024;
+const DIRECT_REQUEST_REFERENCE_BUDGET = 3 * 1024 * 1024;
 const DRAFT_DB_NAME = "material-collager-drafts";
 const DRAFT_STORE_NAME = "drafts";
 const CURRENT_DRAFT_KEY = "current";
@@ -151,6 +152,60 @@ function createReference(file: File, remote?: ReferenceUploadCache): UiReference
 function formatBytes(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+}
+
+async function optimizeReferencesForTransport(files: File[]) {
+  const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+  if (totalBytes <= DIRECT_REQUEST_REFERENCE_BUDGET) return files;
+
+  const targetBytes = Math.floor(DIRECT_REQUEST_REFERENCE_BUDGET / Math.max(files.length, 1));
+  return Promise.all(files.map((file) => optimizeReferenceForTransport(file, targetBytes)));
+}
+
+async function optimizeReferenceForTransport(file: File, targetBytes: number) {
+  if (file.size <= targetBytes) return file;
+
+  const bitmap = await createImageBitmap(file);
+  let scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));
+  let best: Blob | null = null;
+
+  try {
+    for (let pass = 0; pass < 4; pass += 1) {
+      const width = Math.max(1, Math.round(bitmap.width * scale));
+      const height = Math.max(1, Math.round(bitmap.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d", { alpha: false });
+      if (!context) throw new Error(`Could not prepare ${file.name} for generation.`);
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, width, height);
+      context.drawImage(bitmap, 0, 0, width, height);
+
+      for (const quality of [0.92, 0.86, 0.8, 0.74, 0.68]) {
+        const blob = await new Promise<Blob>((resolve, reject) =>
+          canvas.toBlob(
+            (value) => value ? resolve(value) : reject(new Error(`Could not optimize ${file.name}.`)),
+            "image/jpeg",
+            quality,
+          ),
+        );
+        best = !best || blob.size < best.size ? blob : best;
+        if (blob.size <= targetBytes) return transportFile(blob, file.name);
+      }
+      scale *= 0.78;
+    }
+  } finally {
+    bitmap.close();
+  }
+
+  if (!best) throw new Error(`Could not optimize ${file.name}.`);
+  return transportFile(best, file.name);
+}
+
+function transportFile(blob: Blob, originalName: string) {
+  const base = originalName.replace(/\.[^.]+$/, "") || "reference";
+  return new File([blob], `${base}-optimized.jpg`, { type: "image/jpeg", lastModified: Date.now() });
 }
 
 function openDraftDatabase(): Promise<IDBDatabase> {
@@ -712,7 +767,12 @@ export default function Home() {
       const form = new FormData();
       form.append("payload", JSON.stringify(payload));
       const referencesToSend = diagnosticMode ? references.slice(0, diagnosticCount) : references;
-      for (const entry of referencesToSend) form.append("image[]", entry.reference.file, entry.reference.file.name);
+      setWorkingStage("Optimizing references for direct generation");
+      const transportFiles = await optimizeReferencesForTransport(
+        referencesToSend.map((entry) => entry.reference.file),
+      );
+      for (const file of transportFiles) form.append("image[]", file, file.name);
+      setWorkingStage(runQa ? "Composing and reviewing collage" : "Composing collage");
       const response = await fetch(diagnosticMode ? `/api/generate?diagnostic=isolation&count=${diagnosticCount}` : "/api/generate", {
         method: "POST",
         signal: controller.signal,
