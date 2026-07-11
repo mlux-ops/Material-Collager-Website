@@ -139,16 +139,18 @@ export async function POST(request: Request) {
     if (diagnosticMode) {
       const counts = [requestedDiagnosticCount];
       const isolationResults: Array<{ referenceCount: number; outcome: "succeeded" | "failed"; requestId?: string; error?: string }> = [];
+      let diagnosticImageBase64: string | undefined;
       for (const count of counts) {
         const before = diagnostics.attempts.length;
         try {
-          await createImageEdit(apiKey, {
+          const testResult = await createImageEdit(apiKey, {
             ...imageRequest,
             prompt: "Create a simple clean material reference board using every supplied image.",
             references: preparedReferences.slice(0, count),
             size: "1024x1024",
             quality: "low",
           }, diagnostics.attempts, false);
+          diagnosticImageBase64 = testResult.data.data?.[0]?.b64_json;
           isolationResults.push({ referenceCount: count, outcome: "succeeded" });
         } catch (error) {
           const root = error instanceof DiagnosedGenerationError ? error.causeError : error;
@@ -162,7 +164,15 @@ export async function POST(request: Request) {
         }
         if (diagnostics.attempts.length === before) break;
       }
-      return Response.json({ ok: true, diagnosticComplete: true, diagnostics, isolationResults });
+      return Response.json({
+        ok: true,
+        diagnosticComplete: true,
+        diagnostics,
+        isolationResults,
+        imageBase64: diagnosticImageBase64,
+        mimeType: "image/png",
+        filename: "isolation-test.png",
+      });
     }
     let imageResult: Awaited<ReturnType<typeof createImageEdit>>;
     let usedStandardFallback = false;

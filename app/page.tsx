@@ -721,6 +721,13 @@ export default function Home() {
 
       if (diagnosticMode && response.diagnosticComplete) {
         setDiagnostics(response.diagnostics ?? null);
+        if (response.imageBase64) {
+          setResult({
+            dataUrl: `data:${response.mimeType || "image/png"};base64,${response.imageBase64}`,
+            filename: response.filename || "isolation-test.png",
+            qa: null,
+          });
+        }
         const resultText = (response.isolationResults ?? [])
           .map((entry) => `${entry.referenceCount} reference${entry.referenceCount === 1 ? "" : "s"}: ${entry.outcome}`)
           .join("\n");
