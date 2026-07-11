@@ -127,7 +127,7 @@ class ApiResponseError extends Error {
 }
 
 const REFERENCE_CHUNK_BYTES = 4 * 1024 * 1024;
-const DIRECT_REQUEST_REFERENCE_BUDGET = 3 * 1024 * 1024;
+const DIRECT_REQUEST_REFERENCE_BUDGET = 700 * 1024;
 const DRAFT_DB_NAME = "material-collager-drafts";
 const DRAFT_STORE_NAME = "drafts";
 const CURRENT_DRAFT_KEY = "current";
@@ -754,6 +754,7 @@ export default function Home() {
     setPromptPreview("");
     setOverallProgress(0);
     setWorkingStage("Checking references");
+    let transportFilesForReport: File[] | null = null;
 
     try {
       const validationPayload = makePayload(false);
@@ -771,6 +772,7 @@ export default function Home() {
       const transportFiles = await optimizeReferencesForTransport(
         referencesToSend.map((entry) => entry.reference.file),
       );
+      transportFilesForReport = transportFiles;
       for (const file of transportFiles) form.append("image[]", file, file.name);
       setWorkingStage(runQa ? "Composing and reviewing collage" : "Composing collage");
       const response = await fetch(diagnosticMode ? `/api/generate?diagnostic=isolation&count=${diagnosticCount}` : "/api/generate", {
@@ -820,18 +822,23 @@ export default function Home() {
             transport: "multipart",
             quality: diagnosticMode ? "low" : quality,
             referenceCount: diagnosticMode ? Math.min(diagnosticCount, totalReferences) : totalReferences,
-            totalReferenceBytes,
+            totalReferenceBytes: transportFilesForReport?.reduce((sum, file) => sum + file.size, 0) ?? totalReferenceBytes,
             largestReferenceBytes: Math.max(
-              ...items.flatMap((item) => item.references.map((reference) => reference.file.size)),
+              ...(transportFilesForReport?.map((file) => file.size)
+                ?? items.flatMap((item) => item.references.map((reference) => reference.file.size))),
               0,
             ),
-            references: items.flatMap((item) =>
-              item.references.map((reference) => ({
-                filename: reference.file.name,
-                bytes: reference.file.size,
-                mimeType: reference.file.type || "unknown",
-              })),
-            ),
+            references: transportFilesForReport
+              ? transportFilesForReport.map((file) => ({
+                  filename: file.name,
+                  bytes: file.size,
+                  mimeType: file.type || "unknown",
+                }))
+              : items.flatMap((item) => item.references.map((reference) => ({
+                  filename: reference.file.name,
+                  bytes: reference.file.size,
+                  mimeType: reference.file.type || "unknown",
+                }))),
             attempts: [{
               stage: "image_edit",
               outcome: "failed",
