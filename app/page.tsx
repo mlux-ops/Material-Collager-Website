@@ -1166,6 +1166,11 @@ export default function Home() {
                   Generate studio collage
                 </button>
               )}
+              {!isWorking && (
+                <button type="button" className="quiet-button" onClick={() => void generate(true)} disabled={!hasFiles}>
+                  Run isolation test
+                </button>
+              )}
               {result && (
                 <a className="download-button" href={result.dataUrl} download={result.filename}>Download PNG</a>
               )}
@@ -1201,14 +1206,6 @@ export default function Home() {
                   onClick={() => void navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2))}
                 >
                   Copy report
-                </button>
-                <button
-                  type="button"
-                  className="quiet-button"
-                  disabled={isWorking}
-                  onClick={() => void generate(true)}
-                >
-                  Run isolation test
                 </button>
               </details>
             )}
