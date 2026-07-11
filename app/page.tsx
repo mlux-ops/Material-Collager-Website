@@ -711,7 +711,8 @@ export default function Home() {
       const payload = makePayload(true);
       const form = new FormData();
       form.append("payload", JSON.stringify(payload));
-      for (const entry of references) form.append("image[]", entry.reference.file, entry.reference.file.name);
+      const referencesToSend = diagnosticMode ? references.slice(0, diagnosticCount) : references;
+      for (const entry of referencesToSend) form.append("image[]", entry.reference.file, entry.reference.file.name);
       const response = await fetch(diagnosticMode ? `/api/generate?diagnostic=isolation&count=${diagnosticCount}` : "/api/generate", {
         method: "POST",
         signal: controller.signal,

@@ -92,10 +92,15 @@ export async function POST(request: Request) {
 
     const items = activeItems(payload);
     const directFiles = incoming.getAll("image[]").filter((value): value is File => value instanceof File);
-    const expectedReferences = items.reduce(
+    const boardReferenceCount = items.reduce(
       (total, item) => total + Math.max(item.imageNames?.length ?? 0, item.imageFileIds?.length ?? 0),
       0,
     );
+    const requestedDiagnosticCount = Math.max(
+      1,
+      Math.min(boardReferenceCount, Number(new URL(request.url).searchParams.get("count") || 1)),
+    );
+    const expectedReferences = diagnosticMode ? requestedDiagnosticCount : boardReferenceCount;
     if (!directFiles.length || directFiles.length !== expectedReferences) {
       throw new Error("One or more reference images were missing from the direct generation request.");
     }
@@ -132,8 +137,7 @@ export async function POST(request: Request) {
       output_format: "png",
     };
     if (diagnosticMode) {
-      const requestedCount = Number(new URL(request.url).searchParams.get("count") || 1);
-      const counts = [Math.max(1, Math.min(preparedReferences.length, requestedCount))];
+      const counts = [requestedDiagnosticCount];
       const isolationResults: Array<{ referenceCount: number; outcome: "succeeded" | "failed"; requestId?: string; error?: string }> = [];
       for (const count of counts) {
         const before = diagnostics.attempts.length;
