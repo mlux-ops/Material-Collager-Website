@@ -900,7 +900,7 @@ export default function Home() {
               <span>Resolution</span>
               <select value={outputResolution} onChange={(event) => setOutputResolution(event.target.value as OutputResolution)}>
                 {OUTPUT_RESOLUTIONS.map((option) => (
-                  <option key={option} value={option}>{option === "studio" ? "Studio 2K" : "Standard"}</option>
+                  <option key={option} value={option}>{option === "studio" ? "Studio quality / standard canvas" : "Standard"}</option>
                 ))}
               </select>
             </label>

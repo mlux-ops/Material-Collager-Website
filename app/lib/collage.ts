@@ -234,15 +234,9 @@ export function resolvedLighting(request: CollageRequestInput): LightingOption {
 
 export function resolvedSize(request: CollageRequestInput) {
   const orientation = resolvedOrientation(request);
-  if (resolvedOutputResolution(request) === "standard") {
-    if (orientation === "portrait") return "1024x1536";
-    if (orientation === "square") return "1024x1024";
-    return "1536x1024";
-  }
-
-  if (orientation === "portrait") return "1360x2048";
-  if (orientation === "square") return "2048x2048";
-  return "2048x1360";
+  if (orientation === "portrait") return "1024x1536";
+  if (orientation === "square") return "1024x1024";
+  return "1536x1024";
 }
 
 export function buildGenerationPrompt(request: CollageRequestInput) {
