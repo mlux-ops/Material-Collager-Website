@@ -91,6 +91,8 @@ type GenerateResponse = {
   notice?: string;
   qa?: QaResult | null;
   diagnostics?: GenerationDiagnostics;
+  diagnosticComplete?: boolean;
+  isolationResults?: Array<{ referenceCount: number; outcome: "succeeded" | "failed"; requestId?: string; error?: string }>;
 };
 
 type GenerationDiagnostics = {
@@ -689,7 +691,7 @@ export default function Home() {
     }
   }
 
-  async function generate() {
+  async function generate(diagnosticMode = false) {
     const controller = new AbortController();
     abortRef.current = controller;
     setIsWorking(true);
@@ -759,12 +761,22 @@ export default function Home() {
       setOverallProgress(100);
       setWorkingStage(runQa ? "Composing and reviewing collage" : "Composing collage");
       const payload = makePayload(true, fileIdsByReference);
-      const response = await fetch("/api/generate", {
+      const response = await fetch(diagnosticMode ? "/api/generate?diagnostic=isolation" : "/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
         body: JSON.stringify(payload),
       }).then((value) => readApiResponse<GenerateResponse>(value));
+
+      if (diagnosticMode && response.diagnosticComplete) {
+        setDiagnostics(response.diagnostics ?? null);
+        const resultText = (response.isolationResults ?? [])
+          .map((entry) => `${entry.referenceCount} reference${entry.referenceCount === 1 ? "" : "s"}: ${entry.outcome}`)
+          .join("\n");
+        setPanelText(`Isolation test complete.\n${resultText}`);
+        await saveDraft(false);
+        return;
+      }
 
       if (!response.imageBase64) throw new Error("Generation completed without an image.");
       const dataUrl = `data:${response.mimeType || "image/png"};base64,${response.imageBase64}`;
@@ -1189,6 +1201,14 @@ export default function Home() {
                   onClick={() => void navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2))}
                 >
                   Copy report
+                </button>
+                <button
+                  type="button"
+                  className="quiet-button"
+                  disabled={isWorking}
+                  onClick={() => void generate(true)}
+                >
+                  Run isolation test
                 </button>
               </details>
             )}

@@ -83,6 +83,7 @@ const IMAGE_RETRY_DELAYS_MS = [1500];
 export async function POST(request: Request) {
   let diagnostics: GenerationDiagnostics | undefined;
   try {
+    const diagnosticMode = new URL(request.url).searchParams.get("diagnostic") === "isolation";
     const payload = (await request.json()) as CollageRequestInput;
     validateCollageRequest(payload);
 
@@ -136,6 +137,34 @@ export async function POST(request: Request) {
       background: "opaque",
       output_format: "png",
     };
+    if (diagnosticMode) {
+      const counts = [...new Set([1, Math.min(5, preparedReferences.length), preparedReferences.length])];
+      const isolationResults: Array<{ referenceCount: number; outcome: "succeeded" | "failed"; requestId?: string; error?: string }> = [];
+      for (const count of counts) {
+        const before = diagnostics.attempts.length;
+        try {
+          await createImageEdit(apiKey, {
+            ...imageRequest,
+            prompt: "Create a simple clean material reference board using every supplied image.",
+            references: preparedReferences.slice(0, count),
+            size: "1024x1024",
+            quality: "low",
+          }, diagnostics.attempts, false);
+          isolationResults.push({ referenceCount: count, outcome: "succeeded" });
+        } catch (error) {
+          const root = error instanceof DiagnosedGenerationError ? error.causeError : error;
+          isolationResults.push({
+            referenceCount: count,
+            outcome: "failed",
+            requestId: root instanceof OpenAIRequestError ? root.requestId : undefined,
+            error: root instanceof Error ? root.message : "Unknown error.",
+          });
+          break;
+        }
+        if (diagnostics.attempts.length === before) break;
+      }
+      return Response.json({ ok: true, diagnosticComplete: true, diagnostics, isolationResults });
+    }
     let imageResult: Awaited<ReturnType<typeof createImageEdit>>;
     let usedStandardFallback = false;
     try {
@@ -184,10 +213,11 @@ export async function POST(request: Request) {
   }
 }
 
-async function createImageEdit(apiKey: string, body: ImageEditRequest, diagnostics: AttemptDiagnostic[]) {
+async function createImageEdit(apiKey: string, body: ImageEditRequest, diagnostics: AttemptDiagnostic[], retry = true) {
   let lastError: unknown;
+  const retryDelays = retry ? IMAGE_RETRY_DELAYS_MS : [];
 
-  for (let attempt = 0; attempt <= IMAGE_RETRY_DELAYS_MS.length; attempt += 1) {
+  for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
     const startedAt = Date.now();
     try {
       const form = new FormData();
@@ -212,7 +242,7 @@ async function createImageEdit(apiKey: string, body: ImageEditRequest, diagnosti
     } catch (error) {
       diagnostics.push(diagnosticFor(error, "image_edit", attempt + 1, Date.now() - startedAt, body.size));
       lastError = error;
-      if (!isRetryableImageError(error) || attempt === IMAGE_RETRY_DELAYS_MS.length) {
+      if (!isRetryableImageError(error) || attempt === retryDelays.length) {
         throw new DiagnosedGenerationError(error, {
           model: body.model,
           transport: "multipart",
@@ -224,7 +254,7 @@ async function createImageEdit(apiKey: string, body: ImageEditRequest, diagnosti
           attempts: diagnostics,
         });
       }
-      await new Promise((resolve) => setTimeout(resolve, IMAGE_RETRY_DELAYS_MS[attempt]));
+      await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
     }
   }
 
