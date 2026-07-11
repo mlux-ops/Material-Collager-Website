@@ -1120,7 +1120,7 @@ export default function Home() {
               {isWorking ? (
                 <button type="button" className="cancel-button" onClick={cancelWork}>Cancel</button>
               ) : (
-                <button type="button" className="primary-button" onClick={generate} disabled={!hasFiles}>
+                <button type="button" className="primary-button" onClick={() => void generate(false)} disabled={!hasFiles}>
                   Generate studio collage
                 </button>
               )}
