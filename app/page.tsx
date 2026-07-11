@@ -238,7 +238,7 @@ async function readApiResponse<T extends { ok: boolean; error?: string }>(respon
     if (!response.ok || !payload.ok) {
       throw new ApiResponseError(
         payload.error || `Request failed with status ${response.status}.`,
-        payload as Record<string, unknown>,
+        { ...(payload as Record<string, unknown>), status: response.status },
       );
     }
     return payload;
@@ -783,6 +783,36 @@ export default function Home() {
       } else {
         if (error instanceof ApiResponseError && error.payload.diagnostics) {
           setDiagnostics(error.payload.diagnostics as GenerationDiagnostics);
+        } else {
+          const payload = error instanceof ApiResponseError ? error.payload : {};
+          setDiagnostics({
+            model: "gpt-image-2",
+            transport: "multipart",
+            quality,
+            referenceCount: totalReferences,
+            totalReferenceBytes,
+            largestReferenceBytes: Math.max(
+              ...items.flatMap((item) => item.references.map((reference) => reference.file.size)),
+              0,
+            ),
+            references: items.flatMap((item) =>
+              item.references.map((reference) => ({
+                filename: reference.file.name,
+                bytes: reference.file.size,
+                mimeType: reference.file.type || "unknown",
+              })),
+            ),
+            attempts: [{
+              stage: "image_edit",
+              outcome: "failed",
+              attempt: 1,
+              durationMs: 0,
+              status: typeof payload.status === "number" ? payload.status : undefined,
+              code: typeof payload.code === "string" ? payload.code : undefined,
+              requestId: typeof payload.requestId === "string" ? payload.requestId : undefined,
+              error: error instanceof Error ? error.message : "Unknown error.",
+            }],
+          });
         }
         setPanelText(`Generation failed: ${error instanceof Error ? error.message : "Unknown error."}`);
       }
