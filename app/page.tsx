@@ -1053,8 +1053,11 @@ export default function Home() {
     <main className="app-shell">
       <header className="studio-header">
         <div className="brand-block">
-          <p className="eyebrow">Interior Finish Boards</p>
-          <h1>Material Collager</h1>
+          <span className="brand-mark" aria-hidden="true">MC</span>
+          <div>
+            <p className="eyebrow">Interior finish studio</p>
+            <h1>Material Collager</h1>
+          </div>
         </div>
         <div className="board-metrics" aria-label="Board reference summary">
           <div>
@@ -1074,6 +1077,7 @@ export default function Home() {
 
       <div className="workbench">
         <section className="builder-surface">
+          <div className="controls-surface">
           <div className="surface-heading">
             <div>
               <p className="section-kicker">01</p>
@@ -1090,7 +1094,7 @@ export default function Home() {
           </div>
 
           <div className="control-grid setup-controls">
-            <label>
+            <label className="wide-field">
               <span>Board type</span>
               <select value={collageType} onChange={(event) => changeType(event.target.value as CollageType)}>
                 {COLLAGE_TYPES.map((type) => (
@@ -1114,7 +1118,7 @@ export default function Home() {
                 ))}
               </select>
             </label>
-            <label>
+            <label className="wide-field">
               <span>Render quality</span>
               <select value={quality} onChange={(event) => setQuality(event.target.value as Quality)}>
                 {QUALITIES.map((option) => (
@@ -1180,16 +1184,48 @@ export default function Home() {
             </label>
           </div>
 
-          <div className="surface-divider" />
+          <details className="settings-drawer">
+            <summary>Studio settings</summary>
+            <div className="control-grid settings-controls">
+              <label>
+                <span>Output file name</span>
+                <input value={outputFilename} onChange={(event) => setOutputFilename(event.target.value)} />
+              </label>
+              <label>
+                <span>OpenAI API key</span>
+                <input
+                  value={apiKey}
+                  onChange={(event) => setApiKey(event.target.value)}
+                  type="password"
+                  autoComplete="off"
+                  placeholder="Uses hosted key when blank"
+                />
+              </label>
+              <label className="toggle-field wide-field">
+                <input checked={runQa} onChange={(event) => setRunQa(event.target.checked)} type="checkbox" />
+                <span>Run accuracy review after generation</span>
+              </label>
+            </div>
+            <div className="drawer-actions">
+              <button type="button" onClick={() => void restoreSavedDraft()}>Restore saved draft</button>
+              <button type="button" className="danger" onClick={() => void clearSavedDraft()}>Delete saved draft</button>
+            </div>
+          </details>
+          </div>
+
+          <div className="references-surface">
 
           <div className="surface-heading compact-heading reference-heading">
             <div>
               <p className="section-kicker">03</p>
-              <h2>Materials and products</h2>
+              <h2>Reference tray</h2>
             </div>
-            <span className={hasFiles ? "status-pill ready" : "status-pill"}>
-              {totalReferences}/{MAX_REFERENCE_IMAGES}
-            </span>
+            <div className="reference-heading-actions">
+              <span className={hasFiles ? "status-pill ready" : "status-pill"}>
+                {totalReferences}/{MAX_REFERENCE_IMAGES}
+              </span>
+              <button type="button" className="add-item-button" onClick={addItem}>+ Add item</button>
+            </div>
           </div>
 
           <div className="items-list">
@@ -1199,12 +1235,18 @@ export default function Home() {
                   <div className="item-title-group">
                     <span className="item-number">{String(index + 1).padStart(2, "0")}</span>
                     <div>
-                      <strong>{item.role || item.id || `Item ${index + 1}`}</strong>
-                      <span>{item.references.length ? `${item.references.length} reference${item.references.length === 1 ? "" : "s"}` : "Primary reference needed"}{item.required === false ? " / Optional" : ""}</span>
+                      <strong title={item.role || item.id || `Item ${index + 1}`}>{item.role || item.id || `Item ${index + 1}`}</strong>
+                      <span>{item.references.length ? `${item.references.length} reference${item.references.length === 1 ? "" : "s"}` : "No image yet"}{item.required === false ? " / Optional" : ""}</span>
                     </div>
                   </div>
-                  <button type="button" className="text-button danger" onClick={() => removeItem(item.uiKey)}>
-                    Remove item
+                  <button
+                    type="button"
+                    className="remove-item-button"
+                    onClick={() => removeItem(item.uiKey)}
+                    aria-label={`Remove ${item.role || `item ${index + 1}`}`}
+                    title="Remove item"
+                  >
+                    {"\u00d7"}
                   </button>
                 </div>
 
@@ -1276,7 +1318,7 @@ export default function Home() {
                     />
                     <span>{item.references.length ? "Add another view" : "Upload primary image"}</span>
                   </label>
-                  <span>One PNG, JPEG, or WebP / original preserved</span>
+                  <span>Drop a photo here / original preserved</span>
                 </div>
 
                 {item.analysisStatus === "analyzing" && <div className="investigation-status">Analyzing primary image...</div>}
@@ -1365,35 +1407,7 @@ export default function Home() {
             ))}
           </div>
 
-          <button type="button" className="add-item-button" onClick={addItem}>Add custom item</button>
-
-          <details className="settings-drawer">
-            <summary>Generation settings</summary>
-            <div className="control-grid settings-controls">
-              <label>
-                <span>Output file name</span>
-                <input value={outputFilename} onChange={(event) => setOutputFilename(event.target.value)} />
-              </label>
-              <label>
-                <span>OpenAI API key</span>
-                <input
-                  value={apiKey}
-                  onChange={(event) => setApiKey(event.target.value)}
-                  type="password"
-                  autoComplete="off"
-                  placeholder="Uses hosted key when blank"
-                />
-              </label>
-              <label className="toggle-field wide-field">
-                <input checked={runQa} onChange={(event) => setRunQa(event.target.checked)} type="checkbox" />
-                <span>Run accuracy review after generation</span>
-              </label>
-            </div>
-            <div className="drawer-actions">
-              <button type="button" onClick={() => void restoreSavedDraft()}>Restore saved draft</button>
-              <button type="button" className="danger" onClick={() => void clearSavedDraft()}>Delete saved draft</button>
-            </div>
-          </details>
+          </div>
         </section>
 
         <aside className="output-surface">
@@ -1401,7 +1415,7 @@ export default function Home() {
             <div className="surface-heading output-heading">
               <div>
                 <p className="section-kicker">04</p>
-                <h2>Collage output</h2>
+                <h2>Studio preview</h2>
               </div>
               <span className={isWorking ? "status-pill working" : result ? "status-pill ready" : "status-pill"}>
                 {isWorking ? "Working" : result ? "Complete" : "Ready"}
@@ -1427,9 +1441,6 @@ export default function Home() {
             )}
 
             <div className="primary-actions">
-              <button type="button" className="secondary-button" onClick={dryRun} disabled={isWorking}>
-                Review prompt
-              </button>
               {isWorking ? (
                 <button type="button" className="cancel-button" onClick={cancelWork}>Cancel</button>
               ) : (
@@ -1437,15 +1448,22 @@ export default function Home() {
                   Generate studio collage
                 </button>
               )}
-              {!isWorking && (
-                <button type="button" className="quiet-button" onClick={() => void generate(true, 1)} disabled={!hasFiles}>
-                  Test 1 reference
-                </button>
-              )}
+              <button type="button" className="secondary-button" onClick={dryRun} disabled={isWorking}>
+                Review prompt
+              </button>
               {result && (
                 <a className="download-button" href={result.dataUrl} download={result.filename}>Download PNG</a>
               )}
             </div>
+
+            {!isWorking && (
+              <details className="output-tools">
+                <summary>Troubleshooting</summary>
+                <button type="button" className="quiet-button" onClick={() => void generate(true, 1)} disabled={!hasFiles}>
+                  Test one reference
+                </button>
+              </details>
+            )}
 
             {result?.qa && (
               <section className={`qa-result ${result.qa.passed ? "passed" : "review"}`}>
@@ -1463,7 +1481,7 @@ export default function Home() {
             <div className="activity-log" aria-live="polite">{panelText}</div>
 
             {diagnostics && (
-              <details className="diagnostic-report" open>
+              <details className="diagnostic-report">
                 <summary>Diagnostic report</summary>
                 <div className="diagnostic-summary">
                   <span>{diagnostics.referenceCount} references checked</span>
