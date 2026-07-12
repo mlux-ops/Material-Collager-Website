@@ -34,7 +34,6 @@ type ImageEditRequest = {
   prompt: string;
   references: PreparedReference[];
   mask?: PreparedReference;
-  inputFidelity?: "high";
   size: string;
   quality: CollageRequestInput["quality"];
   background: "opaque";
@@ -192,7 +191,6 @@ export async function POST(request: Request) {
       prompt,
       references: generationReferences,
       mask: editMask,
-      inputFidelity: selectiveEdit ? "high" : undefined,
       size: requestedSize,
       quality: payload.quality,
       background: "opaque",
@@ -302,7 +300,7 @@ async function createImageEdit(apiKey: string, body: ImageEditRequest, diagnosti
       form.append("quality", body.quality);
       form.append("background", body.background);
       form.append("output_format", body.output_format);
-      if (body.inputFidelity) form.append("input_fidelity", body.inputFidelity);
+      // GPT Image 2 uses high-fidelity image inputs automatically and rejects input_fidelity.
       for (const reference of body.references) {
         form.append("image[]", reference.blob, reference.filename);
       }
