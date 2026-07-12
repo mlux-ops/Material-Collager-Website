@@ -1,4 +1,3 @@
-// Intentionally empty by default.
-// Add Drizzle tables here when the site actually needs a database.
-// See examples/d1/db/schema.ts for an opt-in example.
+// Tables are created lazily by the generation-history service so a fresh
+// private deployment can provision its D1 binding without a separate setup step.
 export {};

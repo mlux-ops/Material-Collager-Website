@@ -7,7 +7,7 @@ export const COLLAGE_TYPES = [
 
 export const QUALITIES = ["low", "medium", "high", "auto"] as const;
 export const ORIENTATIONS = ["default", "landscape", "portrait", "square"] as const;
-export const OUTPUT_RESOLUTIONS = ["standard", "studio"] as const;
+export const OUTPUT_RESOLUTIONS = ["standard", "studio", "final"] as const;
 export const COMPOSITIONS = ["editorial", "structured", "catalog"] as const;
 export const DENSITIES = ["airy", "balanced", "layered"] as const;
 export const STYLING_OPTIONS = ["materials_only", "botanical_linen"] as const;
@@ -71,6 +71,8 @@ export type CollageRequestInput = {
   runQa?: boolean;
   qaFeedback?: QaFeedbackInput;
   qaSelection?: QaSelectionInput;
+  layoutReference?: boolean;
+  layoutReferenceFileId?: string;
   items: CollageItemInput[];
 };
 
@@ -200,6 +202,9 @@ export function validateCollageRequest(request: CollageRequestInput) {
   if (totalReferenceCount(request) > MAX_REFERENCE_IMAGES) {
     throw new Error(`Use no more than ${MAX_REFERENCE_IMAGES} reference images in one collage.`);
   }
+  if (request.layoutReference && totalReferenceCount(request) >= MAX_REFERENCE_IMAGES) {
+    throw new Error("A final render can use the approved draft plus up to 15 product references. Remove one supporting view or render without the draft.");
+  }
 
   if (request.heroItemId && !ids.has(request.heroItemId)) {
     throw new Error("Choose a hero item that is still in the board.");
@@ -254,6 +259,11 @@ export function resolvedLighting(request: CollageRequestInput): LightingOption {
 
 export function resolvedSize(request: CollageRequestInput) {
   const orientation = resolvedOrientation(request);
+  if (resolvedOutputResolution(request) === "final") {
+    if (orientation === "portrait") return "1440x2560";
+    if (orientation === "square") return "2048x2048";
+    return "2560x1440";
+  }
   if (resolvedOutputResolution(request) === "standard") {
     if (orientation === "portrait") return "1024x1536";
     if (orientation === "square") return "1024x1024";
@@ -270,7 +280,7 @@ export function buildGenerationPrompt(request: CollageRequestInput) {
     return buildSelectiveCorrectionPrompt(request, items);
   }
   const labels: string[] = [];
-  let nextIndex = 1;
+  let nextIndex = request.layoutReference ? 2 : 1;
   for (const item of items) {
     const count = referenceCount(item);
     const start = nextIndex;
@@ -304,6 +314,10 @@ export function buildGenerationPrompt(request: CollageRequestInput) {
     hero,
     "REFERENCE MAP",
     "Use the uploaded images by their exact order below. The images, not the text labels, are the visual source of truth.",
+    ...(request.layoutReference ? [
+      "Image 1 -> approved draft used only for composition, item placement, scale hierarchy, overlap, camera, lighting direction, and negative space. It is not a product-identity reference.",
+      "Preserve the approved draft composition as closely as possible, but use Images 2 onward as the sole visual truth for product identity, geometry, finish, material, color, and detail. Never copy a draft error over an original reference.",
+    ] : []),
     labels.join("\n"),
     ...(qaCorrection ? ["QA CORRECTION PASS", qaCorrection] : []),
     "REFERENCE FIDELITY - NON-NEGOTIABLE",

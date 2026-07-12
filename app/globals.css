@@ -1673,6 +1673,201 @@ body {
   min-height: 43px;
 }
 
+.draft-button {
+  background: #fff;
+  border-color: var(--warm);
+  color: #9a402f;
+}
+
+.finalize-panel {
+  background: #fff;
+  border: 1px solid #d9c8bd;
+  border-top: 4px solid var(--warm);
+  border-radius: 6px;
+  margin-top: 10px;
+  padding: 10px;
+}
+
+.finalize-heading,
+.final-actions,
+.format-switch {
+  display: grid;
+  gap: 7px;
+}
+
+.finalize-heading {
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.finalize-heading span,
+.finalize-heading strong {
+  display: block;
+}
+
+.finalize-heading > div > span {
+  color: var(--warm);
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.finalize-heading strong {
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.quality-lock {
+  background: #f7e8e3;
+  border-radius: 999px;
+  color: #8a3c2d;
+  font-size: 8px;
+  font-weight: 800;
+  padding: 5px 7px;
+}
+
+.format-switch {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 9px;
+}
+
+.format-switch button {
+  background: #f8faf8;
+  border-color: var(--line);
+  min-height: 48px;
+  padding: 7px;
+  text-align: left;
+}
+
+.format-switch button.selected {
+  background: #eaf4f0;
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.format-switch strong,
+.format-switch span,
+.final-actions small {
+  display: block;
+}
+
+.format-switch strong {
+  font-size: 10px;
+}
+
+.format-switch span,
+.final-actions small {
+  color: var(--muted);
+  font-size: 8px;
+  margin-top: 2px;
+}
+
+.final-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 8px;
+}
+
+.final-actions button {
+  min-height: 48px;
+  padding: 7px;
+}
+
+.final-now-button {
+  background: var(--warm);
+  border-color: var(--warm);
+  color: #fff;
+}
+
+.final-now-button small {
+  color: #fff1ed;
+}
+
+.economy-button {
+  background: #24342d;
+  border-color: #24342d;
+  color: #fff;
+}
+
+.economy-button small {
+  color: #c9d8d0;
+}
+
+.generation-history {
+  border-top: 1px solid var(--line);
+  margin-top: 10px;
+  padding-top: 9px;
+}
+
+.generation-history summary {
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.history-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.history-list article {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  display: grid;
+  gap: 5px 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 7px;
+}
+
+.history-list strong,
+.history-list span,
+.history-list small {
+  display: block;
+}
+
+.history-list strong {
+  font-size: 9px;
+}
+
+.history-list span,
+.history-list small,
+.history-list a,
+.history-list p {
+  font-size: 8px;
+}
+
+.history-list > article > small,
+.history-list p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.history-list a {
+  color: var(--accent-dark);
+  font-weight: 800;
+}
+
+.job-status {
+  background: #eef1ef;
+  border-radius: 999px;
+  padding: 4px 6px;
+  text-transform: capitalize;
+}
+
+.job-status.completed {
+  background: #dff1ea;
+  color: var(--accent-dark);
+}
+
+.job-status.failed,
+.job-status.expired,
+.job-status.cancelled {
+  background: #f7e5e2;
+  color: var(--danger);
+}
+
 .primary-actions .cancel-button {
   background: #fff;
 }

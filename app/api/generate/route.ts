@@ -126,14 +126,12 @@ export async function POST(request: Request) {
       1,
       Math.min(boardReferenceCount, Number(new URL(request.url).searchParams.get("count") || 1)),
     );
-    const expectedReferences = diagnosticMode
+    const expectedProductReferences = diagnosticMode
       ? requestedDiagnosticCount
       : selectiveEdit
         ? selectedReferenceCount
         : boardReferenceCount;
-    if (!directFiles.length || directFiles.length !== expectedReferences) {
-      throw new Error("One or more reference images were missing from the direct generation request.");
-    }
+    const expectedReferences = expectedProductReferences + (!diagnosticMode && !selectiveEdit && payload.layoutReference ? 1 : 0);
 
     const apiKey = resolveOpenAIKey(payload.apiKey);
     const prompt = buildGenerationPrompt(payload);
@@ -142,13 +140,36 @@ export async function POST(request: Request) {
       model: "gpt-image-2",
       transport: "multipart",
       quality: payload.quality,
-      referenceCount: directFiles.length,
+      referenceCount: expectedReferences,
       totalReferenceBytes: 0,
       largestReferenceBytes: 0,
       references: [],
       attempts,
     };
-    const preparedReferences: PreparedReference[] = directFiles.map((file) => ({ blob: file, filename: safeReferenceFilename(file.name) }));
+    const remoteProductReferences = items.flatMap((item) =>
+      (item.imageFileIds ?? []).map((fileId, index) => ({
+        fileId,
+        filename: item.imageNames?.[index] || `${item.id}-${index + 1}.png`,
+      })),
+    );
+    let preparedReferences: PreparedReference[];
+    if (directFiles.length) {
+      if (directFiles.length !== expectedReferences) {
+        throw new Error("One or more reference images were missing from the direct generation request.");
+      }
+      preparedReferences = directFiles.map((file) => ({ blob: file, filename: safeReferenceFilename(file.name) }));
+    } else if (!diagnosticMode && !selectiveEdit && remoteProductReferences.length === boardReferenceCount) {
+      const remoteReferences = payload.layoutReference && payload.layoutReferenceFileId
+        ? [{ fileId: payload.layoutReferenceFileId, filename: "approved-draft.png" }, ...remoteProductReferences]
+        : remoteProductReferences;
+      if (remoteReferences.length !== expectedReferences) {
+        throw new Error("The approved draft or one of its full-quality references is no longer available. Upload it again and retry.");
+      }
+      preparedReferences = await retrieveReferences(apiKey, remoteReferences, attempts);
+    } else {
+      throw new Error("One or more reference images were missing from the generation request.");
+    }
+    const productReferences = payload.layoutReference && !selectiveEdit ? preparedReferences.slice(1) : preparedReferences;
     diagnostics.totalReferenceBytes = preparedReferences.reduce((sum, reference) => sum + reference.blob.size, 0);
     diagnostics.largestReferenceBytes = Math.max(...preparedReferences.map((reference) => reference.blob.size), 0);
     diagnostics.references = preparedReferences.map((reference) => ({
@@ -240,7 +261,7 @@ export async function POST(request: Request) {
       imageResult = await createImageEdit(apiKey, imageRequest, diagnostics.attempts);
     } catch (error) {
       const standardSize = standardSizeFor(payload);
-      if (selectiveEdit || !isRetryableImageError(error) || standardSize === requestedSize) throw error;
+      if (selectiveEdit || payload.outputResolution === "final" || !isRetryableImageError(error) || standardSize === requestedSize) throw error;
       usedStandardFallback = true;
       imageResult = await createImageEdit(apiKey, { ...imageRequest, size: standardSize }, diagnostics.attempts);
     }
@@ -251,7 +272,7 @@ export async function POST(request: Request) {
     }
 
     const reviewed = payload.runQa
-      ? await reviewGeneratedImage(apiKey, payload, imageBase64, preparedReferences, selectedIds)
+      ? await reviewGeneratedImage(apiKey, payload, imageBase64, productReferences, selectedIds)
       : null;
     const qa = reviewed && selectiveEdit
       ? mergeProtectedQa(reviewed, payload, selectedIds)

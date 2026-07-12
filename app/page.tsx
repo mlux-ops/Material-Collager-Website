@@ -151,6 +151,19 @@ type GenerateResponse = {
   isolationResults?: Array<{ referenceCount: number; outcome: "succeeded" | "failed"; requestId?: string; error?: string }>;
 };
 
+type GenerationJob = {
+  id: string;
+  mode: "economy" | "immediate";
+  status: string;
+  filename: string;
+  format: string;
+  estimatedUsd: number | null;
+  usage: Record<string, unknown> | null;
+  qa: QaResult | null;
+  error: string | null;
+  createdAt: number;
+};
+
 type GenerationDiagnostics = {
   model: string;
   transport: string;
@@ -208,6 +221,11 @@ function createReference(file: File, remote?: ReferenceUploadCache, metadata?: P
     provenance: "upload",
     ...metadata,
   };
+}
+
+async function dataUrlFile(dataUrl: string, filename: string) {
+  const response = await fetch(dataUrl);
+  return new File([await response.blob()], filename, { type: "image/png", lastModified: Date.now() });
 }
 
 function FieldLabel({ text, help }: { text: string; help: string }) {
@@ -616,7 +634,7 @@ export default function Home() {
   const [lighting, setLighting] = useState<LightingOption>("soft_daylight");
   const [heroItemId, setHeroItemId] = useState("");
   const [outputFilename, setOutputFilename] = useState("material-collage.png");
-  const [apiKey, setApiKey] = useState("");
+  const apiKey = "";
   const [runQa, setRunQa] = useState(true);
   const [items, setItems] = useState<UiItem[]>(() => presetItems("bathroom_fixture_collage"));
   const [panelText, setPanelText] = useState("Board ready.");
@@ -627,7 +645,9 @@ export default function Home() {
   const [overallProgress, setOverallProgress] = useState(0);
   const [referenceProgress, setReferenceProgress] = useState<Record<string, number>>({});
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
-  const [result, setResult] = useState<{ dataUrl: string; filename: string; qa: QaResult | null } | null>(null);
+  const [result, setResult] = useState<{ dataUrl: string; filename: string; qa: QaResult | null; kind: "draft" | "studio" | "final" } | null>(null);
+  const [finalFormat, setFinalFormat] = useState<"landscape" | "square">("landscape");
+  const [jobs, setJobs] = useState<GenerationJob[]>([]);
   const [qaRedoSelection, setQaRedoSelection] = useState<Record<string, boolean>>({});
   const hasLoadedDraft = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -674,6 +694,12 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    void refreshJobs();
+    const interval = window.setInterval(() => void refreshJobs(), 30000);
+    return () => window.clearInterval(interval);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -1123,6 +1149,105 @@ export default function Home() {
     };
   }
 
+  async function refreshJobs() {
+    try {
+      const response = await fetch("/api/economy", { cache: "no-store" })
+        .then((value) => readApiResponse<{ ok: boolean; error?: string; jobs: GenerationJob[] }>(value));
+      setJobs(response.jobs);
+    } catch {
+      // History remains optional in local development before storage bindings exist.
+    }
+  }
+
+  async function ensureFullQualityReferenceIds(controller: AbortController) {
+    const fingerprint = await credentialFingerprint(apiKey);
+    const fileIds = new Map<string, string>();
+    const references = items.flatMap((item) => item.references.map((reference) => ({ itemKey: item.uiKey, reference })));
+    let complete = 0;
+    for (const entry of references) {
+      const cached = entry.reference.remote;
+      if (cached?.credentialFingerprint === fingerprint && cached.fileFingerprint === fileFingerprint(entry.reference.file)) {
+        fileIds.set(entry.reference.uiKey, cached.fileId);
+      } else {
+        setWorkingStage(`Uploading full-quality references ${complete + 1}/${references.length}`);
+        const fileId = await uploadReferenceFile(entry.reference.file, apiKey, controller.signal, (progress) => {
+          setReferenceProgress((current) => ({ ...current, [entry.reference.uiKey]: progress }));
+        });
+        const remote = { fileId, credentialFingerprint: fingerprint, fileFingerprint: fileFingerprint(entry.reference.file) };
+        updateReferenceRemote(entry.itemKey, entry.reference.uiKey, remote);
+        fileIds.set(entry.reference.uiKey, fileId);
+      }
+      complete += 1;
+      setOverallProgress(Math.round((complete / Math.max(references.length + 1, 1)) * 100));
+    }
+    return fileIds;
+  }
+
+  async function finalizeDraft(mode: "immediate" | "economy") {
+    if (!result) return;
+    if (totalReferences > 15) {
+      setPanelText("Final rendering can use the approved draft plus up to 15 product references. Remove one supporting view and retry.");
+      return;
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setIsWorking(true);
+    setOverallProgress(0);
+    setReferenceProgress({});
+    try {
+      const fileIds = await ensureFullQualityReferenceIds(controller);
+      setWorkingStage("Uploading approved composition");
+      const layoutFile = await dataUrlFile(result.dataUrl, "approved-draft.png");
+      const layoutFileId = await uploadReferenceFile(layoutFile, apiKey, controller.signal, (progress) => {
+        setOverallProgress(Math.round(90 + progress * 10));
+      });
+      const payload: CollageRequestInput = {
+        ...makePayload(false, fileIds),
+        orientation: finalFormat,
+        quality: "high",
+        outputResolution: "final",
+        runQa: true,
+        layoutReference: true,
+        layoutReferenceFileId: layoutFileId,
+      };
+      validateCollageRequest(payload);
+      if (mode === "economy") {
+        setWorkingStage("Sending final render to Economy");
+        const queued = await fetch("/api/economy", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({ payload }),
+        }).then((value) => readApiResponse<{ ok: boolean; error?: string; jobId: string; status: string; estimatedUsd: number }>(value));
+        setPanelText(`Final render queued in Economy. Estimated generation cost: $${queued.estimatedUsd.toFixed(2)} plus reference input. It will remain in History for 30 days.`);
+        await refreshJobs();
+        return;
+      }
+      setWorkingStage("Rendering final at maximum quality");
+      const form = new FormData();
+      form.append("payload", JSON.stringify(payload));
+      const response = await fetch("/api/generate", { method: "POST", signal: controller.signal, body: form })
+        .then((value) => readApiResponse<GenerateResponse>(value));
+      if (!response.imageBase64) throw new Error("Final rendering completed without an image.");
+      const dataUrl = `data:${response.mimeType || "image/png"};base64,${response.imageBase64}`;
+      setResult({ dataUrl, filename: response.filename || outputFilename, qa: response.qa ?? null, kind: "final" });
+      setQaRedoSelection(Object.fromEntries((response.qa?.items ?? []).map((item) => [item.id, !item.passed && Boolean(item.box)])));
+      setPromptPreview(response.prompt || "");
+      setDiagnostics(response.diagnostics ?? null);
+      setPanelText(`Final ${finalFormat} render complete at ${finalFormat === "square" ? "2048x2048" : "2560x1440"}. Full-quality product references were used.`);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setPanelText("Final rendering cancelled. Your draft and references are unchanged.");
+      } else {
+        setPanelText(`Final rendering failed: ${error instanceof Error ? error.message : "Unknown error."}`);
+      }
+    } finally {
+      setIsWorking(false);
+      setWorkingStage("");
+      abortRef.current = null;
+    }
+  }
+
   async function dryRun() {
     setIsWorking(true);
     setWorkingStage("Reviewing board");
@@ -1146,7 +1271,7 @@ export default function Home() {
     }
   }
 
-  async function generate(diagnosticMode = false, diagnosticCount = 1, qaRedo?: QaRedoRequest) {
+  async function generate(diagnosticMode = false, diagnosticCount = 1, qaRedo?: QaRedoRequest, renderPreset?: "draft") {
     const qaFeedback = qaRedo?.feedback;
     const controller = new AbortController();
     abortRef.current = controller;
@@ -1157,7 +1282,7 @@ export default function Home() {
     }
     setPromptPreview("");
     setOverallProgress(0);
-    setWorkingStage(qaRedo ? "Preparing selective QA mask" : "Checking references");
+    setWorkingStage(qaRedo ? "Preparing selective QA mask" : renderPreset === "draft" ? "Preparing quick draft" : "Checking references");
     let transportFilesForReport: File[] | null = null;
     let selectiveAssets: SelectiveEditAssets | undefined;
     const selectiveReferenceCount = qaRedo ? items.reduce((count, item, index) => (
@@ -1171,14 +1296,17 @@ export default function Home() {
         }
         selectiveAssets = await createSelectiveEditAssets(qaRedo);
       }
-      const validationPayload = makePayload(false, undefined, qaFeedback, selectiveAssets?.selection);
+      const renderPayload = (payload: CollageRequestInput): CollageRequestInput => renderPreset === "draft"
+        ? { ...payload, quality: "low", outputResolution: "standard", runQa: false }
+        : payload;
+      const validationPayload = renderPayload(makePayload(false, undefined, qaFeedback, selectiveAssets?.selection));
       validateCollageRequest(validationPayload);
       const references = items.flatMap((item, index) =>
         item.references.map((reference) => ({ itemKey: item.uiKey, itemId: resolvedItemId(item, index), reference })),
       );
       setOverallProgress(100);
       setWorkingStage(qaRedo ? "Repairing selected items" : runQa ? "Composing and reviewing collage" : "Composing collage");
-      const payload = makePayload(true, undefined, qaFeedback, selectiveAssets?.selection);
+      const payload = renderPayload(makePayload(true, undefined, qaFeedback, selectiveAssets?.selection));
       const form = new FormData();
       form.append("payload", JSON.stringify(payload));
       if (selectiveAssets) {
@@ -1211,6 +1339,7 @@ export default function Home() {
             dataUrl: `data:${response.mimeType || "image/png"};base64,${response.imageBase64}`,
             filename: response.filename || "isolation-test.png",
             qa: null,
+            kind: "studio",
           });
         }
         const resultText = (response.isolationResults ?? [])
@@ -1238,10 +1367,11 @@ export default function Home() {
         dataUrl,
         filename: response.filename || outputFilename || "material-collage.png",
         qa,
+        kind: renderPreset === "draft" ? "draft" : qaRedo ? (result?.kind || "studio") : "studio",
       });
       setQaRedoSelection(Object.fromEntries((qa?.items ?? []).map((item) => [item.id, !item.passed && Boolean(item.box)])));
       setPromptPreview(response.prompt || "");
-      setPanelText(`${response.summary || "Collage generated."}${qaRedo ? "\n\nOnly the checked QA regions were regenerated; protected pixels were restored from the previous collage." : ""}${response.notice ? `\n\n${response.notice}` : ""}`);
+      setPanelText(`${renderPreset === "draft" ? "Draft ready. Review the composition, then choose an immediate or Economy final render below." : response.summary || "Collage generated."}${qaRedo ? "\n\nOnly the checked QA regions were regenerated; protected pixels were restored from the previous collage." : ""}${response.notice ? `\n\n${response.notice}` : ""}`);
       setDiagnostics(response.diagnostics ?? null);
       await saveDraft(false);
     } catch (error) {
@@ -1441,16 +1571,6 @@ export default function Home() {
               <label>
                 <span>Output file name</span>
                 <input value={outputFilename} onChange={(event) => setOutputFilename(event.target.value)} />
-              </label>
-              <label>
-                <span>OpenAI API key</span>
-                <input
-                  value={apiKey}
-                  onChange={(event) => setApiKey(event.target.value)}
-                  type="password"
-                  autoComplete="off"
-                  placeholder="Uses hosted key when blank"
-                />
               </label>
               <label className="toggle-field wide-field">
                 <input checked={runQa} onChange={(event) => setRunQa(event.target.checked)} type="checkbox" />
@@ -1716,6 +1836,9 @@ export default function Home() {
                   Generate studio collage
                 </button>
               )}
+              <button type="button" className="draft-button" onClick={() => void generate(false, 1, undefined, "draft")} disabled={isWorking || !hasFiles}>
+                Generate quick draft
+              </button>
               <button type="button" className="secondary-button" onClick={dryRun} disabled={isWorking}>
                 Review prompt
               </button>
@@ -1723,6 +1846,36 @@ export default function Home() {
                 <a className="download-button" href={result.dataUrl} download={result.filename}>Download PNG</a>
               )}
             </div>
+
+            {result && result.kind !== "final" && (
+              <section className="finalize-panel">
+                <div className="finalize-heading">
+                  <div>
+                    <span>Ready to finish</span>
+                    <strong>Use this image as the composition guide</strong>
+                  </div>
+                  <span className="quality-lock">Maximum quality</span>
+                </div>
+                <div className="format-switch" role="group" aria-label="Final image format">
+                  <button type="button" className={finalFormat === "landscape" ? "selected" : ""} onClick={() => setFinalFormat("landscape")}>
+                    <strong>Landscape</strong><span>2560 x 1440</span>
+                  </button>
+                  <button type="button" className={finalFormat === "square" ? "selected" : ""} onClick={() => setFinalFormat("square")}>
+                    <strong>Square</strong><span>2048 x 2048</span>
+                  </button>
+                </div>
+                <div className="final-actions">
+                  <button type="button" className="final-now-button" onClick={() => void finalizeDraft("immediate")} disabled={isWorking}>
+                    Render final now
+                    <small>{finalFormat === "square" ? "Est. $0.21" : "Est. $0.17"} + references</small>
+                  </button>
+                  <button type="button" className="economy-button" onClick={() => void finalizeDraft("economy")} disabled={isWorking}>
+                    Send final to Economy
+                    <small>{finalFormat === "square" ? "Est. $0.11" : "Est. $0.08"} + references / up to 24h</small>
+                  </button>
+                </div>
+              </section>
+            )}
 
             {!isWorking && (
               <details className="output-tools">
@@ -1806,6 +1959,29 @@ export default function Home() {
               <details className="prompt-drawer">
                 <summary>Generation prompt</summary>
                 <pre>{promptPreview}</pre>
+              </details>
+            )}
+
+            {jobs.length > 0 && (
+              <details className="generation-history" open={jobs.some((job) => !["completed", "failed", "expired", "cancelled"].includes(job.status))}>
+                <summary>Final render history</summary>
+                <div className="history-list">
+                  {jobs.map((job) => (
+                    <article key={job.id}>
+                      <div>
+                        <strong>{job.mode === "economy" ? "Economy final" : "Final render"}</strong>
+                        <span>{job.format} / {new Date(job.createdAt).toLocaleString()}</span>
+                      </div>
+                      <span className={`job-status ${job.status}`}>{job.status.replaceAll("_", " ")}</span>
+                      {job.status === "completed" && (
+                        <a href={`/api/economy/output/${job.id}`} download={job.filename}>Open PNG</a>
+                      )}
+                      {job.estimatedUsd !== null && <small>Est. ${job.estimatedUsd.toFixed(2)} + reference input</small>}
+                      {job.qa && <small>Accuracy review: {job.qa.reviewFailed ? "unavailable" : `${job.qa.score}/100`}</small>}
+                      {job.error && <p>{job.error}</p>}
+                    </article>
+                  ))}
+                </div>
               </details>
             )}
           </div>
