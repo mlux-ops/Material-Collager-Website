@@ -2527,7 +2527,7 @@ body {
 }
 
 .library-empty-preview {
-  align-items: end;
+  align-items: center;
   display: grid;
   gap: 22px;
   grid-template-columns: minmax(280px, 62vw) minmax(180px, 280px);
