@@ -111,15 +111,27 @@ export async function POST(request: Request) {
 
     const items = activeItems(payload);
     const directFiles = incoming.getAll("image[]").filter((value): value is File => value instanceof File);
+    const selectedIds = new Set(payload.qaSelection?.itemIds ?? []);
+    const selectiveEdit = selectedIds.size > 0;
     const boardReferenceCount = items.reduce(
       (total, item) => total + Math.max(item.imageNames?.length ?? 0, item.imageFileIds?.length ?? 0),
+      0,
+    );
+    const selectedReferenceCount = items.reduce(
+      (total, item) => selectedIds.has(item.id)
+        ? total + Math.max(item.imageNames?.length ?? 0, item.imageFileIds?.length ?? 0)
+        : total,
       0,
     );
     const requestedDiagnosticCount = Math.max(
       1,
       Math.min(boardReferenceCount, Number(new URL(request.url).searchParams.get("count") || 1)),
     );
-    const expectedReferences = diagnosticMode ? requestedDiagnosticCount : boardReferenceCount;
+    const expectedReferences = diagnosticMode
+      ? requestedDiagnosticCount
+      : selectiveEdit
+        ? selectedReferenceCount
+        : boardReferenceCount;
     if (!directFiles.length || directFiles.length !== expectedReferences) {
       throw new Error("One or more reference images were missing from the direct generation request.");
     }
@@ -145,8 +157,6 @@ export async function POST(request: Request) {
       bytes: reference.blob.size,
       mimeType: reference.blob.type,
     }));
-    const selectedIds = new Set(payload.qaSelection?.itemIds ?? []);
-    const selectiveEdit = selectedIds.size > 0;
     let generationReferences = preparedReferences;
     let editMask: PreparedReference | undefined;
     let requestedSize = resolvedSize(payload);
@@ -165,11 +175,10 @@ export async function POST(request: Request) {
       if (!validEditDimension(width) || !validEditDimension(height) || width / height < 1 / 3 || width / height > 3) {
         throw new Error("The selective QA edit has unsupported canvas dimensions.");
       }
-      const selectedReferences = selectItemReferences(payload, preparedReferences, selectedIds);
-      if (!selectedReferences.length) throw new Error("Select at least one referenced item to re-render.");
+      if (!preparedReferences.length) throw new Error("Select at least one referenced item to re-render.");
       generationReferences = [
         { blob: baseImage, filename: baseImage.type === "image/jpeg" ? "current-collage.jpg" : "current-collage.png" },
-        ...selectedReferences,
+        ...preparedReferences,
       ];
       if (generationReferences.length > 16) {
         throw new Error("This correction selects too many supporting views. Uncheck an item or remove one supporting view.");
@@ -394,21 +403,6 @@ function validEditDimension(value: number) {
   return Number.isInteger(value) && value >= 256 && value <= 3840 && value % 16 === 0;
 }
 
-function selectItemReferences(
-  payload: CollageRequestInput,
-  references: PreparedReference[],
-  selectedIds: Set<string>,
-) {
-  const selected: PreparedReference[] = [];
-  let offset = 0;
-  for (const item of activeItems(payload)) {
-    const count = referenceCount(item);
-    if (selectedIds.has(item.id)) selected.push(...references.slice(offset, offset + count));
-    offset += count;
-  }
-  return selected;
-}
-
 function mergeProtectedQa(review: QaReview, payload: CollageRequestInput, selectedIds: Set<string>): QaReview {
   const previousById = new Map((payload.qaFeedback?.items ?? []).map((item) => [item.id, item]));
   const reviewedById = new Map(review.items.map((item) => [item.id, item]));
@@ -459,8 +453,11 @@ async function reviewGeneratedImage(
   selectedIds = new Set<string>(),
 ): Promise<QaReview> {
   const expectedItems = activeItems(payload);
+  const referenceItems = selectedIds.size
+    ? expectedItems.filter((item) => selectedIds.has(item.id))
+    : expectedItems;
   let nextReference = 1;
-  const itemMap = expectedItems.map((item) => {
+  const itemMap = referenceItems.map((item) => {
     const count = referenceCount(item);
     const start = nextReference;
     const end = nextReference + count - 1;

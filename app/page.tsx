@@ -184,6 +184,8 @@ class ApiResponseError extends Error {
 
 const REFERENCE_CHUNK_BYTES = 4 * 1024 * 1024;
 const DIRECT_REQUEST_REFERENCE_BUDGET = 700 * 1024;
+const SELECTIVE_EDIT_BASE_BUDGET = 420 * 1024;
+const SELECTIVE_EDIT_REFERENCE_BUDGET = 250 * 1024;
 const DRAFT_DB_NAME = "material-collager-drafts";
 const DRAFT_STORE_NAME = "drafts";
 const CURRENT_DRAFT_KEY = "current";
@@ -262,9 +264,9 @@ async function compressedEditBase(image: HTMLImageElement) {
   const context = canvas.getContext("2d");
   if (!context) throw new Error("This browser cannot prepare the current collage for editing.");
   context.drawImage(image, 0, 0);
-  let blob = await canvasBlob(canvas, "image/jpeg", 0.9);
-  for (const quality of [0.82, 0.74, 0.66]) {
-    if (blob.size <= 1.8 * 1024 * 1024) break;
+  let blob = await canvasBlob(canvas, "image/jpeg", 0.86);
+  for (const quality of [0.76, 0.66, 0.56, 0.48, 0.4, 0.34]) {
+    if (blob.size <= SELECTIVE_EDIT_BASE_BUDGET) break;
     blob = await canvasBlob(canvas, "image/jpeg", quality);
   }
   return blob;
@@ -392,11 +394,11 @@ async function compositeSelectiveEdit(
   return canvas.toDataURL("image/png");
 }
 
-async function optimizeReferencesForTransport(files: File[]) {
+async function optimizeReferencesForTransport(files: File[], budget = DIRECT_REQUEST_REFERENCE_BUDGET) {
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
-  if (totalBytes <= DIRECT_REQUEST_REFERENCE_BUDGET) return files;
+  if (totalBytes <= budget) return files;
 
-  const targetBytes = Math.floor(DIRECT_REQUEST_REFERENCE_BUDGET / Math.max(files.length, 1));
+  const targetBytes = Math.floor(budget / Math.max(files.length, 1));
   return Promise.all(files.map((file) => optimizeReferenceForTransport(file, targetBytes)));
 }
 
@@ -1158,21 +1160,21 @@ export default function Home() {
     setWorkingStage(qaRedo ? "Preparing selective QA mask" : "Checking references");
     let transportFilesForReport: File[] | null = null;
     let selectiveAssets: SelectiveEditAssets | undefined;
+    const selectiveReferenceCount = qaRedo ? items.reduce((count, item, index) => (
+      qaRedo.itemIds.includes(resolvedItemId(item, index)) ? count + item.references.length : count
+    ), 0) : 0;
 
     try {
       if (qaRedo) {
-        const selectedReferenceCount = items.reduce((count, item, index) => (
-          qaRedo.itemIds.includes(resolvedItemId(item, index)) ? count + item.references.length : count
-        ), 0);
-        if (selectedReferenceCount > 15) {
+        if (selectiveReferenceCount > 15) {
           throw new Error("The selected items use more than 15 correction views. Uncheck an item or remove one supporting view.");
         }
         selectiveAssets = await createSelectiveEditAssets(qaRedo);
       }
       const validationPayload = makePayload(false, undefined, qaFeedback, selectiveAssets?.selection);
       validateCollageRequest(validationPayload);
-      const references = items.flatMap((item) =>
-        item.references.map((reference) => ({ itemKey: item.uiKey, itemId: item.id, reference })),
+      const references = items.flatMap((item, index) =>
+        item.references.map((reference) => ({ itemKey: item.uiKey, itemId: resolvedItemId(item, index), reference })),
       );
       setOverallProgress(100);
       setWorkingStage(qaRedo ? "Repairing selected items" : runQa ? "Composing and reviewing collage" : "Composing collage");
@@ -1183,10 +1185,15 @@ export default function Home() {
         form.append("baseImage", selectiveAssets.baseFile, selectiveAssets.baseFile.name);
         form.append("mask", selectiveAssets.maskFile, selectiveAssets.maskFile.name);
       }
-      const referencesToSend = diagnosticMode ? references.slice(0, diagnosticCount) : references;
+      const referencesToSend = diagnosticMode
+        ? references.slice(0, diagnosticCount)
+        : qaRedo
+          ? references.filter((entry) => qaRedo.itemIds.includes(entry.itemId))
+          : references;
       setWorkingStage("Optimizing references for direct generation");
       const transportFiles = await optimizeReferencesForTransport(
         referencesToSend.map((entry) => entry.reference.file),
+        qaRedo ? SELECTIVE_EDIT_REFERENCE_BUDGET : DIRECT_REQUEST_REFERENCE_BUDGET,
       );
       transportFilesForReport = transportFiles;
       for (const file of transportFiles) form.append("image[]", file, file.name);
@@ -1249,7 +1256,8 @@ export default function Home() {
             model: "gpt-image-2",
             transport: "multipart",
             quality: diagnosticMode ? "low" : quality,
-            referenceCount: diagnosticMode ? Math.min(diagnosticCount, totalReferences) : totalReferences,
+            referenceCount: transportFilesForReport?.length
+              ?? (diagnosticMode ? Math.min(diagnosticCount, totalReferences) : qaRedo ? selectiveReferenceCount : totalReferences),
             totalReferenceBytes: transportFilesForReport?.reduce((sum, file) => sum + file.size, 0) ?? totalReferenceBytes,
             largestReferenceBytes: Math.max(
               ...(transportFilesForReport?.map((file) => file.size)
