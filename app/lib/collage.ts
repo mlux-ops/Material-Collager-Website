@@ -73,6 +73,8 @@ export type CollageRequestInput = {
   qaSelection?: QaSelectionInput;
   layoutReference?: boolean;
   layoutReferenceFileId?: string;
+  renderKind?: "draft" | "studio" | "final" | "repair";
+  libraryJobId?: string;
   items: CollageItemInput[];
 };
 

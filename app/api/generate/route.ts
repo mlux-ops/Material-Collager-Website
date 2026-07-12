@@ -14,6 +14,7 @@ import {
   readOpenAIResponse,
   resolveOpenAIKey,
 } from "@/app/lib/openai-server";
+import { persistGenerationOutput, type RenderKind } from "@/app/lib/generation-jobs";
 
 export const runtime = "edge";
 
@@ -277,6 +278,26 @@ export async function POST(request: Request) {
     const qa = reviewed && selectiveEdit
       ? mergeProtectedQa(reviewed, payload, selectedIds)
       : reviewed;
+    const renderKind: RenderKind = payload.renderKind
+      ?? (payload.outputResolution === "final" ? "final" : selectiveEdit ? "repair" : "studio");
+    let stored: Awaited<ReturnType<typeof persistGenerationOutput>> | null = null;
+    let storageNotice = "";
+    try {
+      stored = await persistGenerationOutput({
+        imageBase64,
+        filename: safeOutputFilename(payload.outputFilename),
+        format: usedStandardFallback ? standardSizeFor(payload) : requestedSize,
+        prompt,
+        payload: payload as unknown as Record<string, unknown>,
+        usage: imageJson.usage,
+        qa: qa as unknown as Record<string, unknown> | null,
+        renderKind,
+        collageType: payload.collageType,
+        replaceJobId: selectiveEdit ? payload.libraryJobId : undefined,
+      });
+    } catch (storageError) {
+      storageNotice = `The collage was generated, but could not be added to 30-day history: ${storageError instanceof Error ? storageError.message : "storage unavailable"}`;
+    }
 
     return Response.json({
       ok: true,
@@ -288,11 +309,14 @@ export async function POST(request: Request) {
       qa,
       selectiveEdit,
       usage: imageJson.usage,
-      notice: usedStandardFallback
+      jobId: stored?.id,
+      libraryVisible: stored?.libraryVisible ?? false,
+      renderKind,
+      notice: [usedStandardFallback
         ? "OpenAI could not complete the Studio 2K render, so the board was generated at the standard resolution without changing reference fidelity or render quality."
         : imageAttempts > 1
           ? `OpenAI completed the collage after ${imageAttempts} attempts.`
-          : undefined,
+          : "", storageNotice].filter(Boolean).join(" ") || undefined,
       diagnostics,
     });
   } catch (error) {

@@ -1,1992 +1,301 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  COLLAGE_TYPES,
-  COMPOSITIONS,
-  DENSITIES,
-  ITEM_PRESETS,
-  LIGHTING_OPTIONS,
-  MAX_REFERENCE_FILE_BYTES,
-  MAX_REFERENCE_IMAGES,
-  ORIENTATIONS,
-  OUTPUT_RESOLUTIONS,
-  QUALITIES,
-  STYLING_OPTIONS,
-  labelFor,
-  resolvedSize,
-  slugify,
-  validateCollageRequest,
-  type CollageItemInput,
-  type CollageRequestInput,
-  type CollageType,
-  type Composition,
-  type Density,
-  type LightingOption,
-  type Orientation,
-  type OutputResolution,
-  type Quality,
-  type QaSelectionInput,
-  type StylingOption,
-} from "@/app/lib/collage";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type WheelEvent } from "react";
 
-type ReferenceUploadCache = {
-  fileId: string;
-  credentialFingerprint: string;
-  fileFingerprint: string;
-};
-
-type UiReference = {
-  uiKey: string;
-  file: File;
-  preview: string;
-  remote?: ReferenceUploadCache;
-  primary?: boolean;
-  sourceUrl?: string;
-  sourceLabel?: string;
-  provenance?: "upload" | "investigation";
-};
-
-type AnalysisField = { value: string; confidence: number };
-type ReferenceAnalysis = {
-  itemType: AnalysisField;
-  brand: AnalysisField;
-  product: AnalysisField;
-  finish: AnalysisField;
-  notes: AnalysisField;
-  searchQuery: string;
-};
-
-type ReferenceCandidate = {
+type LibraryItem = {
+  id: string;
   title: string;
-  pageUrl: string;
-  imageUrl: string;
-  sourceLabel: string;
-  official: boolean;
-  confidence: number;
-  reason: string;
-};
-
-type UiItem = Omit<CollageItemInput, "imageKeys" | "imageNames" | "imageFileIds"> & {
-  uiKey: string;
-  references: UiReference[];
-  analysis?: ReferenceAnalysis;
-  analysisStatus?: "idle" | "analyzing" | "ready" | "error";
-  matchStatus?: "idle" | "searching" | "ready" | "error";
-  candidates?: ReferenceCandidate[];
-};
-
-type DraftReference = Omit<UiReference, "preview">;
-
-type DraftItem = Omit<CollageItemInput, "imageKeys" | "imageNames" | "imageFileIds"> & {
-  uiKey?: string;
-  references?: DraftReference[];
-  files?: File[];
-  analysis?: ReferenceAnalysis;
-};
-
-type SavedDraft = {
-  version?: number;
-  collageType: CollageType;
-  orientation: Orientation;
-  quality: Quality;
-  outputResolution?: OutputResolution;
-  composition?: Composition;
-  density?: Density;
-  styling?: StylingOption;
-  lighting?: LightingOption;
-  heroItemId?: string;
-  outputFilename: string;
-  runQa: boolean;
-  items: DraftItem[];
-  savedAt: number;
-};
-
-type NormalizedBox = [number, number, number, number];
-
-type QaItemResult = {
-  id: string;
-  passed: boolean;
-  finding: string;
-  box?: NormalizedBox;
-};
-
-type QaResult = {
-  passed: boolean;
-  score: number;
-  findings: string[];
-  recommendation: string;
-  items: QaItemResult[];
-  reviewFailed?: boolean;
-};
-
-type QaRedoRequest = {
-  feedback: QaResult;
-  itemIds: string[];
-  sourceDataUrl: string;
-};
-
-type SelectiveEditAssets = {
-  baseFile: File;
-  maskFile: File;
-  boxes: NormalizedBox[];
-  protectedBoxes: NormalizedBox[];
-  selection: QaSelectionInput;
-};
-
-type GenerateResponse = {
-  ok: boolean;
-  error?: string;
-  code?: string;
-  summary?: string;
-  prompt?: string;
-  imageBase64?: string;
-  mimeType?: string;
-  filename?: string;
-  notice?: string;
-  qa?: QaResult | null;
-  diagnostics?: GenerationDiagnostics;
-  diagnosticComplete?: boolean;
-  isolationResults?: Array<{ referenceCount: number; outcome: "succeeded" | "failed"; requestId?: string; error?: string }>;
-};
-
-type GenerationJob = {
-  id: string;
-  mode: "economy" | "immediate";
-  status: string;
   filename: string;
   format: string;
-  estimatedUsd: number | null;
-  usage: Record<string, unknown> | null;
-  qa: QaResult | null;
-  error: string | null;
+  renderKind: "draft" | "studio" | "final" | "repair";
+  collageType: string;
+  mode: "economy" | "immediate";
+  qa: { score?: number; passed?: boolean } | null;
   createdAt: number;
+  imageUrl: string;
 };
 
-type GenerationDiagnostics = {
-  model: string;
-  transport: string;
-  quality: string;
-  referenceCount: number;
-  totalReferenceBytes: number;
-  largestReferenceBytes: number;
-  references: Array<{ filename: string; bytes: number; mimeType: string }>;
-  attempts: Array<{
-    stage: string;
-    outcome: string;
-    attempt: number;
-    durationMs: number;
-    size?: string;
-    status?: number;
-    code?: string;
-    requestId?: string;
-    error?: string;
-  }>;
-};
+type LibraryResponse = { ok: boolean; error?: string; items?: LibraryItem[] };
 
-class ApiResponseError extends Error {
-  payload: Record<string, unknown>;
+export default function LibraryPage() {
+  const [items, setItems] = useState<LibraryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [view, setView] = useState<"overview" | "index">("overview");
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [selected, setSelected] = useState<LibraryItem | null>(null);
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const cardRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const dragRef = useRef({ active: false, startX: 0, scrollLeft: 0, moved: false });
 
-  constructor(message: string, payload: Record<string, unknown>) {
-    super(message);
-    this.name = "ApiResponseError";
-    this.payload = payload;
-  }
-}
-
-const REFERENCE_CHUNK_BYTES = 4 * 1024 * 1024;
-const DIRECT_REQUEST_REFERENCE_BUDGET = 700 * 1024;
-const SELECTIVE_EDIT_BASE_BUDGET = 420 * 1024;
-const SELECTIVE_EDIT_REFERENCE_BUDGET = 250 * 1024;
-const DRAFT_DB_NAME = "material-collager-drafts";
-const DRAFT_STORE_NAME = "drafts";
-const CURRENT_DRAFT_KEY = "current";
-
-function createUiKey() {
-  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
-}
-
-function fileFingerprint(file: File) {
-  return `${file.name}:${file.size}:${file.lastModified}:${file.type}`;
-}
-
-function createReference(file: File, remote?: ReferenceUploadCache, metadata?: Partial<UiReference>): UiReference {
-  return {
-    uiKey: createUiKey(),
-    file,
-    preview: URL.createObjectURL(file),
-    remote,
-    primary: false,
-    provenance: "upload",
-    ...metadata,
-  };
-}
-
-async function dataUrlFile(dataUrl: string, filename: string) {
-  const response = await fetch(dataUrl);
-  return new File([await response.blob()], filename, { type: "image/png", lastModified: Date.now() });
-}
-
-function FieldLabel({ text, help }: { text: string; help: string }) {
-  return (
-    <span className="field-label">
-      {text}
-      <span className="help-wrap">
-        <button type="button" className="help-button" aria-label={`${text}: ${help}`}>?</button>
-        <span className="field-help" role="tooltip">{help}</span>
-      </span>
-    </span>
-  );
-}
-
-function formatBytes(bytes: number) {
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
-}
-
-function resolvedItemId(item: UiItem, index: number) {
-  return item.id || slugify(item.role || `item_${index + 1}`);
-}
-
-function expandedBox(box: NormalizedBox, padding = 24): NormalizedBox {
-  const [x, y, width, height] = box;
-  const left = Math.max(0, x - padding);
-  const top = Math.max(0, y - padding);
-  const right = Math.min(1000, x + width + padding);
-  const bottom = Math.min(1000, y + height + padding);
-  return [left, top, right - left, bottom - top];
-}
-
-async function loadCanvasImage(source: string) {
-  const image = new Image();
-  image.decoding = "async";
-  await new Promise<void>((resolve, reject) => {
-    image.onload = () => resolve();
-    image.onerror = () => reject(new Error("The collage image could not be prepared for selective editing."));
-    image.src = source;
-  });
-  return image;
-}
-
-function canvasBlob(canvas: HTMLCanvasElement, type = "image/png", quality?: number) {
-  return new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("The selective edit image could not be created.")), type, quality);
-  });
-}
-
-async function compressedEditBase(image: HTMLImageElement) {
-  const canvas = document.createElement("canvas");
-  canvas.width = image.naturalWidth;
-  canvas.height = image.naturalHeight;
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("This browser cannot prepare the current collage for editing.");
-  context.drawImage(image, 0, 0);
-  let blob = await canvasBlob(canvas, "image/jpeg", 0.86);
-  for (const quality of [0.76, 0.66, 0.56, 0.48, 0.4, 0.34]) {
-    if (blob.size <= SELECTIVE_EDIT_BASE_BUDGET) break;
-    blob = await canvasBlob(canvas, "image/jpeg", quality);
-  }
-  return blob;
-}
-
-async function createSelectiveEditAssets(request: QaRedoRequest): Promise<SelectiveEditAssets> {
-  const selected = new Set(request.itemIds);
-  const boxes = request.feedback.items
-    .filter((item) => selected.has(item.id))
-    .map((item) => item.box ? expandedBox(item.box) : undefined);
-  if (boxes.some((box) => !box) || boxes.length !== selected.size) {
-    throw new Error("QA could not locate every selected item. Generate once more to refresh the item map.");
-  }
-
-  const normalizedBoxes = boxes as NormalizedBox[];
-  const protectedBoxes = request.feedback.items
-    .filter((item) => !selected.has(item.id) && item.box)
-    .map((item) => expandedBox(item.box as NormalizedBox, 12));
-  const sourceImage = await loadCanvasImage(request.sourceDataUrl);
-  const width = sourceImage.naturalWidth;
-  const height = sourceImage.naturalHeight;
-  if (!width || !height || width % 16 !== 0 || height % 16 !== 0) {
-    throw new Error("The current collage dimensions cannot be used for a masked correction.");
-  }
-
-  const maskCanvas = document.createElement("canvas");
-  maskCanvas.width = width;
-  maskCanvas.height = height;
-  const maskContext = maskCanvas.getContext("2d");
-  if (!maskContext) throw new Error("This browser cannot create a selective edit mask.");
-  maskContext.fillStyle = "#000";
-  maskContext.fillRect(0, 0, width, height);
-  for (const [x, y, boxWidth, boxHeight] of normalizedBoxes) {
-    maskContext.clearRect(
-      Math.floor(x / 1000 * width),
-      Math.floor(y / 1000 * height),
-      Math.ceil(boxWidth / 1000 * width),
-      Math.ceil(boxHeight / 1000 * height),
-    );
-  }
-  maskContext.fillStyle = "#000";
-  for (const [x, y, boxWidth, boxHeight] of protectedBoxes) {
-    maskContext.fillRect(
-      Math.floor(x / 1000 * width),
-      Math.floor(y / 1000 * height),
-      Math.ceil(boxWidth / 1000 * width),
-      Math.ceil(boxHeight / 1000 * height),
-    );
-  }
-
-  const [baseBlob, maskBlob] = await Promise.all([compressedEditBase(sourceImage), canvasBlob(maskCanvas)]);
-  return {
-    baseFile: new File([baseBlob], "current-collage.jpg", { type: "image/jpeg", lastModified: Date.now() }),
-    maskFile: new File([maskBlob], "qa-edit-mask.png", { type: "image/png", lastModified: Date.now() }),
-    boxes: normalizedBoxes,
-    protectedBoxes,
-    selection: { itemIds: request.itemIds, baseWidth: width, baseHeight: height },
-  };
-}
-
-async function compositeSelectiveEdit(
-  originalSource: string,
-  editedSource: string,
-  boxes: NormalizedBox[],
-  protectedBoxes: NormalizedBox[],
-) {
-  const [original, edited] = await Promise.all([loadCanvasImage(originalSource), loadCanvasImage(editedSource)]);
-  const width = original.naturalWidth;
-  const height = original.naturalHeight;
-  const canvas = document.createElement("canvas");
-  const editedLayer = document.createElement("canvas");
-  const hardMask = document.createElement("canvas");
-  const coreMask = document.createElement("canvas");
-  const blendMask = document.createElement("canvas");
-  for (const target of [canvas, editedLayer, hardMask, coreMask, blendMask]) {
-    target.width = width;
-    target.height = height;
-  }
-  const context = canvas.getContext("2d");
-  const editedContext = editedLayer.getContext("2d");
-  const hardContext = hardMask.getContext("2d");
-  const coreContext = coreMask.getContext("2d");
-  const blendContext = blendMask.getContext("2d");
-  if (!context || !editedContext || !hardContext || !coreContext || !blendContext) {
-    throw new Error("This browser cannot merge the selective QA correction.");
-  }
-
-  const feather = Math.max(8, Math.min(28, Math.round(Math.min(width, height) * 0.009)));
-  hardContext.fillStyle = "#fff";
-  coreContext.fillStyle = "#fff";
-  for (const [x, y, boxWidth, boxHeight] of boxes) {
-    const left = Math.floor(x / 1000 * width);
-    const top = Math.floor(y / 1000 * height);
-    const pixelWidth = Math.ceil(boxWidth / 1000 * width);
-    const pixelHeight = Math.ceil(boxHeight / 1000 * height);
-    hardContext.fillRect(left, top, pixelWidth, pixelHeight);
-    const inset = Math.min(feather, Math.floor(pixelWidth / 4), Math.floor(pixelHeight / 4));
-    coreContext.fillRect(left + inset, top + inset, Math.max(1, pixelWidth - inset * 2), Math.max(1, pixelHeight - inset * 2));
-  }
-  for (const maskContext of [hardContext, coreContext]) {
-    maskContext.globalCompositeOperation = "destination-out";
-    for (const [x, y, boxWidth, boxHeight] of protectedBoxes) {
-      maskContext.fillRect(
-        Math.floor(x / 1000 * width),
-        Math.floor(y / 1000 * height),
-        Math.ceil(boxWidth / 1000 * width),
-        Math.ceil(boxHeight / 1000 * height),
-      );
+  const loadLibrary = useCallback(async () => {
+    try {
+      const response = await fetch("/api/library", { cache: "no-store" });
+      const payload = await response.json() as LibraryResponse;
+      if (!response.ok || !payload.ok) throw new Error(payload.error || "The Library could not be loaded.");
+      setItems(payload.items ?? []);
+      setError("");
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "The Library could not be loaded.");
+    } finally {
+      setLoading(false);
     }
-    maskContext.globalCompositeOperation = "source-over";
-  }
-
-  blendContext.filter = `blur(${feather}px)`;
-  blendContext.drawImage(coreMask, 0, 0);
-  blendContext.filter = "none";
-  blendContext.globalCompositeOperation = "destination-in";
-  blendContext.drawImage(hardMask, 0, 0);
-
-  editedContext.drawImage(edited, 0, 0, width, height);
-  editedContext.globalCompositeOperation = "destination-in";
-  editedContext.drawImage(blendMask, 0, 0);
-
-  context.drawImage(original, 0, 0, width, height);
-  context.drawImage(editedLayer, 0, 0);
-  return canvas.toDataURL("image/png");
-}
-
-async function optimizeReferencesForTransport(files: File[], budget = DIRECT_REQUEST_REFERENCE_BUDGET) {
-  const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
-  if (totalBytes <= budget) return files;
-
-  const targetBytes = Math.floor(budget / Math.max(files.length, 1));
-  return Promise.all(files.map((file) => optimizeReferenceForTransport(file, targetBytes)));
-}
-
-async function optimizeReferenceForTransport(file: File, targetBytes: number) {
-  if (file.size <= targetBytes) return file;
-
-  const bitmap = await createImageBitmap(file);
-  let scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));
-  let best: Blob | null = null;
-
-  try {
-    for (let pass = 0; pass < 4; pass += 1) {
-      const width = Math.max(1, Math.round(bitmap.width * scale));
-      const height = Math.max(1, Math.round(bitmap.height * scale));
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const context = canvas.getContext("2d", { alpha: false });
-      if (!context) throw new Error(`Could not prepare ${file.name} for generation.`);
-      context.fillStyle = "#ffffff";
-      context.fillRect(0, 0, width, height);
-      context.drawImage(bitmap, 0, 0, width, height);
-
-      for (const quality of [0.92, 0.86, 0.8, 0.74, 0.68]) {
-        const blob = await new Promise<Blob>((resolve, reject) =>
-          canvas.toBlob(
-            (value) => value ? resolve(value) : reject(new Error(`Could not optimize ${file.name}.`)),
-            "image/jpeg",
-            quality,
-          ),
-        );
-        best = !best || blob.size < best.size ? blob : best;
-        if (blob.size <= targetBytes) return transportFile(blob, file.name);
-      }
-      scale *= 0.78;
-    }
-  } finally {
-    bitmap.close();
-  }
-
-  if (!best) throw new Error(`Could not optimize ${file.name}.`);
-  return transportFile(best, file.name);
-}
-
-function transportFile(blob: Blob, originalName: string) {
-  const base = originalName.replace(/\.[^.]+$/, "") || "reference";
-  return new File([blob], `${base}-optimized.jpg`, { type: "image/jpeg", lastModified: Date.now() });
-}
-
-function openDraftDatabase(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DRAFT_DB_NAME, 1);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(DRAFT_STORE_NAME)) {
-        db.createObjectStore(DRAFT_STORE_NAME);
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("Could not open saved drafts."));
-  });
-}
-
-async function readSavedDraft() {
-  const db = await openDraftDatabase();
-  return new Promise<SavedDraft | null>((resolve, reject) => {
-    const transaction = db.transaction(DRAFT_STORE_NAME, "readonly");
-    const request = transaction.objectStore(DRAFT_STORE_NAME).get(CURRENT_DRAFT_KEY);
-    request.onsuccess = () => resolve((request.result as SavedDraft | undefined) ?? null);
-    request.onerror = () => reject(request.error || new Error("Could not read saved draft."));
-    transaction.oncomplete = () => db.close();
-    transaction.onerror = () => {
-      db.close();
-      reject(transaction.error || new Error("Could not read saved draft."));
-    };
-  });
-}
-
-async function writeSavedDraft(draft: SavedDraft) {
-  const db = await openDraftDatabase();
-  return new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction(DRAFT_STORE_NAME, "readwrite");
-    transaction.objectStore(DRAFT_STORE_NAME).put(draft, CURRENT_DRAFT_KEY);
-    transaction.oncomplete = () => {
-      db.close();
-      resolve();
-    };
-    transaction.onerror = () => {
-      db.close();
-      reject(transaction.error || new Error("Could not save draft."));
-    };
-  });
-}
-
-async function removeSavedDraft() {
-  const db = await openDraftDatabase();
-  return new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction(DRAFT_STORE_NAME, "readwrite");
-    transaction.objectStore(DRAFT_STORE_NAME).delete(CURRENT_DRAFT_KEY);
-    transaction.oncomplete = () => {
-      db.close();
-      resolve();
-    };
-    transaction.onerror = () => {
-      db.close();
-      reject(transaction.error || new Error("Could not clear saved draft."));
-    };
-  });
-}
-
-function presetItems(type: CollageType): UiItem[] {
-  return ITEM_PRESETS[type].map((item) => ({
-    ...item,
-    uiKey: createUiKey(),
-    brand: "",
-    name: "",
-    finish: "",
-    notes: "",
-    references: [],
-  }));
-}
-
-async function credentialFingerprint(apiKey: string) {
-  const trimmed = apiKey.trim();
-  if (!trimmed) return "server-key";
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(trimmed));
-  return Array.from(new Uint8Array(digest).slice(0, 12), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-async function readApiResponse<T extends { ok: boolean; error?: string }>(response: Response): Promise<T> {
-  const contentType = response.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) {
-    const payload = (await response.json()) as T;
-    if (!response.ok || !payload.ok) {
-      throw new ApiResponseError(
-        payload.error || `Request failed with status ${response.status}.`,
-        { ...(payload as Record<string, unknown>), status: response.status },
-      );
-    }
-    return payload;
-  }
-
-  const text = (await response.text()).trim();
-  if (response.status === 413 || /payload too large/i.test(text)) {
-    throw new Error("A reference chunk was rejected by the host. The original files are still saved in your draft.");
-  }
-  throw new Error(text || `Request failed with status ${response.status}.`);
-}
-
-async function uploadReferenceFile(
-  file: File,
-  apiKey: string,
-  signal: AbortSignal,
-  onProgress: (progress: number) => void,
-) {
-  const started = await fetch("/api/references/start", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    signal,
-    body: JSON.stringify({
-      apiKey,
-      filename: file.name,
-      bytes: file.size,
-      mimeType: file.type,
-    }),
-  }).then((response) => readApiResponse<{ ok: boolean; error?: string; uploadId: string }>(response));
-
-  const chunks = Array.from({ length: Math.ceil(file.size / REFERENCE_CHUNK_BYTES) }, (_, index) => ({
-    index,
-    start: index * REFERENCE_CHUNK_BYTES,
-    end: Math.min(file.size, (index + 1) * REFERENCE_CHUNK_BYTES),
-  }));
-  const partIds = new Array<string>(chunks.length);
-  let uploadedBytes = 0;
-
-  for (let batchStart = 0; batchStart < chunks.length; batchStart += 2) {
-    const batch = chunks.slice(batchStart, batchStart + 2);
-    await Promise.all(
-      batch.map(async (chunk) => {
-        const data = file.slice(chunk.start, chunk.end, "application/octet-stream");
-        const form = new FormData();
-        form.append("apiKey", apiKey);
-        form.append("uploadId", started.uploadId);
-        form.append("data", data, `${file.name}.part-${chunk.index + 1}`);
-        const part = await fetch("/api/references/part", {
-          method: "POST",
-          body: form,
-          signal,
-        }).then((response) => readApiResponse<{ ok: boolean; error?: string; partId: string }>(response));
-        partIds[chunk.index] = part.partId;
-        uploadedBytes += chunk.end - chunk.start;
-        onProgress(Math.min(0.98, uploadedBytes / file.size));
-      }),
-    );
-  }
-
-  const completed = await fetch("/api/references/complete", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    signal,
-    body: JSON.stringify({ apiKey, uploadId: started.uploadId, partIds }),
-  }).then((response) => readApiResponse<{ ok: boolean; error?: string; fileId: string }>(response));
-  onProgress(1);
-  return completed.fileId;
-}
-
-export default function Home() {
-  const [collageType, setCollageType] = useState<CollageType>("bathroom_fixture_collage");
-  const [orientation, setOrientation] = useState<Orientation>("default");
-  const [quality, setQuality] = useState<Quality>("high");
-  const [outputResolution, setOutputResolution] = useState<OutputResolution>("studio");
-  const [composition, setComposition] = useState<Composition>("editorial");
-  const [density, setDensity] = useState<Density>("balanced");
-  const [styling, setStyling] = useState<StylingOption>("botanical_linen");
-  const [lighting, setLighting] = useState<LightingOption>("soft_daylight");
-  const [heroItemId, setHeroItemId] = useState("");
-  const [outputFilename, setOutputFilename] = useState("material-collage.png");
-  const apiKey = "";
-  const [runQa, setRunQa] = useState(true);
-  const [items, setItems] = useState<UiItem[]>(() => presetItems("bathroom_fixture_collage"));
-  const [panelText, setPanelText] = useState("Board ready.");
-  const [diagnostics, setDiagnostics] = useState<GenerationDiagnostics | null>(null);
-  const [promptPreview, setPromptPreview] = useState("");
-  const [isWorking, setIsWorking] = useState(false);
-  const [workingStage, setWorkingStage] = useState("");
-  const [overallProgress, setOverallProgress] = useState(0);
-  const [referenceProgress, setReferenceProgress] = useState<Record<string, number>>({});
-  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
-  const [result, setResult] = useState<{ dataUrl: string; filename: string; qa: QaResult | null; kind: "draft" | "studio" | "final" } | null>(null);
-  const [finalFormat, setFinalFormat] = useState<"landscape" | "square">("landscape");
-  const [jobs, setJobs] = useState<GenerationJob[]>([]);
-  const [qaRedoSelection, setQaRedoSelection] = useState<Record<string, boolean>>({});
-  const hasLoadedDraft = useRef(false);
-  const abortRef = useRef<AbortController | null>(null);
-
-  const totalReferences = useMemo(
-    () => items.reduce((total, item) => total + item.references.length, 0),
-    [items],
-  );
-  const totalReferenceBytes = useMemo(
-    () => items.reduce((total, item) => total + item.references.reduce((sum, ref) => sum + ref.file.size, 0), 0),
-    [items],
-  );
-  const hasFiles = totalReferences > 0;
-  const heroOptions = useMemo(() => items.filter((item) => item.references.length > 0), [items]);
-  const selectedQaItemIds = (result?.qa?.items ?? [])
-    .filter((item) => qaRedoSelection[item.id])
-    .map((item) => item.id);
-  const selectedQaRegions = (result?.qa?.items ?? []).filter((item) => qaRedoSelection[item.id] && item.box);
-  const [previewWidth, previewHeight] = resolvedSize({ collageType, orientation, quality, outputResolution, items: [] })
-    .split("x")
-    .map(Number);
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    void navigator.storage?.persist?.();
-    readSavedDraft()
-      .then((draft) => {
-        if (cancelled) return;
-        if (draft) {
-          restoreDraft(draft);
-          setPanelText(`Draft restored from ${new Date(draft.savedAt).toLocaleString()}.`);
-          setLastSavedAt(draft.savedAt);
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setPanelText(`Draft storage is unavailable: ${error instanceof Error ? error.message : "Could not read draft."}`);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) hasLoadedDraft.current = true;
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    void refreshJobs();
-    const interval = window.setInterval(() => void refreshJobs(), 30000);
+    void loadLibrary();
+    const interval = window.setInterval(() => void loadLibrary(), 30000);
     return () => window.clearInterval(interval);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loadLibrary]);
 
   useEffect(() => {
-    if (!hasLoadedDraft.current) return;
-    const timeout = window.setTimeout(() => {
-      void saveDraft(false);
-    }, 900);
-    return () => window.clearTimeout(timeout);
-  }, [ // eslint-disable-line react-hooks/exhaustive-deps
-    collageType,
-    orientation,
-    quality,
-    outputResolution,
-    composition,
-    density,
-    styling,
-    lighting,
-    heroItemId,
-    outputFilename,
-    runQa,
-    items,
-  ]);
-
-  function revokeItemPreviews(currentItems: UiItem[]) {
-    for (const item of currentItems) {
-      for (const reference of item.references) URL.revokeObjectURL(reference.preview);
-    }
-  }
-
-  function changeType(nextType: CollageType) {
-    if (hasFiles && !window.confirm("Change board type and remove the references currently on this board?")) return;
-    setItems((current) => {
-      revokeItemPreviews(current);
-      return presetItems(nextType);
-    });
-    setCollageType(nextType);
-    setOrientation("default");
-    setStyling(nextType === "appliance_collage" ? "materials_only" : "botanical_linen");
-    setHeroItemId("");
-    setResult(null);
-    setDiagnostics(null);
-    setPromptPreview("");
-    setPanelText("Board ready.");
-  }
-
-  function resetPreset() {
-    if (hasFiles && !window.confirm("Reset this board and remove its current references?")) return;
-    setItems((current) => {
-      revokeItemPreviews(current);
-      return presetItems(collageType);
-    });
-    setHeroItemId("");
-    setResult(null);
-    setPromptPreview("");
-    setPanelText("Preset reset.");
-  }
-
-  function updateItem(itemKey: string, patch: Partial<UiItem>) {
-    setItems((current) => current.map((item) => (item.uiKey === itemKey ? { ...item, ...patch } : item)));
-  }
-
-  function applyAnalysisSuggestion(itemKey: string, field: "role" | "brand" | "name" | "finish" | "notes", value: string) {
-    setItems((current) => current.map((item) => {
-      if (item.uiKey !== itemKey || item[field]?.trim()) return item;
-      return { ...item, [field]: value };
-    }));
-  }
-
-  async function analyzePrimaryReference(itemKey: string, file: File) {
-    const currentItem = items.find((item) => item.uiKey === itemKey);
-    if (!currentItem) return;
-    updateItem(itemKey, { analysisStatus: "analyzing", candidates: [], matchStatus: "idle" });
-    try {
-      const optimized = await optimizeReferenceForTransport(file, 450 * 1024);
-      const form = new FormData();
-      form.append("apiKey", apiKey);
-      form.append("itemType", currentItem.role);
-      form.append("image", optimized, optimized.name);
-      const response = await fetch("/api/references/analyze", { method: "POST", body: form })
-        .then((value) => readApiResponse<{ ok: boolean; error?: string; analysis: ReferenceAnalysis }>(value));
-      setItems((current) => current.map((item) => item.uiKey === itemKey ? {
-        ...item,
-        role: item.role.trim() || (response.analysis.itemType.confidence >= 70 ? response.analysis.itemType.value : ""),
-        brand: item.brand?.trim() ? item.brand : (response.analysis.brand.confidence >= 70 ? response.analysis.brand.value : ""),
-        name: item.name?.trim() ? item.name : (response.analysis.product.confidence >= 70 ? response.analysis.product.value : ""),
-        finish: item.finish?.trim() ? item.finish : (response.analysis.finish.confidence >= 70 ? response.analysis.finish.value : ""),
-        notes: item.notes?.trim() ? item.notes : (response.analysis.notes.confidence >= 70 ? response.analysis.notes.value : ""),
-        analysis: response.analysis,
-        analysisStatus: "ready",
-      } : item));
-      setPanelText(`Reference analyzed for ${currentItem.role || "this item"}. Review the suggested details before generating.`);
-    } catch (error) {
-      updateItem(itemKey, { analysisStatus: "error" });
-      setPanelText(`Reference analysis failed: ${error instanceof Error ? error.message : "Could not analyze image."}`);
-    }
-  }
-
-  async function findReferenceMatches(itemKey: string) {
-    const item = items.find((candidate) => candidate.uiKey === itemKey);
-    if (!item?.analysis?.searchQuery) return;
-    updateItem(itemKey, { matchStatus: "searching", candidates: [] });
-    try {
-      const response = await fetch("/api/references/matches", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey, query: item.analysis.searchQuery, itemType: item.role }),
-      }).then((value) => readApiResponse<{ ok: boolean; error?: string; candidates: ReferenceCandidate[] }>(value));
-      updateItem(itemKey, { matchStatus: "ready", candidates: response.candidates });
-      setPanelText(response.candidates.length ? "Possible references found. Review each source before adding it." : "No reliable matching references were found.");
-    } catch (error) {
-      updateItem(itemKey, { matchStatus: "error" });
-      setPanelText(`Reference search failed: ${error instanceof Error ? error.message : "Could not search references."}`);
-    }
-  }
-
-  async function acceptReferenceCandidate(itemKey: string, candidate: ReferenceCandidate) {
-    if (!candidate.imageUrl) return;
-    if (totalReferences >= MAX_REFERENCE_IMAGES) {
-      setPanelText(`This board can use up to ${MAX_REFERENCE_IMAGES} reference images. Remove one before adding this suggestion.`);
-      return;
-    }
-    try {
-      const response = await fetch("/api/references/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageUrl: candidate.imageUrl }),
-      });
-      if (!response.ok) {
-        const payload = await response.json() as { error?: string };
-        throw new Error(payload.error || "Could not import suggested image.");
+    if (!selected) return;
+    const previousOverflow = document.body.style.overflow;
+    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    document.body.style.overflow = "hidden";
+    const dialog = dialogRef.current;
+    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>("button, a[href], [tabindex]:not([tabindex='-1'])") ?? []);
+    focusable()[0]?.focus();
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setSelected(null);
+      if (event.key !== "Tab") return;
+      const controls = focusable();
+      if (!controls.length) return;
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
       }
-      const blob = await response.blob();
-      const extension = blob.type === "image/png" ? "png" : blob.type === "image/webp" ? "webp" : "jpg";
-      const file = new File([blob], `${slugify(candidate.title)}.${extension}`, { type: blob.type, lastModified: Date.now() });
-      setItems((current) => current.map((item) => item.uiKey === itemKey ? {
-        ...item,
-        references: [...item.references, createReference(file, undefined, {
-          sourceUrl: candidate.pageUrl,
-          sourceLabel: candidate.sourceLabel,
-          provenance: "investigation",
-        })],
-        candidates: item.candidates?.filter((entry) => entry.pageUrl !== candidate.pageUrl),
-      } : item));
-      setPanelText(`${candidate.title} added as a supporting reference.`);
-    } catch (error) {
-      setPanelText(`Suggested reference could not be added: ${error instanceof Error ? error.message : "Import failed."}`);
-    }
-  }
-
-  function addItem() {
-    setItems((current) => [
-      ...current,
-      {
-        id: `item_${current.length + 1}`,
-        role: "",
-        brand: "",
-        name: "",
-        finish: "",
-        notes: "",
-        required: true,
-        uiKey: createUiKey(),
-        references: [],
-      },
-    ]);
-  }
-
-  function removeItem(itemKey: string) {
-    const item = items.find((candidate) => candidate.uiKey === itemKey);
-    if (!item) return;
-    if (item.references.length > 0 && !window.confirm(`Remove ${item.id || item.role} and its reference images?`)) return;
-    for (const reference of item.references) URL.revokeObjectURL(reference.preview);
-    setItems((current) => current.filter((candidate) => candidate.uiKey !== itemKey));
-    if (heroItemId === item.id) setHeroItemId("");
-  }
-
-  function addReferences(itemKey: string, fileList: FileList | null) {
-    const files = Array.from(fileList ?? []);
-    if (!files.length) return;
-    if (totalReferences + files.length > MAX_REFERENCE_IMAGES) {
-      setPanelText(`This board can use up to ${MAX_REFERENCE_IMAGES} reference images. Remove a reference before adding this batch.`);
-      return;
-    }
-    const invalid = files.find(
-      (file) => !["image/png", "image/jpeg", "image/webp"].includes(file.type) || file.size >= MAX_REFERENCE_FILE_BYTES,
-    );
-    if (invalid) {
-      setPanelText(`${invalid.name} must be a PNG, JPEG, or WebP image under 50 MB.`);
-      return;
-    }
-
-    const currentItem = items.find((item) => item.uiKey === itemKey);
-    const isPrimaryUpload = !currentItem?.references.length;
-    setItems((current) =>
-      current.map((item) =>
-        item.uiKey === itemKey
-          ? {
-              ...item,
-              references: [...item.references, ...files.map((file, index) => createReference(file, undefined, {
-                primary: isPrimaryUpload && index === 0,
-              }))],
-            }
-          : item,
-      ),
-    );
-    setPanelText(`${files.length} reference image${files.length === 1 ? "" : "s"} added.`);
-    if (isPrimaryUpload) void analyzePrimaryReference(itemKey, files[0]);
-  }
-
-  function replaceReference(itemKey: string, referenceKey: string, fileList: FileList | null) {
-    const file = fileList?.[0];
-    if (!file) return;
-    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type) || file.size >= MAX_REFERENCE_FILE_BYTES) {
-      setPanelText(`${file.name} must be a PNG, JPEG, or WebP image under 50 MB.`);
-      return;
-    }
-    const item = items.find((candidate) => candidate.uiKey === itemKey);
-    const existing = item?.references.find((reference) => reference.uiKey === referenceKey);
-    if (!existing) return;
-    URL.revokeObjectURL(existing.preview);
-    const replacement = createReference(file, undefined, { primary: existing.primary, provenance: "upload" });
-    setItems((current) => current.map((candidate) => candidate.uiKey === itemKey ? {
-      ...candidate,
-      references: candidate.references.map((reference) => reference.uiKey === referenceKey ? replacement : reference),
-    } : candidate));
-    if (existing.primary || item?.references[0]?.uiKey === referenceKey) void analyzePrimaryReference(itemKey, file);
-  }
-
-  function removeReference(itemKey: string, referenceKey: string) {
-    const item = items.find((candidate) => candidate.uiKey === itemKey);
-    if (item?.id === heroItemId && item.references.length === 1) setHeroItemId("");
-    const removedPrimary = item?.references[0]?.uiKey === referenceKey;
-    const nextPrimary = removedPrimary ? item?.references.find((reference) => reference.uiKey !== referenceKey) : undefined;
-    setItems((current) =>
-      current.map((item) => {
-        if (item.uiKey !== itemKey) return item;
-        const reference = item.references.find((candidate) => candidate.uiKey === referenceKey);
-        if (reference) URL.revokeObjectURL(reference.preview);
-        const references = item.references.filter((candidate) => candidate.uiKey !== referenceKey);
-        return {
-          ...item,
-          references: references.map((candidate, index) => ({ ...candidate, primary: index === 0 })),
-          ...(references.length ? {} : { analysis: undefined, analysisStatus: "idle" as const, candidates: [], matchStatus: "idle" as const }),
-        };
-      }),
-    );
-    setReferenceProgress((current) => {
-      const next = { ...current };
-      delete next[referenceKey];
-      return next;
-    });
-    if (nextPrimary) void analyzePrimaryReference(itemKey, nextPrimary.file);
-  }
-
-  function makePrimary(itemKey: string, referenceKey: string) {
-    const selectedFile = items
-      .find((item) => item.uiKey === itemKey)
-      ?.references.find((reference) => reference.uiKey === referenceKey)?.file;
-    setItems((current) =>
-      current.map((item) => {
-        if (item.uiKey !== itemKey) return item;
-        const selected = item.references.find((reference) => reference.uiKey === referenceKey);
-        if (!selected) return item;
-        return {
-          ...item,
-          references: [
-            { ...selected, primary: true },
-            ...item.references.filter((reference) => reference.uiKey !== referenceKey).map((reference) => ({ ...reference, primary: false })),
-          ],
-        };
-      }),
-    );
-    if (selectedFile) void analyzePrimaryReference(itemKey, selectedFile);
-  }
-
-  function updateReferenceRemote(itemKey: string, referenceKey: string, remote: ReferenceUploadCache) {
-    setItems((current) =>
-      current.map((item) =>
-        item.uiKey === itemKey
-          ? {
-              ...item,
-              references: item.references.map((reference) =>
-                reference.uiKey === referenceKey ? { ...reference, remote } : reference,
-              ),
-            }
-          : item,
-      ),
-    );
-  }
-
-  function makeDraft(): SavedDraft {
-    return {
-      version: 2,
-      collageType,
-      orientation,
-      quality,
-      outputResolution,
-      composition,
-      density,
-      styling,
-      lighting,
-      heroItemId,
-      outputFilename,
-      runQa,
-      savedAt: Date.now(),
-      items: items.map((item) => ({
-        id: item.id,
-        role: item.role,
-        brand: item.brand,
-        name: item.name,
-        finish: item.finish,
-        notes: item.notes,
-        required: item.required,
-        uiKey: item.uiKey,
-        analysis: item.analysis,
-        references: item.references.map((reference) => ({
-          uiKey: reference.uiKey,
-          file: reference.file,
-          remote: reference.remote,
-          primary: reference.primary,
-          sourceUrl: reference.sourceUrl,
-          sourceLabel: reference.sourceLabel,
-          provenance: reference.provenance,
-        })),
-      })),
     };
-  }
-
-  function restoreDraft(draft: SavedDraft) {
-    setItems((current) => {
-      revokeItemPreviews(current);
-      return draft.items.map((item) => {
-        const savedReferences: DraftReference[] = item.references?.length
-          ? item.references
-          : (item.files ?? []).map((file) => ({ uiKey: createUiKey(), file, primary: false, provenance: "upload" }));
-        return {
-          id: item.id,
-          role: item.role,
-          brand: item.brand ?? "",
-          name: item.name ?? "",
-          finish: item.finish ?? "",
-          notes: item.notes ?? "",
-          required: item.required,
-          uiKey: item.uiKey || createUiKey(),
-          analysis: item.analysis,
-          analysisStatus: item.analysis ? "ready" : "idle",
-          references: savedReferences
-            .sort((left, right) => Number(Boolean(right.primary)) - Number(Boolean(left.primary)))
-            .map((reference, index) => ({
-              ...reference,
-              primary: index === 0,
-              uiKey: reference.uiKey || createUiKey(),
-              preview: URL.createObjectURL(reference.file),
-            })),
-        };
-      });
-    });
-    setCollageType(draft.collageType);
-    setOrientation(draft.orientation);
-    setQuality(draft.quality);
-    setOutputResolution(draft.outputResolution ?? "studio");
-    setComposition(draft.composition ?? "editorial");
-    setDensity(draft.density ?? "balanced");
-    setStyling(draft.collageType === "appliance_collage" ? "materials_only" : (draft.styling ?? "botanical_linen"));
-    setLighting(draft.lighting ?? "soft_daylight");
-    setHeroItemId(draft.heroItemId ?? "");
-    setOutputFilename(draft.outputFilename);
-    setRunQa(draft.runQa ?? true);
-    setResult(null);
-    setPromptPreview("");
-  }
-
-  async function saveDraft(showMessage: boolean) {
-    try {
-      const draft = makeDraft();
-      await writeSavedDraft(draft);
-      setLastSavedAt(draft.savedAt);
-      if (showMessage) setPanelText("Draft saved with its full-quality reference images in this browser.");
-    } catch (error) {
-      setPanelText(`Draft save failed: ${error instanceof Error ? error.message : "Browser storage is full."}`);
-    }
-  }
-
-  async function restoreSavedDraft() {
-    try {
-      const draft = await readSavedDraft();
-      if (!draft) {
-        setPanelText("No saved draft was found in this browser.");
-        return;
-      }
-      restoreDraft(draft);
-      setLastSavedAt(draft.savedAt);
-      setPanelText(`Draft restored from ${new Date(draft.savedAt).toLocaleString()}.`);
-    } catch (error) {
-      setPanelText(`Draft restore failed: ${error instanceof Error ? error.message : "Could not restore draft."}`);
-    }
-  }
-
-  async function clearSavedDraft() {
-    try {
-      await removeSavedDraft();
-      setLastSavedAt(null);
-      setPanelText("Saved browser draft deleted. The current board is unchanged.");
-    } catch (error) {
-      setPanelText(`Draft deletion failed: ${error instanceof Error ? error.message : "Could not delete draft."}`);
-    }
-  }
-
-  function makePayload(
-    includeApiKey: boolean,
-    fileIdsByReference?: Map<string, string>,
-    qaFeedback?: QaResult,
-    qaSelection?: QaSelectionInput,
-  ): CollageRequestInput {
-    return {
-      collageType,
-      orientation,
-      quality,
-      outputResolution,
-      composition,
-      density,
-      styling: collageType === "appliance_collage" ? "materials_only" : styling,
-      lighting,
-      heroItemId: heroItemId || undefined,
-      outputFilename,
-      apiKey: includeApiKey ? apiKey : "",
-      runQa: qaFeedback ? true : runQa,
-      qaFeedback: qaFeedback ? {
-        score: qaFeedback.score,
-        findings: qaFeedback.findings,
-        recommendation: qaFeedback.recommendation,
-        items: qaFeedback.items,
-      } : undefined,
-      qaSelection,
-      items: items.map((item, index) => ({
-        id: resolvedItemId(item, index),
-        role: item.role,
-        brand: item.brand,
-        name: item.name,
-        finish: item.finish,
-        notes: item.notes,
-        required: item.required,
-        imageNames: item.references.map((reference) => reference.file.name),
-        imageFileIds: fileIdsByReference
-          ? item.references.map((reference) => fileIdsByReference.get(reference.uiKey) || "").filter(Boolean)
-          : undefined,
-      })),
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+      returnFocusRef.current?.focus();
     };
-  }
+  }, [selected]);
 
-  async function refreshJobs() {
-    try {
-      const response = await fetch("/api/economy", { cache: "no-store" })
-        .then((value) => readApiResponse<{ ok: boolean; error?: string; jobs: GenerationJob[] }>(value));
-      setJobs(response.jobs);
-    } catch {
-      // History remains optional in local development before storage bindings exist.
-    }
-  }
-
-  async function ensureFullQualityReferenceIds(controller: AbortController) {
-    const fingerprint = await credentialFingerprint(apiKey);
-    const fileIds = new Map<string, string>();
-    const references = items.flatMap((item) => item.references.map((reference) => ({ itemKey: item.uiKey, reference })));
-    let complete = 0;
-    for (const entry of references) {
-      const cached = entry.reference.remote;
-      if (cached?.credentialFingerprint === fingerprint && cached.fileFingerprint === fileFingerprint(entry.reference.file)) {
-        fileIds.set(entry.reference.uiKey, cached.fileId);
-      } else {
-        setWorkingStage(`Uploading full-quality references ${complete + 1}/${references.length}`);
-        const fileId = await uploadReferenceFile(entry.reference.file, apiKey, controller.signal, (progress) => {
-          setReferenceProgress((current) => ({ ...current, [entry.reference.uiKey]: progress }));
-        });
-        const remote = { fileId, credentialFingerprint: fingerprint, fileFingerprint: fileFingerprint(entry.reference.file) };
-        updateReferenceRemote(entry.itemKey, entry.reference.uiKey, remote);
-        fileIds.set(entry.reference.uiKey, fileId);
+  function updateActiveIndex() {
+    const track = trackRef.current;
+    if (!track || !items.length) return;
+    const center = track.getBoundingClientRect().left + track.clientWidth / 2;
+    let nearest = 0;
+    let distance = Number.POSITIVE_INFINITY;
+    cardRefs.current.forEach((card, index) => {
+      if (!card) return;
+      const rect = card.getBoundingClientRect();
+      const nextDistance = Math.abs(rect.left + rect.width / 2 - center);
+      if (nextDistance < distance) {
+        distance = nextDistance;
+        nearest = index;
       }
-      complete += 1;
-      setOverallProgress(Math.round((complete / Math.max(references.length + 1, 1)) * 100));
-    }
-    return fileIds;
+    });
+    setActiveIndex(nearest);
   }
 
-  async function finalizeDraft(mode: "immediate" | "economy") {
-    if (!result) return;
-    if (totalReferences > 15) {
-      setPanelText("Final rendering can use the approved draft plus up to 15 product references. Remove one supporting view and retry.");
+  function scrollToIndex(index: number) {
+    const target = Math.max(0, Math.min(items.length - 1, index));
+    cardRefs.current[target]?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+    setActiveIndex(target);
+  }
+
+  function onTrackWheel(event: WheelEvent<HTMLDivElement>) {
+    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    event.preventDefault();
+    event.currentTarget.scrollBy({ left: event.deltaY, behavior: "auto" });
+  }
+
+  function onTrackKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "ArrowRight") scrollToIndex(activeIndex + 1);
+    else if (event.key === "ArrowLeft") scrollToIndex(activeIndex - 1);
+    else if (event.key === "Home") scrollToIndex(0);
+    else if (event.key === "End") scrollToIndex(items.length - 1);
+    else return;
+    event.preventDefault();
+  }
+
+  function onPointerDown(event: PointerEvent<HTMLDivElement>) {
+    const track = event.currentTarget;
+    dragRef.current = { active: true, startX: event.clientX, scrollLeft: track.scrollLeft, moved: false };
+    track.setPointerCapture(event.pointerId);
+  }
+
+  function onPointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (!dragRef.current.active) return;
+    const delta = event.clientX - dragRef.current.startX;
+    if (Math.abs(delta) > 5) dragRef.current.moved = true;
+    event.currentTarget.scrollLeft = dragRef.current.scrollLeft - delta;
+  }
+
+  function onPointerUp(event: PointerEvent<HTMLDivElement>) {
+    dragRef.current.active = false;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+
+  function openItem(item: LibraryItem) {
+    if (dragRef.current.moved) {
+      dragRef.current.moved = false;
       return;
     }
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setIsWorking(true);
-    setOverallProgress(0);
-    setReferenceProgress({});
-    try {
-      const fileIds = await ensureFullQualityReferenceIds(controller);
-      setWorkingStage("Uploading approved composition");
-      const layoutFile = await dataUrlFile(result.dataUrl, "approved-draft.png");
-      const layoutFileId = await uploadReferenceFile(layoutFile, apiKey, controller.signal, (progress) => {
-        setOverallProgress(Math.round(90 + progress * 10));
-      });
-      const payload: CollageRequestInput = {
-        ...makePayload(false, fileIds),
-        orientation: finalFormat,
-        quality: "high",
-        outputResolution: "final",
-        runQa: true,
-        layoutReference: true,
-        layoutReferenceFileId: layoutFileId,
-      };
-      validateCollageRequest(payload);
-      if (mode === "economy") {
-        setWorkingStage("Sending final render to Economy");
-        const queued = await fetch("/api/economy", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
-          body: JSON.stringify({ payload }),
-        }).then((value) => readApiResponse<{ ok: boolean; error?: string; jobId: string; status: string; estimatedUsd: number }>(value));
-        setPanelText(`Final render queued in Economy. Estimated generation cost: $${queued.estimatedUsd.toFixed(2)} plus reference input. It will remain in History for 30 days.`);
-        await refreshJobs();
-        return;
-      }
-      setWorkingStage("Rendering final at maximum quality");
-      const form = new FormData();
-      form.append("payload", JSON.stringify(payload));
-      const response = await fetch("/api/generate", { method: "POST", signal: controller.signal, body: form })
-        .then((value) => readApiResponse<GenerateResponse>(value));
-      if (!response.imageBase64) throw new Error("Final rendering completed without an image.");
-      const dataUrl = `data:${response.mimeType || "image/png"};base64,${response.imageBase64}`;
-      setResult({ dataUrl, filename: response.filename || outputFilename, qa: response.qa ?? null, kind: "final" });
-      setQaRedoSelection(Object.fromEntries((response.qa?.items ?? []).map((item) => [item.id, !item.passed && Boolean(item.box)])));
-      setPromptPreview(response.prompt || "");
-      setDiagnostics(response.diagnostics ?? null);
-      setPanelText(`Final ${finalFormat} render complete at ${finalFormat === "square" ? "2048x2048" : "2560x1440"}. Full-quality product references were used.`);
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        setPanelText("Final rendering cancelled. Your draft and references are unchanged.");
-      } else {
-        setPanelText(`Final rendering failed: ${error instanceof Error ? error.message : "Unknown error."}`);
-      }
-    } finally {
-      setIsWorking(false);
-      setWorkingStage("");
-      abortRef.current = null;
-    }
+    setSelected(item);
   }
 
-  async function dryRun() {
-    setIsWorking(true);
-    setWorkingStage("Reviewing board");
-    try {
-      const payload = makePayload(false);
-      validateCollageRequest(payload);
-      const response = await fetch("/api/dry-run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }).then((value) =>
-        readApiResponse<{ ok: boolean; error?: string; summary?: string; prompt?: string }>(value),
-      );
-      setPromptPreview(response.prompt || "");
-      setPanelText(response.summary || "Board prompt is ready.");
-    } catch (error) {
-      setPanelText(`Review failed: ${error instanceof Error ? error.message : "Could not review board."}`);
-    } finally {
-      setIsWorking(false);
-      setWorkingStage("");
+  async function removeFromLibrary(item: LibraryItem) {
+    const response = await fetch(`/api/library/${encodeURIComponent(item.id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ visible: false }),
+    });
+    const payload = await response.json() as { ok?: boolean; error?: string };
+    if (!response.ok || !payload.ok) {
+      setError(payload.error || "The collage could not be removed.");
+      return;
     }
+    setSelected(null);
+    setItems((current) => current.filter((candidate) => candidate.id !== item.id));
+    setActiveIndex((current) => Math.max(0, Math.min(current, items.length - 2)));
   }
 
-  async function generate(diagnosticMode = false, diagnosticCount = 1, qaRedo?: QaRedoRequest, renderPreset?: "draft") {
-    const qaFeedback = qaRedo?.feedback;
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setIsWorking(true);
-    if (!qaRedo) {
-      setResult(null);
-      setQaRedoSelection({});
-    }
-    setPromptPreview("");
-    setOverallProgress(0);
-    setWorkingStage(qaRedo ? "Preparing selective QA mask" : renderPreset === "draft" ? "Preparing quick draft" : "Checking references");
-    let transportFilesForReport: File[] | null = null;
-    let selectiveAssets: SelectiveEditAssets | undefined;
-    const selectiveReferenceCount = qaRedo ? items.reduce((count, item, index) => (
-      qaRedo.itemIds.includes(resolvedItemId(item, index)) ? count + item.references.length : count
-    ), 0) : 0;
-
-    try {
-      if (qaRedo) {
-        if (selectiveReferenceCount > 15) {
-          throw new Error("The selected items use more than 15 correction views. Uncheck an item or remove one supporting view.");
-        }
-        selectiveAssets = await createSelectiveEditAssets(qaRedo);
-      }
-      const renderPayload = (payload: CollageRequestInput): CollageRequestInput => renderPreset === "draft"
-        ? { ...payload, quality: "low", outputResolution: "standard", runQa: false }
-        : payload;
-      const validationPayload = renderPayload(makePayload(false, undefined, qaFeedback, selectiveAssets?.selection));
-      validateCollageRequest(validationPayload);
-      const references = items.flatMap((item, index) =>
-        item.references.map((reference) => ({ itemKey: item.uiKey, itemId: resolvedItemId(item, index), reference })),
-      );
-      setOverallProgress(100);
-      setWorkingStage(qaRedo ? "Repairing selected items" : runQa ? "Composing and reviewing collage" : "Composing collage");
-      const payload = renderPayload(makePayload(true, undefined, qaFeedback, selectiveAssets?.selection));
-      const form = new FormData();
-      form.append("payload", JSON.stringify(payload));
-      if (selectiveAssets) {
-        form.append("baseImage", selectiveAssets.baseFile, selectiveAssets.baseFile.name);
-        form.append("mask", selectiveAssets.maskFile, selectiveAssets.maskFile.name);
-      }
-      const referencesToSend = diagnosticMode
-        ? references.slice(0, diagnosticCount)
-        : qaRedo
-          ? references.filter((entry) => qaRedo.itemIds.includes(entry.itemId))
-          : references;
-      setWorkingStage("Optimizing references for direct generation");
-      const transportFiles = await optimizeReferencesForTransport(
-        referencesToSend.map((entry) => entry.reference.file),
-        qaRedo ? SELECTIVE_EDIT_REFERENCE_BUDGET : DIRECT_REQUEST_REFERENCE_BUDGET,
-      );
-      transportFilesForReport = transportFiles;
-      for (const file of transportFiles) form.append("image[]", file, file.name);
-      setWorkingStage(qaRedo ? "Repairing selected items" : runQa ? "Composing and reviewing collage" : "Composing collage");
-      const response = await fetch(diagnosticMode ? `/api/generate?diagnostic=isolation&count=${diagnosticCount}` : "/api/generate", {
-        method: "POST",
-        signal: controller.signal,
-        body: form,
-      }).then((value) => readApiResponse<GenerateResponse>(value));
-
-      if (diagnosticMode && response.diagnosticComplete) {
-        setDiagnostics(response.diagnostics ?? null);
-        if (response.imageBase64) {
-          setResult({
-            dataUrl: `data:${response.mimeType || "image/png"};base64,${response.imageBase64}`,
-            filename: response.filename || "isolation-test.png",
-            qa: null,
-            kind: "studio",
-          });
-        }
-        const resultText = (response.isolationResults ?? [])
-          .map((entry) => `${entry.referenceCount} reference${entry.referenceCount === 1 ? "" : "s"}: ${entry.outcome}`)
-          .join("\n");
-        setPanelText(`Isolation test complete.\n${resultText}${diagnosticCount < totalReferences ? `\nNext: test ${Math.min(diagnosticCount === 1 ? 5 : totalReferences, totalReferences)} references.` : ""}`);
-        await saveDraft(false);
-        return;
-      }
-
-      if (!response.imageBase64) throw new Error("Generation completed without an image.");
-      const generatedDataUrl = `data:${response.mimeType || "image/png"};base64,${response.imageBase64}`;
-      let dataUrl = generatedDataUrl;
-      if (qaRedo && selectiveAssets) {
-        setWorkingStage("Mending protected edges");
-        dataUrl = await compositeSelectiveEdit(
-          qaRedo.sourceDataUrl,
-          generatedDataUrl,
-          selectiveAssets.boxes,
-          selectiveAssets.protectedBoxes,
-        );
-      }
-      const qa = response.qa ?? null;
-      setResult({
-        dataUrl,
-        filename: response.filename || outputFilename || "material-collage.png",
-        qa,
-        kind: renderPreset === "draft" ? "draft" : qaRedo ? (result?.kind || "studio") : "studio",
-      });
-      setQaRedoSelection(Object.fromEntries((qa?.items ?? []).map((item) => [item.id, !item.passed && Boolean(item.box)])));
-      setPromptPreview(response.prompt || "");
-      setPanelText(`${renderPreset === "draft" ? "Draft ready. Review the composition, then choose an immediate or Economy final render below." : response.summary || "Collage generated."}${qaRedo ? "\n\nOnly the checked QA regions were regenerated; protected pixels were restored from the previous collage." : ""}${response.notice ? `\n\n${response.notice}` : ""}`);
-      setDiagnostics(response.diagnostics ?? null);
-      await saveDraft(false);
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        setPanelText("Generation cancelled. Your board and references are still saved.");
-      } else {
-        if (error instanceof ApiResponseError && error.payload.diagnostics) {
-          setDiagnostics(error.payload.diagnostics as GenerationDiagnostics);
-        } else {
-          const payload = error instanceof ApiResponseError ? error.payload : {};
-          setDiagnostics({
-            model: "gpt-image-2",
-            transport: "multipart",
-            quality: diagnosticMode ? "low" : quality,
-            referenceCount: transportFilesForReport?.length
-              ?? (diagnosticMode ? Math.min(diagnosticCount, totalReferences) : qaRedo ? selectiveReferenceCount : totalReferences),
-            totalReferenceBytes: transportFilesForReport?.reduce((sum, file) => sum + file.size, 0) ?? totalReferenceBytes,
-            largestReferenceBytes: Math.max(
-              ...(transportFilesForReport?.map((file) => file.size)
-                ?? items.flatMap((item) => item.references.map((reference) => reference.file.size))),
-              0,
-            ),
-            references: transportFilesForReport
-              ? transportFilesForReport.map((file) => ({
-                  filename: file.name,
-                  bytes: file.size,
-                  mimeType: file.type || "unknown",
-                }))
-              : items.flatMap((item) => item.references.map((reference) => ({
-                  filename: reference.file.name,
-                  bytes: reference.file.size,
-                  mimeType: reference.file.type || "unknown",
-                }))),
-            attempts: [{
-              stage: "image_edit",
-              outcome: "failed",
-              attempt: 1,
-              durationMs: 0,
-              status: typeof payload.status === "number" ? payload.status : undefined,
-              code: typeof payload.code === "string" ? payload.code : undefined,
-              requestId: typeof payload.requestId === "string" ? payload.requestId : undefined,
-              error: `${diagnosticMode ? "Isolation test" : "Generation"}: ${error instanceof Error ? error.message : "Unknown error."}`,
-            }],
-          });
-        }
-        setPanelText(`${diagnosticMode ? "Isolation test" : "Generation"} failed: ${error instanceof Error ? error.message : "Unknown error."}`);
-      }
-    } finally {
-      setIsWorking(false);
-      setWorkingStage("");
-      abortRef.current = null;
-    }
-  }
-
-  function cancelWork() {
-    abortRef.current?.abort();
-  }
+  const activeItem = items[activeIndex];
 
   return (
-    <main className="app-shell">
-      <header className="studio-header">
-        <div className="brand-block">
-          <span className="brand-mark" aria-hidden="true">MC</span>
+    <main className="library-shell">
+      <SiteNavigation active="library" />
+
+      <section className="library-stage" aria-labelledby="library-title">
+        <div className="library-title-row">
           <div>
-            <p className="eyebrow">Interior finish studio</p>
-            <h1>Material Collager</h1>
+            <p>Material Collager</p>
+            <h1 id="library-title">Library</h1>
           </div>
+          {items.length > 0 && <span>{String(activeIndex + 1).padStart(2, "0")} / {String(items.length).padStart(2, "0")}</span>}
         </div>
-        <div className="board-metrics" aria-label="Board reference summary">
-          <div>
-            <strong>{totalReferences}</strong>
-            <span>of {MAX_REFERENCE_IMAGES} references</span>
+
+        {loading ? (
+          <div className="library-loading" aria-live="polite">Loading collages</div>
+        ) : error && items.length === 0 ? (
+          <div className="library-empty">
+            <p>{error}</p>
+            <button type="button" onClick={() => void loadLibrary()}>Retry</button>
           </div>
-          <div>
-            <strong>{formatBytes(totalReferenceBytes)}</strong>
-            <span>source files</span>
+        ) : items.length === 0 ? (
+          <div className="library-empty library-empty-preview">
+            <div className="empty-preview-panel"><img src="/sample-collage.png" alt="Example material collage" /></div>
+            <div><span>Studio sample</span><h2>Your finished collages will live here.</h2><a href="/generator">Open Generator</a></div>
           </div>
-          <div>
-            <strong>{lastSavedAt ? "Saved" : "Local"}</strong>
-            <span>{lastSavedAt ? new Date(lastSavedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "browser draft"}</span>
-          </div>
-        </div>
-      </header>
-
-      <div className="workbench">
-        <section className="builder-surface">
-          <div className="controls-surface">
-          <div className="surface-heading">
-            <div>
-              <p className="section-kicker">01</p>
-              <h2>Board setup</h2>
-            </div>
-            <div className="surface-actions">
-              <button type="button" className="quiet-button" onClick={() => void saveDraft(true)}>
-                Save draft
-              </button>
-              <button type="button" className="quiet-button" onClick={resetPreset}>
-                Reset
-              </button>
-            </div>
-          </div>
-
-          <div className="control-grid setup-controls">
-            <label className="wide-field">
-              <span>Board type</span>
-              <select value={collageType} onChange={(event) => changeType(event.target.value as CollageType)}>
-                {COLLAGE_TYPES.map((type) => (
-                  <option key={type} value={type}>{labelFor(type)}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>Orientation</span>
-              <select value={orientation} onChange={(event) => setOrientation(event.target.value as Orientation)}>
-                {ORIENTATIONS.map((option) => (
-                  <option key={option} value={option}>{labelFor(option)}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>Resolution</span>
-              <select value={outputResolution} onChange={(event) => setOutputResolution(event.target.value as OutputResolution)}>
-                {OUTPUT_RESOLUTIONS.map((option) => (
-                  <option key={option} value={option}>{option === "studio" ? "Studio 2K" : "Standard"}</option>
-                ))}
-              </select>
-            </label>
-            <label className="wide-field">
-              <span>Render quality</span>
-              <select value={quality} onChange={(event) => setQuality(event.target.value as Quality)}>
-                {QUALITIES.map((option) => (
-                  <option key={option} value={option}>{labelFor(option)}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <div className="surface-divider" />
-
-          <div className="surface-heading compact-heading">
-            <div>
-              <p className="section-kicker">02</p>
-              <h2>Art direction</h2>
-            </div>
-          </div>
-          <div className="control-grid art-controls">
-            <label>
-              <span>Composition</span>
-              <select value={composition} onChange={(event) => setComposition(event.target.value as Composition)}>
-                {COMPOSITIONS.map((option) => (
-                  <option key={option} value={option}>{labelFor(option)}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>Spacing</span>
-              <select value={density} onChange={(event) => setDensity(event.target.value as Density)}>
-                {DENSITIES.map((option) => (
-                  <option key={option} value={option}>{labelFor(option)}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>Lighting</span>
-              <select value={lighting} onChange={(event) => setLighting(event.target.value as LightingOption)}>
-                {LIGHTING_OPTIONS.map((option) => (
-                  <option key={option} value={option}>{labelFor(option)}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>Styling</span>
-              <select
-                value={collageType === "appliance_collage" ? "materials_only" : styling}
-                onChange={(event) => setStyling(event.target.value as StylingOption)}
-                disabled={collageType === "appliance_collage"}
-              >
-                {STYLING_OPTIONS.map((option) => (
-                  <option key={option} value={option}>{labelFor(option)}</option>
-                ))}
-              </select>
-            </label>
-            <label className="wide-field">
-              <span>Hero item</span>
-              <select value={heroItemId} onChange={(event) => setHeroItemId(event.target.value)}>
-                <option value="">Automatic</option>
-                {heroOptions.map((item) => (
-                  <option key={item.uiKey} value={item.id}>{item.id || item.role}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <details className="settings-drawer">
-            <summary>Studio settings</summary>
-            <div className="control-grid settings-controls">
-              <label>
-                <span>Output file name</span>
-                <input value={outputFilename} onChange={(event) => setOutputFilename(event.target.value)} />
-              </label>
-              <label className="toggle-field wide-field">
-                <input checked={runQa} onChange={(event) => setRunQa(event.target.checked)} type="checkbox" />
-                <span>Run accuracy review after generation</span>
-              </label>
-            </div>
-            <div className="drawer-actions">
-              <button type="button" onClick={() => void restoreSavedDraft()}>Restore saved draft</button>
-              <button type="button" className="danger" onClick={() => void clearSavedDraft()}>Delete saved draft</button>
-            </div>
-          </details>
-          </div>
-
-          <div className="references-surface">
-
-          <div className="surface-heading compact-heading reference-heading">
-            <div>
-              <p className="section-kicker">03</p>
-              <h2>Reference tray</h2>
-            </div>
-            <div className="reference-heading-actions">
-              <span className={hasFiles ? "status-pill ready" : "status-pill"}>
-                {totalReferences}/{MAX_REFERENCE_IMAGES}
-              </span>
-              <button type="button" className="add-item-button" onClick={addItem}>+ Add item</button>
-            </div>
-          </div>
-
-          <div className="items-list">
-            {items.map((item, index) => (
-              <article className="material-item" key={item.uiKey}>
-                <div className="item-row-head">
-                  <div className="item-title-group">
-                    <span className="item-number">{String(index + 1).padStart(2, "0")}</span>
-                    <div>
-                      <strong title={item.role || item.id || `Item ${index + 1}`}>{item.role || item.id || `Item ${index + 1}`}</strong>
-                      <span>{item.references.length ? `${item.references.length} reference${item.references.length === 1 ? "" : "s"}` : "No image yet"}{item.required === false ? " / Optional" : ""}</span>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="remove-item-button"
-                    onClick={() => removeItem(item.uiKey)}
-                    aria-label={`Remove ${item.role || `item ${index + 1}`}`}
-                    title="Remove item"
-                  >
-                    {"\u00d7"}
-                  </button>
-                </div>
-
-                {item.references.length > 0 && (
-                  <div className="reference-strip">
-                    {item.references.map((reference, referenceIndex) => {
-                      const progress = referenceProgress[reference.uiKey];
-                      return (
-                        <figure className="reference-tile" key={reference.uiKey}>
-                          <div className="reference-image-wrap">
-                            <img src={reference.preview} alt={`${item.id || item.role} reference ${referenceIndex + 1}`} />
-                            {referenceIndex === 0 && <span className="primary-badge">Primary</span>}
-                            {isWorking && progress !== undefined && progress < 1 && (
-                              <span className="reference-progress" style={{ height: `${Math.round(progress * 100)}%` }} />
-                            )}
-                          </div>
-                          <figcaption>
-                            <span title={reference.file.name}>{reference.file.name}</span>
-                            <small>{formatBytes(reference.file.size)}</small>
-                          </figcaption>
-                          {reference.sourceLabel && (
-                            <a className="reference-source" href={reference.sourceUrl} target="_blank" rel="noreferrer">
-                              {reference.sourceLabel}
-                            </a>
-                          )}
-                          <div className="reference-actions">
-                            {referenceIndex > 0 && (
-                              <button type="button" onClick={() => makePrimary(item.uiKey, reference.uiKey)}>
-                                Make primary
-                              </button>
-                            )}
-                            <button type="button" onClick={() => removeReference(item.uiKey, reference.uiKey)}>
-                              Remove
-                            </button>
-                            <label className="replace-reference">
-                              <input
-                                type="file"
-                                accept="image/png,image/jpeg,image/webp"
-                                onChange={(event) => {
-                                  replaceReference(item.uiKey, reference.uiKey, event.target.files);
-                                  event.currentTarget.value = "";
-                                }}
-                              />
-                              <span>Replace</span>
-                            </label>
-                          </div>
-                        </figure>
-                      );
-                    })}
-                  </div>
-                )}
-
-                <div
-                  className="reference-dropzone"
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    addReferences(item.uiKey, event.dataTransfer.files);
-                  }}
-                >
-                  <label>
-                    <input
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp"
-                      onChange={(event) => {
-                        addReferences(item.uiKey, event.target.files);
-                        event.currentTarget.value = "";
-                      }}
-                    />
-                    <span>{item.references.length ? "Add another view" : "Upload primary image"}</span>
-                  </label>
-                  <span>Drop a photo here / original preserved</span>
-                </div>
-
-                {item.analysisStatus === "analyzing" && <div className="investigation-status">Analyzing primary image...</div>}
-                {item.analysisStatus === "ready" && item.analysis && (
-                  <section className="investigation-panel">
-                    <div className="investigation-heading">
-                      <div>
-                        <strong>Reference investigation</strong>
-                        <span>Suggestions fill blank fields only.</span>
-                      </div>
-                      <button
-                        type="button"
-                        className="quiet-button"
-                        onClick={() => void findReferenceMatches(item.uiKey)}
-                        disabled={item.matchStatus === "searching" || !item.analysis.searchQuery}
-                      >
-                        {item.matchStatus === "searching" ? "Searching..." : "Find matches"}
-                      </button>
-                    </div>
-                    <div className="analysis-evidence">
-                      {([
-                        ["Item type", "role", item.analysis.itemType],
-                        ["Brand", "brand", item.analysis.brand],
-                        ["Product", "name", item.analysis.product],
-                        ["Finish", "finish", item.analysis.finish],
-                        ["Notes", "notes", item.analysis.notes],
-                      ] as Array<[string, "role" | "brand" | "name" | "finish" | "notes", AnalysisField]>).filter(([, , field]) => field.value).map(([label, key, field]) => (
-                        <span key={label} className={field.confidence < 70 ? "uncertain" : ""}>
-                          {label}: {field.value} / {field.confidence}%
-                          {field.confidence < 70 && !item[key]?.trim() && (
-                            <button type="button" onClick={() => applyAnalysisSuggestion(item.uiKey, key, field.value)}>Use</button>
-                          )}
-                        </span>
-                      ))}
-                    </div>
-                  </section>
-                )}
-
-                {item.candidates && item.candidates.length > 0 && (
-                  <div className="candidate-list">
-                    {item.candidates.map((candidate) => (
-                      <article className="candidate-item" key={candidate.pageUrl}>
-                        {candidate.imageUrl ? <img src={candidate.imageUrl} alt="" /> : <div className="candidate-no-image">No preview</div>}
-                        <div>
-                          <strong>{candidate.title}</strong>
-                          <span>{candidate.sourceLabel}{candidate.official ? " / Official" : ""} / {candidate.confidence}%</span>
-                          {candidate.reason && <p>{candidate.reason}</p>}
-                          <div className="candidate-actions">
-                            <a href={candidate.pageUrl} target="_blank" rel="noreferrer">Review source</a>
-                            <button type="button" onClick={() => void acceptReferenceCandidate(item.uiKey, candidate)} disabled={!candidate.imageUrl}>
-                              Add reference
-                            </button>
-                          </div>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                )}
-
-                <details className="item-details">
-                  <summary>Item details</summary>
-                  <div className="item-fields">
-                    <label>
-                      <FieldLabel text="Item type" help="What this object contributes to the collage, such as main bathroom tile, vanity faucet, or countertop stone." />
-                      <input value={item.role} onChange={(event) => updateItem(item.uiKey, { role: event.target.value })} />
-                    </label>
-                    <label>
-                      <FieldLabel text="Product / model" help="The exact collection, model number, or SKU when known. Leave blank when the image does not prove it." />
-                      <input value={item.name || ""} onChange={(event) => updateItem(item.uiKey, { name: event.target.value })} />
-                    </label>
-                    <label>
-                      <FieldLabel text="Brand" help="The manufacturer name, not the retailer or showroom." />
-                      <input value={item.brand || ""} onChange={(event) => updateItem(item.uiKey, { brand: event.target.value })} />
-                    </label>
-                    <label className="wide-field">
-                      <FieldLabel text="Finish / color" help="Use the manufacturer finish name when known, or describe the visible material color and sheen." />
-                      <input value={item.finish || ""} onChange={(event) => updateItem(item.uiKey, { finish: event.target.value })} />
-                    </label>
-                    <label className="wide-field">
-                      <FieldLabel text="Generation notes" help="Add exceptions the image cannot communicate, such as which face to show, details to preserve, or objects that must not appear." />
-                      <textarea value={item.notes || ""} onChange={(event) => updateItem(item.uiKey, { notes: event.target.value })} />
-                    </label>
-                  </div>
-                </details>
-              </article>
-            ))}
-          </div>
-
-          </div>
-        </section>
-
-        <aside className="output-surface">
-          <div className="output-sticky">
-            <div className="surface-heading output-heading">
-              <div>
-                <p className="section-kicker">04</p>
-                <h2>Studio preview</h2>
-              </div>
-              <span className={isWorking ? "status-pill working" : result ? "status-pill ready" : "status-pill"}>
-                {isWorking ? "Working" : result ? "Complete" : "Ready"}
-              </span>
-            </div>
-
-            <div
-              className={`result-stage ${result ? "has-result" : ""}`}
-              style={result ? { aspectRatio: `${previewWidth} / ${previewHeight}` } : undefined}
-            >
-              {result ? (
-                <img src={result.dataUrl} alt="Generated material collage" />
-              ) : (
-                <img src="/sample-collage.png" alt="Sample material collage" />
-              )}
-              {result && !isWorking && selectedQaRegions.map((item) => {
-                const [x, y, width, height] = item.box as NormalizedBox;
-                const itemIndex = items.findIndex((candidate, index) => resolvedItemId(candidate, index) === item.id);
-                return (
-                  <span
-                    className="qa-region-outline"
-                    key={item.id}
-                    style={{ left: `${x / 10}%`, top: `${y / 10}%`, width: `${width / 10}%`, height: `${height / 10}%` }}
-                    aria-hidden="true"
-                  >
-                    {itemIndex >= 0 ? String(itemIndex + 1).padStart(2, "0") : "QA"}
-                  </span>
-                );
-              })}
-            </div>
-
-            {isWorking && (
-              <div className="work-progress" aria-live="polite">
-                <div>
-                  <span>{workingStage}</span>
-                  <strong>{overallProgress > 0 && overallProgress < 100 ? `${overallProgress}%` : ""}</strong>
-                </div>
-                <div className="progress-track"><span style={{ width: `${overallProgress}%` }} /></div>
-              </div>
-            )}
-
-            <div className="primary-actions">
-              {isWorking ? (
-                <button type="button" className="cancel-button" onClick={cancelWork}>Cancel</button>
-              ) : (
-                <button type="button" className="primary-button" onClick={() => void generate(false)} disabled={!hasFiles}>
-                  Generate studio collage
-                </button>
-              )}
-              <button type="button" className="draft-button" onClick={() => void generate(false, 1, undefined, "draft")} disabled={isWorking || !hasFiles}>
-                Generate quick draft
-              </button>
-              <button type="button" className="secondary-button" onClick={dryRun} disabled={isWorking}>
-                Review prompt
-              </button>
-              {result && (
-                <a className="download-button" href={result.dataUrl} download={result.filename}>Download PNG</a>
-              )}
-            </div>
-
-            {result && result.kind !== "final" && (
-              <section className="finalize-panel">
-                <div className="finalize-heading">
-                  <div>
-                    <span>Ready to finish</span>
-                    <strong>Use this image as the composition guide</strong>
-                  </div>
-                  <span className="quality-lock">Maximum quality</span>
-                </div>
-                <div className="format-switch" role="group" aria-label="Final image format">
-                  <button type="button" className={finalFormat === "landscape" ? "selected" : ""} onClick={() => setFinalFormat("landscape")}>
-                    <strong>Landscape</strong><span>2560 x 1440</span>
-                  </button>
-                  <button type="button" className={finalFormat === "square" ? "selected" : ""} onClick={() => setFinalFormat("square")}>
-                    <strong>Square</strong><span>2048 x 2048</span>
-                  </button>
-                </div>
-                <div className="final-actions">
-                  <button type="button" className="final-now-button" onClick={() => void finalizeDraft("immediate")} disabled={isWorking}>
-                    Render final now
-                    <small>{finalFormat === "square" ? "Est. $0.21" : "Est. $0.17"} + references</small>
-                  </button>
-                  <button type="button" className="economy-button" onClick={() => void finalizeDraft("economy")} disabled={isWorking}>
-                    Send final to Economy
-                    <small>{finalFormat === "square" ? "Est. $0.11" : "Est. $0.08"} + references / up to 24h</small>
-                  </button>
-                </div>
-              </section>
-            )}
-
-            {!isWorking && (
-              <details className="output-tools">
-                <summary>Troubleshooting</summary>
-                <button type="button" className="quiet-button" onClick={() => void generate(true, 1)} disabled={!hasFiles}>
-                  Test one reference
-                </button>
-              </details>
-            )}
-
-            {result?.qa && (
-              <section className={`qa-result ${result.qa.passed ? "passed" : "review"}`}>
-                <div>
-                  <span>Accuracy review</span>
-                  <strong>{result.qa.score}/100</strong>
-                </div>
-                {result.qa.findings.length > 0 && (
-                  <ul>{result.qa.findings.map((finding) => <li key={finding}>{finding}</li>)}</ul>
-                )}
-                {result.qa.recommendation && <p>{result.qa.recommendation}</p>}
-                {!result.qa.reviewFailed && result.qa.items?.length > 0 && (
-                  <fieldset className="qa-item-selector">
-                    <legend>Items to re-render</legend>
-                    {items.map((item, index) => ({ item, index })).filter(({ item }) => item.references.length > 0).map(({ item, index }) => {
-                      const id = resolvedItemId(item, index);
-                      const itemReview = result.qa?.items.find((entry) => entry.id === id);
-                      return (
-                        <label className={qaRedoSelection[id] ? "selected" : ""} key={id} title={itemReview?.finding || ""}>
-                          <input
-                            type="checkbox"
-                            checked={Boolean(qaRedoSelection[id])}
-                            disabled={isWorking || !itemReview?.box}
-                            onChange={(event) => setQaRedoSelection((current) => ({ ...current, [id]: event.target.checked }))}
-                          />
-                          <span><strong>{String(index + 1).padStart(2, "0")}</strong>{item.role}</span>
-                          <small>{itemReview?.box ? itemReview.passed ? "QA passed" : "QA flagged" : "Not located"}</small>
-                        </label>
-                      );
-                    })}
-                  </fieldset>
-                )}
-                {!result.qa.reviewFailed && result.qa.items?.length > 0 && (
-                  <button
-                    type="button"
-                    className="qa-recreate-button"
-                    onClick={() => void generate(false, 1, {
-                      feedback: result.qa as QaResult,
-                      itemIds: selectedQaItemIds,
-                      sourceDataUrl: result.dataUrl,
-                    })}
-                    disabled={isWorking || selectedQaItemIds.length === 0}
-                  >
-                    {isWorking ? "Repairing checked items..." : "Re-create checked items"}
-                  </button>
-                )}
-              </section>
-            )}
-
-            <div className="activity-log" aria-live="polite">{panelText}</div>
-
-            {diagnostics && (
-              <details className="diagnostic-report">
-                <summary>Diagnostic report</summary>
-                <div className="diagnostic-summary">
-                  <span>{diagnostics.referenceCount} references checked</span>
-                  <span>{formatBytes(diagnostics.totalReferenceBytes)} total</span>
-                  <span>{diagnostics.attempts.filter((attempt) => attempt.stage === "image_edit").length} generation attempts</span>
-                </div>
-                <pre>{JSON.stringify(diagnostics, null, 2)}</pre>
+        ) : view === "overview" ? (
+          <div
+            className="glass-track"
+            ref={trackRef}
+            tabIndex={0}
+            aria-label="Collage library. Use left and right arrow keys to browse."
+            onScroll={updateActiveIndex}
+            onWheel={onTrackWheel}
+            onKeyDown={onTrackKeyDown}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+          >
+            <span className="track-spacer" aria-hidden="true" />
+            {items.map((item, index) => {
+              const offset = index - activeIndex;
+              return (
                 <button
                   type="button"
-                  className="quiet-button"
-                  onClick={() => void navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2))}
+                  className={`glass-panel ${index === activeIndex ? "active" : ""}`}
+                  key={item.id}
+                  ref={(node) => { cardRefs.current[index] = node; }}
+                  style={{
+                    "--panel-offset": offset,
+                    "--panel-opacity": Math.max(0.28, 1 - Math.abs(offset) * 0.18),
+                    zIndex: items.length - Math.abs(offset),
+                  } as CSSProperties}
+                  aria-label={`Open ${item.title}`}
+                  onClick={() => openItem(item)}
                 >
-                  Copy report
+                  <img src={item.imageUrl} alt="" draggable={false} />
                 </button>
-              </details>
-            )}
-
-            {promptPreview && (
-              <details className="prompt-drawer">
-                <summary>Generation prompt</summary>
-                <pre>{promptPreview}</pre>
-              </details>
-            )}
-
-            {jobs.length > 0 && (
-              <details className="generation-history" open={jobs.some((job) => !["completed", "failed", "expired", "cancelled"].includes(job.status))}>
-                <summary>Final render history</summary>
-                <div className="history-list">
-                  {jobs.map((job) => (
-                    <article key={job.id}>
-                      <div>
-                        <strong>{job.mode === "economy" ? "Economy final" : "Final render"}</strong>
-                        <span>{job.format} / {new Date(job.createdAt).toLocaleString()}</span>
-                      </div>
-                      <span className={`job-status ${job.status}`}>{job.status.replaceAll("_", " ")}</span>
-                      {job.status === "completed" && (
-                        <a href={`/api/economy/output/${job.id}`} download={job.filename}>Open PNG</a>
-                      )}
-                      {job.estimatedUsd !== null && <small>Est. ${job.estimatedUsd.toFixed(2)} + reference input</small>}
-                      {job.qa && <small>Accuracy review: {job.qa.reviewFailed ? "unavailable" : `${job.qa.score}/100`}</small>}
-                      {job.error && <p>{job.error}</p>}
-                    </article>
-                  ))}
-                </div>
-              </details>
-            )}
+              );
+            })}
+            <span className="track-spacer" aria-hidden="true" />
           </div>
-        </aside>
-      </div>
+        ) : (
+          <div className="library-index" aria-label="Collage index">
+            {items.map((item, index) => (
+              <button type="button" key={item.id} onClick={() => { setActiveIndex(index); setSelected(item); }}>
+                <img src={item.imageUrl} alt="" />
+                <span>{item.title}</span>
+                <small>{formatDate(item.createdAt)}</small>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {activeItem && view === "overview" && (
+          <div className="active-collage-meta" aria-live="polite">
+            <strong>{activeItem.title}</strong>
+            <span>{label(activeItem.collageType)} / {activeItem.format} / {formatDate(activeItem.createdAt)}</span>
+          </div>
+        )}
+
+        {items.length > 0 && (
+          <div className="library-view-toggle" role="group" aria-label="Library view">
+            <button type="button" className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}>Overview</button>
+            <button type="button" className={view === "index" ? "active" : ""} onClick={() => setView("index")}>Index</button>
+          </div>
+        )}
+      </section>
+
+      {selected && (
+        <div className="collage-viewer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelected(null); }}>
+          <div className="collage-viewer" role="dialog" aria-modal="true" aria-labelledby="viewer-title" ref={dialogRef}>
+            <div className="viewer-toolbar">
+              <div><p>Library</p><h2 id="viewer-title">{selected.title}</h2></div>
+              <button type="button" onClick={() => setSelected(null)}>Close</button>
+            </div>
+            <div className="viewer-image"><img src={selected.imageUrl} alt={selected.title} /></div>
+            <div className="viewer-meta">
+              <span>{label(selected.collageType)}</span>
+              <span>{selected.format}</span>
+              <span>{selected.mode === "economy" ? "Economy final" : label(selected.renderKind)}</span>
+              <span>{selected.qa?.score !== undefined ? `QA ${selected.qa.score}/100` : "QA not available"}</span>
+              <span>{formatDate(selected.createdAt)}</span>
+            </div>
+            <div className="viewer-actions">
+              <a href={selected.imageUrl} download={selected.filename}>Download PNG</a>
+              <button type="button" onClick={() => void removeFromLibrary(selected)}>Remove from Library</button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
+}
+
+function SiteNavigation({ active }: { active: "library" | "generator" }) {
+  return (
+    <header className="site-navigation">
+      <a className="site-wordmark" href="/">Material Collager</a>
+      <nav aria-label="Primary navigation">
+        <a className={active === "library" ? "active" : ""} href="/">Library</a>
+        <a className={active === "generator" ? "active" : ""} href="/generator">Generator</a>
+      </nav>
+    </header>
+  );
+}
+
+function label(value: string) {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatDate(value: number) {
+  return new Date(value).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
 }

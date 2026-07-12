@@ -1,5 +1,5 @@
 import { activeItems, buildGenerationPrompt, referenceCount, resolvedSize, validateCollageRequest, type CollageRequestInput } from "@/app/lib/collage";
-import { cleanupExpiredJobs, ensureJobStorage, publicJob, runtimeStorage } from "@/app/lib/generation-jobs";
+import { cleanupExpiredJobs, ensureJobStorage, publicJob, runtimeStorage, type JobRow } from "@/app/lib/generation-jobs";
 import { errorResponse, readOpenAIResponse, resolveOpenAIKey } from "@/app/lib/openai-server";
 
 export const runtime = "edge";
@@ -10,25 +10,6 @@ type BatchResponse = {
   output_file_id?: string;
   error_file_id?: string;
   errors?: { data?: Array<{ message?: string }> };
-};
-
-type JobRow = {
-  id: string;
-  mode: "economy" | "immediate";
-  status: string;
-  openai_batch_id: string | null;
-  output_key: string | null;
-  filename: string;
-  format: string;
-  estimated_usd: number | null;
-  usage_json: string | null;
-  qa_json: string | null;
-  error: string | null;
-  created_at: number;
-  updated_at: number;
-  expires_at: number;
-  payload_json: string;
-  reference_ids_json: string;
 };
 
 const COMPLETE_STATUSES = new Set(["completed", "failed", "expired", "cancelled"]);
@@ -44,6 +25,7 @@ export async function POST(request: Request) {
       quality: "high",
       outputResolution: "final",
       runQa: true,
+      renderKind: "final",
     };
     validateCollageRequest(payload);
     const referenceIds = activeItems(payload).flatMap((item) => item.imageFileIds ?? []);
@@ -93,8 +75,9 @@ export async function POST(request: Request) {
     const now = Date.now();
     const DB = await ensureJobStorage();
     await DB.prepare(`INSERT INTO generation_jobs
-      (id, mode, status, openai_batch_id, output_key, filename, format, prompt, payload_json, reference_ids_json, estimated_usd, usage_json, qa_json, error, created_at, updated_at, expires_at)
-      VALUES (?, 'economy', ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?)`)
+      (id, mode, status, openai_batch_id, output_key, filename, format, prompt, payload_json, reference_ids_json,
+       render_kind, collage_type, library_visible, title, estimated_usd, usage_json, qa_json, error, created_at, updated_at, expires_at)
+      VALUES (?, 'economy', ?, ?, NULL, ?, ?, ?, ?, ?, 'final', ?, 1, ?, ?, NULL, NULL, NULL, ?, ?, ?)`)
       .bind(
         jobId,
         batch.status || "validating",
@@ -104,6 +87,8 @@ export async function POST(request: Request) {
         prompt,
         JSON.stringify(payload),
         JSON.stringify(referenceIds),
+        payload.collageType,
+        displayTitle(payload.outputFilename, payload.collageType),
         baseEstimate(payload) / 2,
         now,
         now,
@@ -232,4 +217,10 @@ function baseEstimate(payload: CollageRequestInput) {
 function finalFilename(value?: string) {
   const base = (value || "material-collage.png").replace(/[^a-zA-Z0-9._-]+/g, "-");
   return base.toLowerCase().endsWith(".png") ? base : `${base}.png`;
+}
+
+function displayTitle(filename: string | undefined, collageType: string) {
+  const clean = finalFilename(filename).replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim();
+  const value = clean && clean.toLowerCase() !== "material collage" ? clean : collageType.replaceAll("_", " ");
+  return value.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
