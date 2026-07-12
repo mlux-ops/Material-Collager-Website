@@ -33,6 +33,8 @@ type ImageEditRequest = {
   model: "gpt-image-2";
   prompt: string;
   references: PreparedReference[];
+  mask?: PreparedReference;
+  inputFidelity?: "high";
   size: string;
   quality: CollageRequestInput["quality"];
   background: "opaque";
@@ -42,6 +44,22 @@ type ImageEditRequest = {
 type PreparedReference = {
   blob: Blob;
   filename: string;
+};
+
+type QaItemReview = {
+  id: string;
+  passed: boolean;
+  finding: string;
+  box?: [number, number, number, number];
+};
+
+type QaReview = {
+  passed: boolean;
+  score: number;
+  findings: string[];
+  recommendation: string;
+  items: QaItemReview[];
+  reviewFailed?: boolean;
 };
 
 type AttemptDiagnostic = {
@@ -119,7 +137,7 @@ export async function POST(request: Request) {
       references: [],
       attempts,
     };
-    const preparedReferences = directFiles.map((file) => ({ blob: file, filename: safeReferenceFilename(file.name) }));
+    const preparedReferences: PreparedReference[] = directFiles.map((file) => ({ blob: file, filename: safeReferenceFilename(file.name) }));
     diagnostics.totalReferenceBytes = preparedReferences.reduce((sum, reference) => sum + reference.blob.size, 0);
     diagnostics.largestReferenceBytes = Math.max(...preparedReferences.map((reference) => reference.blob.size), 0);
     diagnostics.references = preparedReferences.map((reference) => ({
@@ -127,11 +145,45 @@ export async function POST(request: Request) {
       bytes: reference.blob.size,
       mimeType: reference.blob.type,
     }));
-    const requestedSize = resolvedSize(payload);
+    const selectedIds = new Set(payload.qaSelection?.itemIds ?? []);
+    const selectiveEdit = selectedIds.size > 0;
+    let generationReferences = preparedReferences;
+    let editMask: PreparedReference | undefined;
+    let requestedSize = resolvedSize(payload);
+
+    if (selectiveEdit) {
+      const baseImage = incoming.get("baseImage");
+      const mask = incoming.get("mask");
+      if (!(baseImage instanceof File) || !baseImage.type.startsWith("image/")) {
+        throw new Error("The current collage was missing from the selective QA edit.");
+      }
+      if (!(mask instanceof File) || mask.type !== "image/png" || mask.size >= 4 * 1024 * 1024) {
+        throw new Error("The selective QA mask must be a PNG under 4 MB.");
+      }
+      const width = Number(payload.qaSelection?.baseWidth);
+      const height = Number(payload.qaSelection?.baseHeight);
+      if (!validEditDimension(width) || !validEditDimension(height) || width / height < 1 / 3 || width / height > 3) {
+        throw new Error("The selective QA edit has unsupported canvas dimensions.");
+      }
+      const selectedReferences = selectItemReferences(payload, preparedReferences, selectedIds);
+      if (!selectedReferences.length) throw new Error("Select at least one referenced item to re-render.");
+      generationReferences = [
+        { blob: baseImage, filename: baseImage.type === "image/jpeg" ? "current-collage.jpg" : "current-collage.png" },
+        ...selectedReferences,
+      ];
+      if (generationReferences.length > 16) {
+        throw new Error("This correction selects too many supporting views. Uncheck an item or remove one supporting view.");
+      }
+      editMask = { blob: mask, filename: "qa-edit-mask.png" };
+      requestedSize = `${width}x${height}`;
+    }
+
     const imageRequest: ImageEditRequest = {
       model: "gpt-image-2",
       prompt,
-      references: preparedReferences,
+      references: generationReferences,
+      mask: editMask,
+      inputFidelity: selectiveEdit ? "high" : undefined,
       size: requestedSize,
       quality: payload.quality,
       background: "opaque",
@@ -181,7 +233,7 @@ export async function POST(request: Request) {
       imageResult = await createImageEdit(apiKey, imageRequest, diagnostics.attempts);
     } catch (error) {
       const standardSize = standardSizeFor(payload);
-      if (!isRetryableImageError(error) || standardSize === requestedSize) throw error;
+      if (selectiveEdit || !isRetryableImageError(error) || standardSize === requestedSize) throw error;
       usedStandardFallback = true;
       imageResult = await createImageEdit(apiKey, { ...imageRequest, size: standardSize }, diagnostics.attempts);
     }
@@ -191,9 +243,12 @@ export async function POST(request: Request) {
       throw new Error("OpenAI did not return image data.");
     }
 
-    const qa = payload.runQa
-      ? await reviewGeneratedImage(apiKey, payload, imageBase64, preparedReferences)
+    const reviewed = payload.runQa
+      ? await reviewGeneratedImage(apiKey, payload, imageBase64, preparedReferences, selectedIds)
       : null;
+    const qa = reviewed && selectiveEdit
+      ? mergeProtectedQa(reviewed, payload, selectedIds)
+      : reviewed;
 
     return Response.json({
       ok: true,
@@ -203,6 +258,7 @@ export async function POST(request: Request) {
       mimeType: "image/png",
       filename: safeOutputFilename(payload.outputFilename),
       qa,
+      selectiveEdit,
       usage: imageJson.usage,
       notice: usedStandardFallback
         ? "OpenAI could not complete the Studio 2K render, so the board was generated at the standard resolution without changing reference fidelity or render quality."
@@ -237,9 +293,11 @@ async function createImageEdit(apiKey: string, body: ImageEditRequest, diagnosti
       form.append("quality", body.quality);
       form.append("background", body.background);
       form.append("output_format", body.output_format);
+      if (body.inputFidelity) form.append("input_fidelity", body.inputFidelity);
       for (const reference of body.references) {
         form.append("image[]", reference.blob, reference.filename);
       }
+      if (body.mask) form.append("mask", body.mask.blob, body.mask.filename);
 
       const response = await fetch("https://api.openai.com/v1/images/edits", {
         method: "POST",
@@ -332,6 +390,52 @@ function safeReferenceFilename(value: string) {
   return safe || "reference.png";
 }
 
+function validEditDimension(value: number) {
+  return Number.isInteger(value) && value >= 256 && value <= 3840 && value % 16 === 0;
+}
+
+function selectItemReferences(
+  payload: CollageRequestInput,
+  references: PreparedReference[],
+  selectedIds: Set<string>,
+) {
+  const selected: PreparedReference[] = [];
+  let offset = 0;
+  for (const item of activeItems(payload)) {
+    const count = referenceCount(item);
+    if (selectedIds.has(item.id)) selected.push(...references.slice(offset, offset + count));
+    offset += count;
+  }
+  return selected;
+}
+
+function mergeProtectedQa(review: QaReview, payload: CollageRequestInput, selectedIds: Set<string>): QaReview {
+  const previousById = new Map((payload.qaFeedback?.items ?? []).map((item) => [item.id, item]));
+  const reviewedById = new Map(review.items.map((item) => [item.id, item]));
+  const items = activeItems(payload).map((item) => {
+    const reviewed = reviewedById.get(item.id);
+    const previous = previousById.get(item.id);
+    if (selectedIds.has(item.id)) return reviewed ?? previous ?? missingQaItem(item.id);
+    return previous ?? reviewed ?? missingQaItem(item.id);
+  });
+  const protectedFailure = items.some((item) => !selectedIds.has(item.id) && !item.passed);
+  const score = protectedFailure
+    ? Math.min(review.score, Math.max(0, Math.min(100, Number(payload.qaFeedback?.score) || 0)))
+    : review.score;
+  const findings = items.filter((item) => !item.passed && item.finding).map((item) => `${item.id}: ${item.finding}`);
+  return {
+    ...review,
+    passed: review.passed && score >= 90 && items.every((item) => item.passed),
+    score,
+    findings: findings.length ? findings : review.findings,
+    items,
+  };
+}
+
+function missingQaItem(id: string): QaItemReview {
+  return { id, passed: false, finding: "QA could not reliably locate this item." };
+}
+
 function standardSizeFor(payload: CollageRequestInput) {
   const orientation = resolvedOrientation(payload);
   if (orientation === "portrait") return "1024x1536";
@@ -352,9 +456,11 @@ async function reviewGeneratedImage(
   payload: CollageRequestInput,
   imageBase64: string,
   references: PreparedReference[],
-) {
+  selectedIds = new Set<string>(),
+): Promise<QaReview> {
+  const expectedItems = activeItems(payload);
   let nextReference = 1;
-  const itemMap = activeItems(payload).map((item) => {
+  const itemMap = expectedItems.map((item) => {
     const count = referenceCount(item);
     const start = nextReference;
     const end = nextReference + count - 1;
@@ -377,7 +483,11 @@ Evaluate:
 3. The collage is photorealistic, cleanly isolated, pure white, professionally lit, and editorially composed.
 4. No item is badly warped, duplicated, mislabeled, recolored, hidden, or replaced by a generic substitute.
 
-Return JSON only with: passed (boolean), score (integer 0-100), findings (array of concise strings naming item IDs when relevant), recommendation (one concise corrective instruction). Pass only at 90 or above with no major reference mismatch.`,
+${selectedIds.size
+  ? `This is an intermediate masked repair. Score only these selected items: ${Array.from(selectedIds).join(", ")}. Unselected pixels will be restored exactly after this review, so do not penalize drift in unselected items. Still locate every item.`
+  : "Score the complete collage."}
+
+For every item ID, return an item verdict and a tight bounding box [x, y, width, height] around its visible pixels and contact shadow. Coordinates are integers normalized from 0 to 1000 relative to the collage. Include every ID exactly once. Pass only at 90 or above with no major mismatch in the scored items.`,
     },
     {
       type: "input_image",
@@ -403,6 +513,45 @@ Return JSON only with: passed (boolean), score (integer 0-100), findings (array 
     body: JSON.stringify({
       model: process.env.MATERIAL_COLLAGER_QA_MODEL || "gpt-5.6",
       reasoning: { effort: "low" },
+      text: {
+        format: {
+          type: "json_schema",
+          name: "collage_accuracy_review",
+          strict: true,
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              passed: { type: "boolean" },
+              score: { type: "integer", minimum: 0, maximum: 100 },
+              findings: { type: "array", items: { type: "string" }, maxItems: 20 },
+              recommendation: { type: "string" },
+              items: {
+                type: "array",
+                minItems: expectedItems.length,
+                maxItems: expectedItems.length,
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    id: { type: "string" },
+                    passed: { type: "boolean" },
+                    finding: { type: "string" },
+                    box: {
+                      type: "array",
+                      items: { type: "integer", minimum: 0, maximum: 1000 },
+                      minItems: 4,
+                      maxItems: 4,
+                    },
+                  },
+                  required: ["id", "passed", "finding", "box"],
+                },
+              },
+            },
+            required: ["passed", "score", "findings", "recommendation", "items"],
+          },
+        },
+      },
       input: [{ role: "user", content }],
     }),
   });
@@ -415,10 +564,23 @@ Return JSON only with: passed (boolean), score (integer 0-100), findings (array 
       score?: number;
       findings?: string[] | string;
       recommendation?: string;
+      items?: Array<{ id?: unknown; passed?: unknown; finding?: unknown; box?: unknown }>;
     };
     const score = Math.max(0, Math.min(100, Math.round(Number(parsed.score) || 0)));
+    const parsedItems = new Map((parsed.items ?? []).map((item) => [String(item.id || ""), item]));
+    const items = expectedItems.map((item) => {
+      const parsedItem = parsedItems.get(item.id);
+      const box = normalizeQaBox(parsedItem?.box);
+      return {
+        id: item.id,
+        passed: Boolean(parsedItem?.passed),
+        finding: String(parsedItem?.finding || (box ? "" : "QA could not reliably locate this item.")),
+        ...(box ? { box } : {}),
+      };
+    });
+    const scoredItems = selectedIds.size ? items.filter((item) => selectedIds.has(item.id)) : items;
     return {
-      passed: Boolean(parsed.passed) && score >= 90,
+      passed: Boolean(parsed.passed) && score >= 90 && scoredItems.every((item) => item.passed),
       score,
       findings: Array.isArray(parsed.findings)
         ? parsed.findings.map(String)
@@ -426,6 +588,7 @@ Return JSON only with: passed (boolean), score (integer 0-100), findings (array 
           ? [String(parsed.findings)]
           : [],
       recommendation: String(parsed.recommendation || ""),
+      items,
       reviewFailed: false,
     };
   } catch (error) {
@@ -434,9 +597,20 @@ Return JSON only with: passed (boolean), score (integer 0-100), findings (array 
       score: 0,
       findings: [error instanceof Error ? error.message : "Accuracy review failed."],
       recommendation: "Review the collage manually before using it.",
+      items: expectedItems.map((item) => missingQaItem(item.id)),
       reviewFailed: true,
     };
   }
+}
+
+function normalizeQaBox(value: unknown): [number, number, number, number] | undefined {
+  if (!Array.isArray(value) || value.length !== 4) return undefined;
+  const numbers = value.map((entry) => Math.max(0, Math.min(1000, Math.round(Number(entry) || 0))));
+  const [x, y, rawWidth, rawHeight] = numbers;
+  const width = Math.min(rawWidth, 1000 - x);
+  const height = Math.min(rawHeight, 1000 - y);
+  if (width < 5 || height < 5) return undefined;
+  return [x, y, width, height];
 }
 
 async function blobDataUrl(blob: Blob) {

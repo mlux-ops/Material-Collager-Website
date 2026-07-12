@@ -1636,6 +1636,20 @@ body {
   aspect-ratio: 1;
   border-radius: 6px;
   min-height: 0;
+  position: relative;
+}
+
+.qa-region-outline {
+  background: rgba(53, 103, 166, 0.08);
+  border: 2px dashed #3567a6;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 3px;
+  pointer-events: none;
+  position: absolute;
+  text-shadow: 0 1px 2px #172a42;
+  z-index: 3;
 }
 
 .primary-actions {
@@ -1726,6 +1740,73 @@ body {
 
 .qa-recreate-button:hover {
   background: #294f80;
+}
+
+.qa-item-selector {
+  border: 0;
+  display: grid;
+  gap: 5px;
+  margin: 10px 0 0;
+  padding: 0;
+}
+
+.qa-item-selector legend {
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.qa-item-selector label {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  cursor: pointer;
+  display: grid;
+  gap: 7px;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  min-height: 34px;
+  padding: 6px 7px;
+}
+
+.qa-item-selector label.selected {
+  background: #edf4fb;
+  border-color: #7c9dc5;
+}
+
+.qa-item-selector label:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.qa-item-selector input {
+  accent-color: var(--blue);
+  height: 14px;
+  min-height: 14px;
+  width: 14px;
+}
+
+.qa-item-selector label > span {
+  color: var(--ink);
+  display: flex;
+  font-size: 9px;
+  gap: 6px;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qa-item-selector label > span strong {
+  color: var(--blue);
+  flex: 0 0 auto;
+}
+
+.qa-item-selector small {
+  color: var(--muted);
+  font-size: 8px;
 }
 
 @media (max-width: 1180px) {

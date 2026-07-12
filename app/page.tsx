@@ -15,6 +15,7 @@ import {
   QUALITIES,
   STYLING_OPTIONS,
   labelFor,
+  resolvedSize,
   slugify,
   validateCollageRequest,
   type CollageItemInput,
@@ -26,6 +27,7 @@ import {
   type Orientation,
   type OutputResolution,
   type Quality,
+  type QaSelectionInput,
   type StylingOption,
 } from "@/app/lib/collage";
 
@@ -101,12 +103,36 @@ type SavedDraft = {
   savedAt: number;
 };
 
+type NormalizedBox = [number, number, number, number];
+
+type QaItemResult = {
+  id: string;
+  passed: boolean;
+  finding: string;
+  box?: NormalizedBox;
+};
+
 type QaResult = {
   passed: boolean;
   score: number;
   findings: string[];
   recommendation: string;
+  items: QaItemResult[];
   reviewFailed?: boolean;
+};
+
+type QaRedoRequest = {
+  feedback: QaResult;
+  itemIds: string[];
+  sourceDataUrl: string;
+};
+
+type SelectiveEditAssets = {
+  baseFile: File;
+  maskFile: File;
+  boxes: NormalizedBox[];
+  protectedBoxes: NormalizedBox[];
+  selection: QaSelectionInput;
 };
 
 type GenerateResponse = {
@@ -197,6 +223,173 @@ function FieldLabel({ text, help }: { text: string; help: string }) {
 function formatBytes(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+}
+
+function resolvedItemId(item: UiItem, index: number) {
+  return item.id || slugify(item.role || `item_${index + 1}`);
+}
+
+function expandedBox(box: NormalizedBox, padding = 24): NormalizedBox {
+  const [x, y, width, height] = box;
+  const left = Math.max(0, x - padding);
+  const top = Math.max(0, y - padding);
+  const right = Math.min(1000, x + width + padding);
+  const bottom = Math.min(1000, y + height + padding);
+  return [left, top, right - left, bottom - top];
+}
+
+async function loadCanvasImage(source: string) {
+  const image = new Image();
+  image.decoding = "async";
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error("The collage image could not be prepared for selective editing."));
+    image.src = source;
+  });
+  return image;
+}
+
+function canvasBlob(canvas: HTMLCanvasElement, type = "image/png", quality?: number) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("The selective edit image could not be created.")), type, quality);
+  });
+}
+
+async function compressedEditBase(image: HTMLImageElement) {
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("This browser cannot prepare the current collage for editing.");
+  context.drawImage(image, 0, 0);
+  let blob = await canvasBlob(canvas, "image/jpeg", 0.9);
+  for (const quality of [0.82, 0.74, 0.66]) {
+    if (blob.size <= 1.8 * 1024 * 1024) break;
+    blob = await canvasBlob(canvas, "image/jpeg", quality);
+  }
+  return blob;
+}
+
+async function createSelectiveEditAssets(request: QaRedoRequest): Promise<SelectiveEditAssets> {
+  const selected = new Set(request.itemIds);
+  const boxes = request.feedback.items
+    .filter((item) => selected.has(item.id))
+    .map((item) => item.box ? expandedBox(item.box) : undefined);
+  if (boxes.some((box) => !box) || boxes.length !== selected.size) {
+    throw new Error("QA could not locate every selected item. Generate once more to refresh the item map.");
+  }
+
+  const normalizedBoxes = boxes as NormalizedBox[];
+  const protectedBoxes = request.feedback.items
+    .filter((item) => !selected.has(item.id) && item.box)
+    .map((item) => expandedBox(item.box as NormalizedBox, 12));
+  const sourceImage = await loadCanvasImage(request.sourceDataUrl);
+  const width = sourceImage.naturalWidth;
+  const height = sourceImage.naturalHeight;
+  if (!width || !height || width % 16 !== 0 || height % 16 !== 0) {
+    throw new Error("The current collage dimensions cannot be used for a masked correction.");
+  }
+
+  const maskCanvas = document.createElement("canvas");
+  maskCanvas.width = width;
+  maskCanvas.height = height;
+  const maskContext = maskCanvas.getContext("2d");
+  if (!maskContext) throw new Error("This browser cannot create a selective edit mask.");
+  maskContext.fillStyle = "#000";
+  maskContext.fillRect(0, 0, width, height);
+  for (const [x, y, boxWidth, boxHeight] of normalizedBoxes) {
+    maskContext.clearRect(
+      Math.floor(x / 1000 * width),
+      Math.floor(y / 1000 * height),
+      Math.ceil(boxWidth / 1000 * width),
+      Math.ceil(boxHeight / 1000 * height),
+    );
+  }
+  maskContext.fillStyle = "#000";
+  for (const [x, y, boxWidth, boxHeight] of protectedBoxes) {
+    maskContext.fillRect(
+      Math.floor(x / 1000 * width),
+      Math.floor(y / 1000 * height),
+      Math.ceil(boxWidth / 1000 * width),
+      Math.ceil(boxHeight / 1000 * height),
+    );
+  }
+
+  const [baseBlob, maskBlob] = await Promise.all([compressedEditBase(sourceImage), canvasBlob(maskCanvas)]);
+  return {
+    baseFile: new File([baseBlob], "current-collage.jpg", { type: "image/jpeg", lastModified: Date.now() }),
+    maskFile: new File([maskBlob], "qa-edit-mask.png", { type: "image/png", lastModified: Date.now() }),
+    boxes: normalizedBoxes,
+    protectedBoxes,
+    selection: { itemIds: request.itemIds, baseWidth: width, baseHeight: height },
+  };
+}
+
+async function compositeSelectiveEdit(
+  originalSource: string,
+  editedSource: string,
+  boxes: NormalizedBox[],
+  protectedBoxes: NormalizedBox[],
+) {
+  const [original, edited] = await Promise.all([loadCanvasImage(originalSource), loadCanvasImage(editedSource)]);
+  const width = original.naturalWidth;
+  const height = original.naturalHeight;
+  const canvas = document.createElement("canvas");
+  const editedLayer = document.createElement("canvas");
+  const hardMask = document.createElement("canvas");
+  const coreMask = document.createElement("canvas");
+  const blendMask = document.createElement("canvas");
+  for (const target of [canvas, editedLayer, hardMask, coreMask, blendMask]) {
+    target.width = width;
+    target.height = height;
+  }
+  const context = canvas.getContext("2d");
+  const editedContext = editedLayer.getContext("2d");
+  const hardContext = hardMask.getContext("2d");
+  const coreContext = coreMask.getContext("2d");
+  const blendContext = blendMask.getContext("2d");
+  if (!context || !editedContext || !hardContext || !coreContext || !blendContext) {
+    throw new Error("This browser cannot merge the selective QA correction.");
+  }
+
+  const feather = Math.max(8, Math.min(28, Math.round(Math.min(width, height) * 0.009)));
+  hardContext.fillStyle = "#fff";
+  coreContext.fillStyle = "#fff";
+  for (const [x, y, boxWidth, boxHeight] of boxes) {
+    const left = Math.floor(x / 1000 * width);
+    const top = Math.floor(y / 1000 * height);
+    const pixelWidth = Math.ceil(boxWidth / 1000 * width);
+    const pixelHeight = Math.ceil(boxHeight / 1000 * height);
+    hardContext.fillRect(left, top, pixelWidth, pixelHeight);
+    const inset = Math.min(feather, Math.floor(pixelWidth / 4), Math.floor(pixelHeight / 4));
+    coreContext.fillRect(left + inset, top + inset, Math.max(1, pixelWidth - inset * 2), Math.max(1, pixelHeight - inset * 2));
+  }
+  for (const maskContext of [hardContext, coreContext]) {
+    maskContext.globalCompositeOperation = "destination-out";
+    for (const [x, y, boxWidth, boxHeight] of protectedBoxes) {
+      maskContext.fillRect(
+        Math.floor(x / 1000 * width),
+        Math.floor(y / 1000 * height),
+        Math.ceil(boxWidth / 1000 * width),
+        Math.ceil(boxHeight / 1000 * height),
+      );
+    }
+    maskContext.globalCompositeOperation = "source-over";
+  }
+
+  blendContext.filter = `blur(${feather}px)`;
+  blendContext.drawImage(coreMask, 0, 0);
+  blendContext.filter = "none";
+  blendContext.globalCompositeOperation = "destination-in";
+  blendContext.drawImage(hardMask, 0, 0);
+
+  editedContext.drawImage(edited, 0, 0, width, height);
+  editedContext.globalCompositeOperation = "destination-in";
+  editedContext.drawImage(blendMask, 0, 0);
+
+  context.drawImage(original, 0, 0, width, height);
+  context.drawImage(editedLayer, 0, 0);
+  return canvas.toDataURL("image/png");
 }
 
 async function optimizeReferencesForTransport(files: File[]) {
@@ -433,6 +626,7 @@ export default function Home() {
   const [referenceProgress, setReferenceProgress] = useState<Record<string, number>>({});
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [result, setResult] = useState<{ dataUrl: string; filename: string; qa: QaResult | null } | null>(null);
+  const [qaRedoSelection, setQaRedoSelection] = useState<Record<string, boolean>>({});
   const hasLoadedDraft = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -446,6 +640,13 @@ export default function Home() {
   );
   const hasFiles = totalReferences > 0;
   const heroOptions = useMemo(() => items.filter((item) => item.references.length > 0), [items]);
+  const selectedQaItemIds = (result?.qa?.items ?? [])
+    .filter((item) => qaRedoSelection[item.id])
+    .map((item) => item.id);
+  const selectedQaRegions = (result?.qa?.items ?? []).filter((item) => qaRedoSelection[item.id] && item.box);
+  const [previewWidth, previewHeight] = resolvedSize({ collageType, orientation, quality, outputResolution, items: [] })
+    .split("x")
+    .map(Number);
 
   useEffect(() => {
     let cancelled = false;
@@ -758,7 +959,6 @@ export default function Home() {
           : item,
       ),
     );
-    if (selectedFile) void analyzePrimaryReference(itemKey, selectedFile);
   }
 
   function makeDraft(): SavedDraft {
@@ -774,7 +974,7 @@ export default function Home() {
       lighting,
       heroItemId,
       outputFilename,
-      runQa: qaFeedback ? true : runQa,
+      runQa,
       savedAt: Date.now(),
       items: items.map((item) => ({
         id: item.id,
@@ -803,9 +1003,9 @@ export default function Home() {
     setItems((current) => {
       revokeItemPreviews(current);
       return draft.items.map((item) => {
-        const savedReferences = item.references?.length
+        const savedReferences: DraftReference[] = item.references?.length
           ? item.references
-          : (item.files ?? []).map((file) => ({ uiKey: createUiKey(), file }));
+          : (item.files ?? []).map((file) => ({ uiKey: createUiKey(), file, primary: false, provenance: "upload" }));
         return {
           id: item.id,
           role: item.role,
@@ -883,6 +1083,7 @@ export default function Home() {
     includeApiKey: boolean,
     fileIdsByReference?: Map<string, string>,
     qaFeedback?: QaResult,
+    qaSelection?: QaSelectionInput,
   ): CollageRequestInput {
     return {
       collageType,
@@ -896,14 +1097,16 @@ export default function Home() {
       heroItemId: heroItemId || undefined,
       outputFilename,
       apiKey: includeApiKey ? apiKey : "",
-      runQa,
+      runQa: qaFeedback ? true : runQa,
       qaFeedback: qaFeedback ? {
         score: qaFeedback.score,
         findings: qaFeedback.findings,
         recommendation: qaFeedback.recommendation,
+        items: qaFeedback.items,
       } : undefined,
+      qaSelection,
       items: items.map((item, index) => ({
-        id: item.id || slugify(item.role || `item_${index + 1}`),
+        id: resolvedItemId(item, index),
         role: item.role,
         brand: item.brand,
         name: item.name,
@@ -941,27 +1144,45 @@ export default function Home() {
     }
   }
 
-  async function generate(diagnosticMode = false, diagnosticCount = 1, qaFeedback?: QaResult) {
+  async function generate(diagnosticMode = false, diagnosticCount = 1, qaRedo?: QaRedoRequest) {
+    const qaFeedback = qaRedo?.feedback;
     const controller = new AbortController();
     abortRef.current = controller;
     setIsWorking(true);
-    if (!qaFeedback) setResult(null);
+    if (!qaRedo) {
+      setResult(null);
+      setQaRedoSelection({});
+    }
     setPromptPreview("");
     setOverallProgress(0);
-    setWorkingStage(qaFeedback ? "Preparing QA correction pass" : "Checking references");
+    setWorkingStage(qaRedo ? "Preparing selective QA mask" : "Checking references");
     let transportFilesForReport: File[] | null = null;
+    let selectiveAssets: SelectiveEditAssets | undefined;
 
     try {
-      const validationPayload = makePayload(false, undefined, qaFeedback);
+      if (qaRedo) {
+        const selectedReferenceCount = items.reduce((count, item, index) => (
+          qaRedo.itemIds.includes(resolvedItemId(item, index)) ? count + item.references.length : count
+        ), 0);
+        if (selectedReferenceCount > 15) {
+          throw new Error("The selected items use more than 15 correction views. Uncheck an item or remove one supporting view.");
+        }
+        selectiveAssets = await createSelectiveEditAssets(qaRedo);
+      }
+      const validationPayload = makePayload(false, undefined, qaFeedback, selectiveAssets?.selection);
       validateCollageRequest(validationPayload);
       const references = items.flatMap((item) =>
         item.references.map((reference) => ({ itemKey: item.uiKey, itemId: item.id, reference })),
       );
       setOverallProgress(100);
-      setWorkingStage(qaFeedback ? "Re-creating with QA corrections" : runQa ? "Composing and reviewing collage" : "Composing collage");
-      const payload = makePayload(true, undefined, qaFeedback);
+      setWorkingStage(qaRedo ? "Repairing selected items" : runQa ? "Composing and reviewing collage" : "Composing collage");
+      const payload = makePayload(true, undefined, qaFeedback, selectiveAssets?.selection);
       const form = new FormData();
       form.append("payload", JSON.stringify(payload));
+      if (selectiveAssets) {
+        form.append("baseImage", selectiveAssets.baseFile, selectiveAssets.baseFile.name);
+        form.append("mask", selectiveAssets.maskFile, selectiveAssets.maskFile.name);
+      }
       const referencesToSend = diagnosticMode ? references.slice(0, diagnosticCount) : references;
       setWorkingStage("Optimizing references for direct generation");
       const transportFiles = await optimizeReferencesForTransport(
@@ -969,7 +1190,7 @@ export default function Home() {
       );
       transportFilesForReport = transportFiles;
       for (const file of transportFiles) form.append("image[]", file, file.name);
-      setWorkingStage(qaFeedback ? "Re-creating with QA corrections" : runQa ? "Composing and reviewing collage" : "Composing collage");
+      setWorkingStage(qaRedo ? "Repairing selected items" : runQa ? "Composing and reviewing collage" : "Composing collage");
       const response = await fetch(diagnosticMode ? `/api/generate?diagnostic=isolation&count=${diagnosticCount}` : "/api/generate", {
         method: "POST",
         signal: controller.signal,
@@ -994,14 +1215,26 @@ export default function Home() {
       }
 
       if (!response.imageBase64) throw new Error("Generation completed without an image.");
-      const dataUrl = `data:${response.mimeType || "image/png"};base64,${response.imageBase64}`;
+      const generatedDataUrl = `data:${response.mimeType || "image/png"};base64,${response.imageBase64}`;
+      let dataUrl = generatedDataUrl;
+      if (qaRedo && selectiveAssets) {
+        setWorkingStage("Mending protected edges");
+        dataUrl = await compositeSelectiveEdit(
+          qaRedo.sourceDataUrl,
+          generatedDataUrl,
+          selectiveAssets.boxes,
+          selectiveAssets.protectedBoxes,
+        );
+      }
+      const qa = response.qa ?? null;
       setResult({
         dataUrl,
         filename: response.filename || outputFilename || "material-collage.png",
-        qa: response.qa ?? null,
+        qa,
       });
+      setQaRedoSelection(Object.fromEntries((qa?.items ?? []).map((item) => [item.id, !item.passed && Boolean(item.box)])));
       setPromptPreview(response.prompt || "");
-      setPanelText(`${response.summary || "Collage generated."}${qaFeedback ? "\n\nQA findings were integrated into this correction pass." : ""}${response.notice ? `\n\n${response.notice}` : ""}`);
+      setPanelText(`${response.summary || "Collage generated."}${qaRedo ? "\n\nOnly the checked QA regions were regenerated; protected pixels were restored from the previous collage." : ""}${response.notice ? `\n\n${response.notice}` : ""}`);
       setDiagnostics(response.diagnostics ?? null);
       await saveDraft(false);
     } catch (error) {
@@ -1432,12 +1665,29 @@ export default function Home() {
               </span>
             </div>
 
-            <div className={`result-stage ${result ? "has-result" : ""}`}>
+            <div
+              className={`result-stage ${result ? "has-result" : ""}`}
+              style={result ? { aspectRatio: `${previewWidth} / ${previewHeight}` } : undefined}
+            >
               {result ? (
                 <img src={result.dataUrl} alt="Generated material collage" />
               ) : (
                 <img src="/sample-collage.png" alt="Sample material collage" />
               )}
+              {result && !isWorking && selectedQaRegions.map((item) => {
+                const [x, y, width, height] = item.box as NormalizedBox;
+                const itemIndex = items.findIndex((candidate, index) => resolvedItemId(candidate, index) === item.id);
+                return (
+                  <span
+                    className="qa-region-outline"
+                    key={item.id}
+                    style={{ left: `${x / 10}%`, top: `${y / 10}%`, width: `${width / 10}%`, height: `${height / 10}%` }}
+                    aria-hidden="true"
+                  >
+                    {itemIndex >= 0 ? String(itemIndex + 1).padStart(2, "0") : "QA"}
+                  </span>
+                );
+              })}
             </div>
 
             {isWorking && (
@@ -1485,14 +1735,39 @@ export default function Home() {
                   <ul>{result.qa.findings.map((finding) => <li key={finding}>{finding}</li>)}</ul>
                 )}
                 {result.qa.recommendation && <p>{result.qa.recommendation}</p>}
-                {!result.qa.passed && !result.qa.reviewFailed && (
+                {!result.qa.reviewFailed && result.qa.items?.length > 0 && (
+                  <fieldset className="qa-item-selector">
+                    <legend>Items to re-render</legend>
+                    {items.map((item, index) => ({ item, index })).filter(({ item }) => item.references.length > 0).map(({ item, index }) => {
+                      const id = resolvedItemId(item, index);
+                      const itemReview = result.qa?.items.find((entry) => entry.id === id);
+                      return (
+                        <label className={qaRedoSelection[id] ? "selected" : ""} key={id} title={itemReview?.finding || ""}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(qaRedoSelection[id])}
+                            disabled={isWorking || !itemReview?.box}
+                            onChange={(event) => setQaRedoSelection((current) => ({ ...current, [id]: event.target.checked }))}
+                          />
+                          <span><strong>{String(index + 1).padStart(2, "0")}</strong>{item.role}</span>
+                          <small>{itemReview?.box ? itemReview.passed ? "QA passed" : "QA flagged" : "Not located"}</small>
+                        </label>
+                      );
+                    })}
+                  </fieldset>
+                )}
+                {!result.qa.reviewFailed && result.qa.items?.length > 0 && (
                   <button
                     type="button"
                     className="qa-recreate-button"
-                    onClick={() => void generate(false, 1, result.qa || undefined)}
-                    disabled={isWorking}
+                    onClick={() => void generate(false, 1, {
+                      feedback: result.qa as QaResult,
+                      itemIds: selectedQaItemIds,
+                      sourceDataUrl: result.dataUrl,
+                    })}
+                    disabled={isWorking || selectedQaItemIds.length === 0}
                   >
-                    {isWorking ? "Re-creating with QA fixes..." : "Re-create with QA fixes"}
+                    {isWorking ? "Repairing checked items..." : "Re-create checked items"}
                   </button>
                 )}
               </section>
