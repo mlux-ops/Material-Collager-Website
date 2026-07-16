@@ -10,6 +10,7 @@ const MAX_PNG_BYTES = 10 * 1024 * 1024;
 const MAX_CHUNK_BYTES = 384 * 1024;
 const MAX_CHUNKS = 64;
 const RELEASE_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000;
+const RELEASE_IMPORT_RETIRED = true;
 
 type ReleaseRuntimeEnv = {
   RELEASE_IMPORT_TOKEN?: string;
@@ -39,6 +40,10 @@ const approvedCollages = new Map<string, { collage: ApprovedCollage; order: numb
 
 export async function POST(request: Request) {
   try {
+    if (RELEASE_IMPORT_RETIRED) {
+      return Response.json({ ok: false, error: "The release import is closed." }, { status: 410 });
+    }
+
     const configuredToken = (env as unknown as ReleaseRuntimeEnv).RELEASE_IMPORT_TOKEN?.trim();
     if (!configuredToken) {
       return Response.json({ ok: false, error: "Release import is disabled." }, { status: 503 });
