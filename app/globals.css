@@ -15,6 +15,7 @@
   --warm: #a54d39;
   --danger: #9a392f;
   --shadow: 0 14px 38px rgba(25, 33, 28, 0.08);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 * {
@@ -29,7 +30,8 @@ body {
   margin: 0;
   background: var(--background);
   color: var(--ink);
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--font-inter), Arial, Helvetica, sans-serif;
+  font-optical-sizing: auto;
 }
 
 button,
@@ -926,7 +928,7 @@ button:disabled {
   background: var(--surface-soft);
   border: 1px solid var(--line);
   color: #343a36;
-  font-family: var(--font-geist-mono), monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;
   margin-top: 12px;
@@ -941,7 +943,7 @@ button:disabled {
   background: #f7f8f6;
   border: 1px solid var(--line);
   color: #303632;
-  font-family: var(--font-geist-mono), monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   line-height: 1.5;
   margin: 0;
@@ -979,7 +981,7 @@ button:disabled {
 .diagnostic-report pre {
   background: #f7f8f6;
   border: 1px solid var(--line);
-  font-family: var(--font-geist-mono), monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   line-height: 1.5;
   max-height: 300px;
@@ -1897,7 +1899,7 @@ body {
   border-left: 4px solid var(--yellow);
   border-radius: 4px;
   color: #414a44;
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--font-inter), Arial, Helvetica, sans-serif;
   font-size: 10px;
   line-height: 1.45;
   margin-top: 9px;
@@ -2248,7 +2250,7 @@ body {
 body {
   background: var(--mono-off-white);
   color: var(--mono-black);
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--font-inter), Arial, Helvetica, sans-serif;
 }
 
 .site-navigation {

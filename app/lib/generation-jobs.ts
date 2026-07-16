@@ -143,7 +143,8 @@ export async function persistGenerationOutput(input: {
   if (existing) {
     await DB.prepare(`UPDATE generation_jobs SET
       mode = 'immediate', status = 'completed', output_key = ?, filename = ?, format = ?, prompt = ?, payload_json = ?,
-      usage_json = ?, qa_json = ?, error = NULL, updated_at = ?, expires_at = ?, render_kind = ?, collage_type = ?, title = ?
+      usage_json = ?, qa_json = ?, error = NULL, updated_at = ?, expires_at = ?, render_kind = ?, collage_type = ?,
+      library_visible = ?, title = ?
       WHERE id = ?`)
       .bind(
         outputKey,
@@ -157,6 +158,7 @@ export async function persistGenerationOutput(input: {
         now + THIRTY_DAYS_MS,
         input.renderKind,
         input.collageType,
+        input.renderKind === "final" ? 1 : 0,
         title,
         id,
       ).run();
@@ -190,15 +192,19 @@ export async function persistGenerationOutput(input: {
 
 export async function setLibraryVisibility(id: string, visible: boolean) {
   const DB = await ensureJobStorage();
-  await DB.prepare("UPDATE generation_jobs SET library_visible = ?, updated_at = ? WHERE id = ? AND status = 'completed' AND output_key IS NOT NULL")
+  await DB.prepare(`UPDATE generation_jobs SET library_visible = ?, updated_at = ?
+    WHERE id = ? AND status = 'completed' AND output_key IS NOT NULL AND render_kind = 'final'`)
     .bind(visible ? 1 : 0, Date.now(), id).run();
-  return DB.prepare("SELECT * FROM generation_jobs WHERE id = ?").bind(id).first<JobRow>();
+  return DB.prepare(`SELECT * FROM generation_jobs
+    WHERE id = ? AND status = 'completed' AND output_key IS NOT NULL AND render_kind = 'final'`)
+    .bind(id).first<JobRow>();
 }
 
 export async function listLibraryJobs() {
   const DB = await ensureJobStorage();
   return DB.prepare(`SELECT * FROM generation_jobs
-    WHERE library_visible = 1 AND status = 'completed' AND output_key IS NOT NULL AND expires_at >= ?
+    WHERE library_visible = 1 AND status = 'completed' AND output_key IS NOT NULL
+      AND render_kind = 'final' AND expires_at >= ?
     ORDER BY created_at DESC LIMIT 60`)
     .bind(Date.now()).all<JobRow>();
 }

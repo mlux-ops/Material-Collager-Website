@@ -1,0 +1,147 @@
+{
+  "$schema": "./release-collage-rights.schema.json",
+  "version": 1,
+  "collages": [
+    {
+      "assetKey": "chrome-bathroom-package",
+      "title": "Chrome Bathroom Package",
+      "approvedForPublicPreview": true,
+      "approvedForDownload": true,
+      "rightsBasis": "owned",
+      "approvedBy": "ML",
+      "approvedAt": "2026-07-16T02:20:22Z",
+      "sourceAssets": [
+        {
+          "description": "Hansgrohe plumbing fixtures",
+          "rightsBasis": "owned",
+          "reference": "material-collage (1).png"
+        }
+      ],
+      "notes": "Image 1 supplied and approved for the release Library."
+    },
+    {
+      "assetKey": "chrome-bathroom-package-v2",
+      "title": "Chrome Bathroom Package v2",
+      "approvedForPublicPreview": true,
+      "approvedForDownload": true,
+      "rightsBasis": "owned",
+      "approvedBy": "ML",
+      "approvedAt": "2026-07-16T02:20:22Z",
+      "sourceAssets": [
+        {
+          "description": "Kohler plumbing fixtures",
+          "rightsBasis": "owned",
+          "reference": "bath2_fixtures.png"
+        }
+      ],
+      "notes": "Image 2 supplied and approved for the release Library."
+    },
+    {
+      "assetKey": "matte-black-bathroom-package",
+      "title": "Matte Black Bathroom Package",
+      "approvedForPublicPreview": true,
+      "approvedForDownload": true,
+      "rightsBasis": "owned",
+      "approvedBy": "ML",
+      "approvedAt": "2026-07-16T02:20:22Z",
+      "sourceAssets": [
+        {
+          "description": "Kohler plumbing fixtures",
+          "rightsBasis": "owned",
+          "reference": "bath3_fixtures.png"
+        }
+      ],
+      "notes": "Image 3 supplied and approved for the release Library."
+    },
+    {
+      "assetKey": "kitchen-cabinet-package",
+      "title": "Kitchen Cabinet Package",
+      "approvedForPublicPreview": true,
+      "approvedForDownload": true,
+      "rightsBasis": "owned",
+      "approvedBy": "ML",
+      "approvedAt": "2026-07-16T02:20:22Z",
+      "sourceAssets": [
+        {
+          "description": "Brizo faucet",
+          "rightsBasis": "owned",
+          "reference": "material_collage.png"
+        }
+      ],
+      "notes": "Image 4 supplied and approved for the release Library."
+    },
+    {
+      "assetKey": "matte-white-terrazzo-bathroom-package",
+      "title": "Matte White Terrazzo Bathroom Package",
+      "approvedForPublicPreview": true,
+      "approvedForDownload": true,
+      "rightsBasis": "owned",
+      "approvedBy": "ML",
+      "approvedAt": "2026-07-16T02:20:22Z",
+      "sourceAssets": [
+        {
+          "description": "Hansgrohe plumbing fixtures",
+          "rightsBasis": "owned",
+          "reference": "material-collage2 (6).png"
+        }
+      ],
+      "notes": "Image 5 supplied and approved for the release Library."
+    },
+    {
+      "assetKey": "primary-bathroom-brizo-package",
+      "title": "Primary Bathroom Brizo Package",
+      "approvedForPublicPreview": true,
+      "approvedForDownload": true,
+      "rightsBasis": "owned",
+      "approvedBy": "ML",
+      "approvedAt": "2026-07-16T02:20:22Z",
+      "sourceAssets": [
+        {
+          "description": "Brizo plumbing fixtures",
+          "rightsBasis": "owned",
+          "reference": "material-collage2 (7).png"
+        },
+        {
+          "description": "Elm Surfaces tiles",
+          "rightsBasis": "owned",
+          "reference": "material-collage2 (7).png"
+        }
+      ],
+      "notes": "Image 6 supplied and approved for the release Library."
+    },
+    {
+      "assetKey": "primary-bathroom-kohler-package",
+      "title": "Primary Bathroom Kohler Package",
+      "approvedForPublicPreview": true,
+      "approvedForDownload": true,
+      "rightsBasis": "owned",
+      "approvedBy": "ML",
+      "approvedAt": "2026-07-16T02:20:22Z",
+      "sourceAssets": [
+        {
+          "description": "Kohler plumbing fixtures",
+          "rightsBasis": "owned",
+          "reference": "primary_bath_fixtures.png"
+        }
+      ],
+      "notes": "Image 7 supplied and approved for the release Library."
+    },
+    {
+      "assetKey": "bathroom-tile-package",
+      "title": "Bathroom Tile Package",
+      "approvedForPublicPreview": true,
+      "approvedForDownload": true,
+      "rightsBasis": "owned",
+      "approvedBy": "ML",
+      "approvedAt": "2026-07-16T02:20:22Z",
+      "sourceAssets": [
+        {
+          "description": "Elm Surfaces tiles",
+          "rightsBasis": "owned",
+          "reference": "bath3_tiles.png"
+        }
+      ],
+      "notes": "Image 8 supplied and approved for the release Library."
+    }
+  ]
+}

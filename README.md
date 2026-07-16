@@ -51,3 +51,31 @@ The original Python CLI remains available:
 material-collager dry-run --input request.json
 material-collager generate --input request.json --output out.png
 ```
+
+## Release Readiness
+
+Inter is self-hosted from `app/fonts/`. Release evidence and staging procedures are documented in:
+
+- `docs/release-decisions.md`
+- `docs/staging-deployment-checklist.md`
+- `docs/device-release-qa.md`
+
+Validate the prepared rights manifest and local release tooling:
+
+```powershell
+npm run validate:rights
+npm run test:release-readiness
+npm run test:scene-lab
+npm run lint
+npm run build
+```
+
+After a private staging URL and at least eight approved final records exist:
+
+```powershell
+npm run qa:scaffold -- --date YYYY-MM-DD --commit COMMIT_SHA --base-url https://PRIVATE-REVIEW-URL
+npm run validate:rights -- --release
+npm run validate:library -- --base-url https://PRIVATE-REVIEW-URL --release `
+  --output artifacts/release-qa/YYYY-MM-DD/library-validation.json `
+  --records-output artifacts/release-qa/YYYY-MM-DD/library-records.json
+```

@@ -1,6 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   COLLAGE_TYPES,
@@ -714,7 +715,7 @@ export default function Home() {
     void refreshJobs();
     const interval = window.setInterval(() => void refreshJobs(), 30000);
     return () => window.clearInterval(interval);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!hasLoadedDraft.current) return;
@@ -1479,10 +1480,10 @@ export default function Home() {
   return (
     <main className="app-shell generator-shell">
       <header className="site-navigation generator-navigation">
-        <a className="site-wordmark" href="/">Material Collager</a>
+        <Link className="site-wordmark" href="/">Material Collager</Link>
         <nav aria-label="Primary navigation">
-          <a href="/">Library</a>
-          <a className="active" href="/generator">Generator</a>
+          <Link href="/">Library</Link>
+          <Link className="active" href="/generator">Generator</Link>
         </nav>
         <div className="generator-status" aria-label="Board reference summary">
           <span>{totalReferences}/{MAX_REFERENCE_IMAGES} references</span>
@@ -1883,7 +1884,7 @@ export default function Home() {
               {result?.jobId && !result.libraryVisible && (
                 <button type="button" className="library-save-button" onClick={() => void saveResultToLibrary()}>Save to Library</button>
               )}
-              {result?.libraryVisible && <a className="library-link-button" href="/">View in Library</a>}
+              {result?.libraryVisible && <Link className="library-link-button" href="/">View in Library</Link>}
             </div>
 
             {result && result.kind !== "final" && (

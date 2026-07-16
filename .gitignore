@@ -50,3 +50,8 @@ public/screenshot.png
 
 # python package output
 *.egg-info/
+
+# Generated release QA evidence (templates remain tracked)
+/artifacts/release-qa/*/
+!/artifacts/release-qa/templates/
+!/artifacts/release-qa/templates/**
