@@ -1,7 +1,7 @@
 import { Matrix4, MathUtils, Quaternion, Vector3 } from "three";
 
-// Keep the measured rail direction, but tighten the interval so adjacent panes
-// overlap with the steady cadence visible in the reference capture.
+// Straight lower-left to upper-right rail. The interval is intentionally tight
+// enough for the regular overlapping cadence visible in the reference.
 const RAIL_ORIGIN = new Vector3(-3.15, -2.05, 4.55);
 const RAIL_STEP = new Vector3(0.98, 0.665, -1.155);
 const FRONT_BUFFER = 1.35;
@@ -9,20 +9,25 @@ const FRONT_BUFFER = 1.35;
 const WORLD_UP = new Vector3(0, 1, 0);
 const CAMERA_FACING_NORMAL = new Vector3(0, 0, 1);
 const SCROLL_DIRECTION = RAIL_STEP.clone().multiplyScalar(-1);
-const RAIL_FACING_NORMAL = new Vector3(SCROLL_DIRECTION.x, 0, SCROLL_DIRECTION.z).normalize();
+const RAIL_FACING_NORMAL = new Vector3(
+  SCROLL_DIRECTION.x,
+  0,
+  SCROLL_DIRECTION.z,
+).normalize();
 
-// The reference panes remain largely camera-facing while sharing one stable
-// orientation. A restrained rail-facing component preserves depth without
-// turning the stack into edge-on dominoes.
-const FACE_NORMAL = CAMERA_FACING_NORMAL.clone().lerp(RAIL_FACING_NORMAL, 0.32).normalize();
+// Keep every pane upright and parallel, like a line of dominoes. The normal is
+// primarily aligned with travel, but retains enough camera-facing bias for the
+// artwork to remain readable at the observed reference angle.
+const FACE_NORMAL = CAMERA_FACING_NORMAL.clone()
+  .lerp(RAIL_FACING_NORMAL, 0.58)
+  .normalize();
 const FACE_RIGHT = new Vector3().crossVectors(WORLD_UP, FACE_NORMAL).normalize();
 const FACE_UP = new Vector3().crossVectors(FACE_NORMAL, FACE_RIGHT).normalize();
 const BASE_ORIENTATION = new Quaternion().setFromRotationMatrix(
   new Matrix4().makeBasis(FACE_RIGHT, FACE_UP, FACE_NORMAL),
 ).multiply(new Quaternion().setFromAxisAngle(FACE_NORMAL, MathUtils.degToRad(-1.2)));
 
-// Hover extraction is intentionally screen-right dominant, with only a small
-// movement toward the camera so the pane separates without feeling enlarged.
+// Reference hover behavior extracts one pane predominantly toward screen-right.
 export const SCENE_WHEEL_HOVER_OFFSET = new Vector3(1.18, 0.02, 0.2);
 
 export type SceneWheelPose = {

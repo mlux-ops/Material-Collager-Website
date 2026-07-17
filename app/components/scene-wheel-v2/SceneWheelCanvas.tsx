@@ -4,16 +4,17 @@ import { Suspense, useMemo, useRef, type MutableRefObject } from "react";
 import { Canvas, useFrame, useLoader } from "@react-three/fiber";
 import { NoToneMapping, SRGBColorSpace, TextureLoader } from "three";
 import type { SceneLabCollageItem } from "@/app/lib/scene-lab-assets";
-import { SceneCard } from "./SceneCard";
+import { SceneCard, type SceneWheelHoverState } from "./SceneCard";
 import { SCENE_WHEEL_CAMERA } from "./curve-model";
 
 type Props = {
   items: readonly SceneLabCollageItem[];
+  onHover: (state: SceneWheelHoverState) => void;
   onOpen: (item: SceneLabCollageItem) => void;
   targetProgress: MutableRefObject<number>;
 };
 
-function WheelScene({ items, onOpen, targetProgress }: Props) {
+function WheelScene({ items, onHover, onOpen, targetProgress }: Props) {
   const urls = useMemo(() => items.map((item) => item.url), [items]);
   const textures = useLoader(TextureLoader, urls);
   const renderedProgress = useRef(targetProgress.current);
@@ -41,6 +42,7 @@ function WheelScene({ items, onOpen, targetProgress }: Props) {
           count={items.length}
           index={index}
           item={item}
+          onHover={onHover}
           onOpen={onOpen}
           progress={renderedProgress}
           texture={textures[index]}
@@ -64,6 +66,7 @@ export default function SceneWheelCanvas(props: Props) {
         gl.setClearColor(0xfafafa, 1);
         gl.domElement.setAttribute("data-scene-renderer", "scene-wheel-v2-linear-glass");
       }}
+      onPointerMissed={() => props.onHover(null)}
     >
       <color attach="background" args={["#fafafa"]} />
       <Suspense fallback={null}>

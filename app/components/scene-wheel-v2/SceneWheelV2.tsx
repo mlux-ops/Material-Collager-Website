@@ -10,6 +10,7 @@ import {
   type LibraryCollageRecord,
   type SceneLabCollageItem,
 } from "@/app/lib/scene-lab-assets";
+import type { SceneWheelHoverState } from "./SceneCard";
 import { useNativeScrollProgress } from "./useNativeScrollProgress";
 import styles from "./scene-wheel-v2.module.css";
 
@@ -20,6 +21,7 @@ export default function SceneWheelV2() {
   const targetProgress = useNativeScrollProgress(trackRef);
   const [records, setRecords] = useState<LibraryCollageRecord[]>([]);
   const [libraryState, setLibraryState] = useState<"loading" | "ready" | "fallback">("loading");
+  const [hoverState, setHoverState] = useState<SceneWheelHoverState>(null);
   const [selectedItem, setSelectedItem] = useState<SceneLabCollageItem | null>(null);
 
   useEffect(() => {
@@ -53,6 +55,12 @@ export default function SceneWheelV2() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [selectedItem]);
 
+  useEffect(() => {
+    const clearHover = () => setHoverState(null);
+    window.addEventListener("blur", clearHover);
+    return () => window.removeEventListener("blur", clearHover);
+  }, []);
+
   const catalog = useMemo(
     () => adaptCompletedCollages(records, { allowLabFixtures: true }),
     [records],
@@ -62,11 +70,15 @@ export default function SceneWheelV2() {
     <main className={styles.page}>
       <section ref={trackRef} className={styles.track} aria-label="Experimental linear material rail">
         <div className={styles.sticky}>
-          <div className={styles.canvas}>
+          <div className={styles.canvas} onPointerLeave={() => setHoverState(null)}>
             {catalog.items.length > 0 ? (
               <SceneWheelCanvas
                 items={catalog.items}
-                onOpen={setSelectedItem}
+                onHover={setHoverState}
+                onOpen={(item) => {
+                  setHoverState(null);
+                  setSelectedItem(item);
+                }}
                 targetProgress={targetProgress}
               />
             ) : null}
@@ -89,6 +101,15 @@ export default function SceneWheelV2() {
             <span>SCROLL BOTH DIRECTIONS</span>
             <i />
           </div>
+
+          {hoverState ? (
+            <p
+              className={styles.cursorLabel}
+              style={{ left: hoverState.clientX + 14, top: hoverState.clientY }}
+            >
+              {hoverState.item.title}
+            </p>
+          ) : null}
 
           <ol className={styles.semanticList}>
             {catalog.items.map((item) => <li key={item.id}>{item.accessibleName}</li>)}

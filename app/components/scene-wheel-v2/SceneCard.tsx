@@ -41,21 +41,22 @@ type Props = {
 type PaneProfile = {
   glassOpacity: number;
   imageOpacity: number;
+  smoke: string;
 };
 
 const CARD_HEIGHT = 2.52;
 const CARD_DEPTH = 0.045;
 const IMAGE_INSET = 0.018;
 
-// The reference uses a varied field: some panes are clearer, while others read
-// as smoke-tinted glass. Keep the variation deterministic instead of random.
+// The reference field mixes clearer and smokier panes. Variation is stable by
+// track index so the composition does not flicker or change between renders.
 const PANE_PROFILES: readonly PaneProfile[] = [
-  { glassOpacity: 0.055, imageOpacity: 0.88 },
-  { glassOpacity: 0.075, imageOpacity: 0.78 },
-  { glassOpacity: 0.045, imageOpacity: 0.93 },
-  { glassOpacity: 0.09, imageOpacity: 0.72 },
-  { glassOpacity: 0.06, imageOpacity: 0.84 },
-  { glassOpacity: 0.08, imageOpacity: 0.76 },
+  { glassOpacity: 0.045, imageOpacity: 0.94, smoke: "#f3f6f6" },
+  { glassOpacity: 0.07, imageOpacity: 0.86, smoke: "#e9eeee" },
+  { glassOpacity: 0.035, imageOpacity: 0.97, smoke: "#f6f8f8" },
+  { glassOpacity: 0.085, imageOpacity: 0.8, smoke: "#dfe5e6" },
+  { glassOpacity: 0.055, imageOpacity: 0.91, smoke: "#edf1f1" },
+  { glassOpacity: 0.075, imageOpacity: 0.84, smoke: "#e4e9ea" },
 ];
 
 export function SceneCard({ count, index, item, onHover, onOpen, progress, texture }: Props) {
@@ -65,7 +66,7 @@ export function SceneCard({ count, index, item, onHover, onOpen, progress, textu
   const edgeMaterialRef = useRef<MeshPhysicalMaterial>(null);
   const hoverTarget = useRef(0);
   const hoverValue = useRef(0);
-  const { gl } = useThree();
+  const maxAnisotropy = useThree((state) => state.gl.capabilities.getMaxAnisotropy());
 
   const aspect = useMemo(() => {
     const image = texture.image as ImageLike;
@@ -77,18 +78,18 @@ export function SceneCard({ count, index, item, onHover, onOpen, progress, textu
   const profile = PANE_PROFILES[index % PANE_PROFILES.length];
   const width = CARD_HEIGHT * aspect;
 
-  useEffect(() => {
-    texture.colorSpace = SRGBColorSpace;
-    texture.minFilter = LinearMipmapLinearFilter;
-    texture.magFilter = LinearFilter;
-    texture.generateMipmaps = true;
-    texture.anisotropy = Math.min(16, gl.capabilities.getMaxAnisotropy());
-    texture.needsUpdate = true;
-  }, [gl, texture]);
+  const configuredTexture = useMemo(() => {
+    const next = texture.clone();
+    next.colorSpace = SRGBColorSpace;
+    next.minFilter = LinearMipmapLinearFilter;
+    next.magFilter = LinearFilter;
+    next.generateMipmaps = true;
+    next.anisotropy = Math.min(16, maxAnisotropy);
+    next.needsUpdate = true;
+    return next;
+  }, [maxAnisotropy, texture]);
 
-  useEffect(() => () => {
-    gl.domElement.style.cursor = "default";
-  }, [gl]);
+  useEffect(() => () => configuredTexture.dispose(), [configuredTexture]);
 
   const reportHover = (event: ThreeEvent<PointerEvent>) => {
     const nativeEvent = event.nativeEvent as PointerEvent;
@@ -111,11 +112,13 @@ export function SceneCard({ count, index, item, onHover, onOpen, progress, textu
     group.scale.setScalar(pose.scale * (1 + hoverValue.current * 0.012));
     group.visible = pose.opacity > 0.002;
 
-    // One image layer preserves texture sharpness. Hovering clarifies the pane
-    // slightly, while the separate glass surfaces supply the frosted veil.
-    imageMaterial.opacity = pose.opacity * Math.min(0.98, profile.imageOpacity + hoverValue.current * 0.08);
-    glassMaterial.opacity = pose.opacity * (profile.glassOpacity + hoverValue.current * 0.018);
-    edgeMaterial.opacity = pose.opacity * (0.1 + profile.glassOpacity * 0.45);
+    // One image layer preserves clarity. The independent shell and face layers
+    // provide the glass veil without sampling or blurring neighboring texels.
+    imageMaterial.opacity = pose.opacity
+      * Math.min(0.995, profile.imageOpacity + hoverValue.current * 0.055);
+    glassMaterial.opacity = pose.opacity
+      * Math.max(0.018, profile.glassOpacity - hoverValue.current * 0.012);
+    edgeMaterial.opacity = pose.opacity * (0.075 + profile.glassOpacity * 0.35);
   });
 
   return (
@@ -124,19 +127,19 @@ export function SceneCard({ count, index, item, onHover, onOpen, progress, textu
         <boxGeometry args={[width, CARD_HEIGHT, CARD_DEPTH]} />
         <meshPhysicalMaterial
           ref={edgeMaterialRef}
-          clearcoat={0.65}
-          clearcoatRoughness={0.28}
-          color="#dfe7e9"
+          clearcoat={0.75}
+          clearcoatRoughness={0.22}
+          color={profile.smoke}
           depthTest
           depthWrite={false}
           ior={1.42}
           metalness={0}
-          opacity={0.12}
-          roughness={0.28}
+          opacity={0.09}
+          roughness={0.24}
           side={DoubleSide}
-          thickness={0.05}
+          thickness={0.045}
           transparent
-          transmission={0.58}
+          transmission={0.18}
         />
       </mesh>
 
@@ -146,7 +149,7 @@ export function SceneCard({ count, index, item, onHover, onOpen, progress, textu
           ref={imageMaterialRef}
           depthTest
           depthWrite={false}
-          map={texture}
+          map={configuredTexture}
           opacity={profile.imageOpacity}
           side={DoubleSide}
           toneMapped={false}
@@ -165,7 +168,6 @@ export function SceneCard({ count, index, item, onHover, onOpen, progress, textu
           event.stopPropagation();
           hoverTarget.current = 1;
           reportHover(event);
-          gl.domElement.style.cursor = "pointer";
         }}
         onPointerMove={(event) => {
           event.stopPropagation();
@@ -174,25 +176,24 @@ export function SceneCard({ count, index, item, onHover, onOpen, progress, textu
         onPointerLeave={() => {
           hoverTarget.current = 0;
           onHover(null);
-          gl.domElement.style.cursor = "default";
         }}
       >
         <planeGeometry args={[width, CARD_HEIGHT]} />
         <meshPhysicalMaterial
           ref={glassMaterialRef}
-          clearcoat={0.8}
-          clearcoatRoughness={0.22}
-          color="#f2f6f7"
+          clearcoat={0.92}
+          clearcoatRoughness={0.18}
+          color={profile.smoke}
           depthTest
           depthWrite={false}
           ior={1.36}
           metalness={0}
           opacity={profile.glassOpacity}
-          roughness={0.32}
+          roughness={0.27}
           side={DoubleSide}
-          thickness={0.018}
+          thickness={0.014}
           transparent
-          transmission={0.72}
+          transmission={0.1}
         />
       </mesh>
     </group>

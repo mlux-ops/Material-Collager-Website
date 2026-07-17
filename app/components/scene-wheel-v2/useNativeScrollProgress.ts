@@ -5,73 +5,178 @@ import { useEffect, useRef, type RefObject } from "react";
 const CENTER_FRACTION = 0.5;
 const EDGE_FRACTION = 0.12;
 const CARDS_PER_VIEWPORT = 1.72;
+const RESTORE_DELAY_MS = 140;
 
-export function useNativeScrollProgress(trackRef: RefObject<HTMLElement | null>) {
+export function useNativeScrollProgress(
+  trackRef: RefObject<HTMLElement | null>,
+) {
   const target = useRef(0);
 
   useEffect(() => {
-    let frame = 0;
+    let scrollFrame = 0;
+    let resizeFrame = 0;
+    let releaseFrame = 0;
+    let releaseFrameTwo = 0;
+    let restoreTimer = 0;
     let lastScrollY = window.scrollY;
-    let recentering = false;
+    let suppressScroll = false;
+
+    const previousScrollRestoration = window.history.scrollRestoration;
+    window.history.scrollRestoration = "manual";
 
     const metrics = () => {
       const track = trackRef.current;
       if (!track) return null;
+
       const start = window.scrollY + track.getBoundingClientRect().top;
       const distance = Math.max(1, track.offsetHeight - window.innerHeight);
-      return { distance, start };
+
+      return {
+        centerY: start + distance * CENTER_FRACTION,
+        distance,
+        start,
+      };
     };
 
-    const centerScroll = () => {
+    const writeProgress = () => {
+      const displayProgress = ((target.current % 1) + 1) % 1;
+      trackRef.current?.style.setProperty(
+        "--scene-wheel-progress",
+        displayProgress.toFixed(5),
+      );
+    };
+
+    const releaseScrollSuppression = () => {
+      if (releaseFrame) window.cancelAnimationFrame(releaseFrame);
+      if (releaseFrameTwo) window.cancelAnimationFrame(releaseFrameTwo);
+
+      releaseFrame = window.requestAnimationFrame(() => {
+        releaseFrameTwo = window.requestAnimationFrame(() => {
+          lastScrollY = window.scrollY;
+          suppressScroll = false;
+          releaseFrame = 0;
+          releaseFrameTwo = 0;
+        });
+      });
+    };
+
+    const recenter = () => {
       const current = metrics();
       if (!current) return;
-      const nextY = current.start + current.distance * CENTER_FRACTION;
-      recentering = true;
-      window.scrollTo({ left: 0, top: nextY, behavior: "auto" });
-      lastScrollY = nextY;
-      window.requestAnimationFrame(() => { recentering = false; });
+
+      suppressScroll = true;
+      window.scrollTo({ left: 0, top: current.centerY, behavior: "auto" });
+      lastScrollY = current.centerY;
+      writeProgress();
+      releaseScrollSuppression();
     };
 
-    const update = () => {
-      frame = 0;
+    const updateFromScroll = () => {
+      scrollFrame = 0;
       const current = metrics();
-      if (!current || recentering) return;
+      if (!current) return;
+
       const nextScrollY = window.scrollY;
+
+      if (suppressScroll) {
+        lastScrollY = nextScrollY;
+        return;
+      }
+
       const deltaPixels = nextScrollY - lastScrollY;
       lastScrollY = nextScrollY;
-      target.current += (deltaPixels / Math.max(1, window.innerHeight)) * CARDS_PER_VIEWPORT;
-      const localFraction = (nextScrollY - current.start) / current.distance;
-      const displayProgress = ((target.current % 1) + 1) % 1;
-      trackRef.current?.style.setProperty("--scene-wheel-progress", displayProgress.toFixed(5));
-      if (localFraction < EDGE_FRACTION || localFraction > 1 - EDGE_FRACTION) centerScroll();
+
+      if (deltaPixels !== 0) {
+        target.current +=
+          (deltaPixels / Math.max(1, window.innerHeight)) *
+          CARDS_PER_VIEWPORT;
+        writeProgress();
+      }
+
+      const localFraction =
+        (nextScrollY - current.start) / current.distance;
+
+      if (
+        localFraction < EDGE_FRACTION ||
+        localFraction > 1 - EDGE_FRACTION
+      ) {
+        recenter();
+      }
     };
 
-    const schedule = () => {
-      if (frame) return;
-      frame = window.requestAnimationFrame(update);
+    const scheduleScrollUpdate = () => {
+      if (scrollFrame) return;
+      scrollFrame = window.requestAnimationFrame(updateFromScroll);
     };
 
-    const initialize = () => {
+    const scheduleRecenter = () => {
+      if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
+      resizeFrame = window.requestAnimationFrame(() => {
+        resizeFrame = 0;
+        recenter();
+      });
+    };
+
+    const handleBoundaryWheel = (event: WheelEvent) => {
       const current = metrics();
       if (!current) return;
-      const centerY = current.start + current.distance * CENTER_FRACTION;
-      window.scrollTo({ left: 0, top: centerY, behavior: "auto" });
-      lastScrollY = centerY;
-      trackRef.current?.style.setProperty("--scene-wheel-progress", "0");
+
+      const localFraction =
+        (window.scrollY - current.start) / current.distance;
+      const blockedAtStart =
+        localFraction <= EDGE_FRACTION && event.deltaY < 0;
+      const blockedAtEnd =
+        localFraction >= 1 - EDGE_FRACTION && event.deltaY > 0;
+
+      if (!blockedAtStart && !blockedAtEnd) return;
+
+      event.preventDefault();
+      target.current +=
+        (event.deltaY / Math.max(1, window.innerHeight)) *
+        CARDS_PER_VIEWPORT;
+      writeProgress();
+      recenter();
     };
 
-    const initializeFrame = window.requestAnimationFrame(initialize);
-    window.addEventListener("scroll", schedule, { passive: true });
-    window.addEventListener("resize", schedule);
-    const observer = new ResizeObserver(schedule);
-    if (trackRef.current) observer.observe(trackRef.current);
+    const handlePageShow = () => {
+      scheduleRecenter();
+      window.clearTimeout(restoreTimer);
+      restoreTimer = window.setTimeout(recenter, RESTORE_DELAY_MS);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") scheduleRecenter();
+    };
+
+    const initializeFrame = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(recenter);
+    });
+    restoreTimer = window.setTimeout(recenter, RESTORE_DELAY_MS);
+
+    window.addEventListener("scroll", scheduleScrollUpdate, { passive: true });
+    window.addEventListener("resize", scheduleRecenter, { passive: true });
+    window.addEventListener("pageshow", handlePageShow);
+    window.addEventListener("wheel", handleBoundaryWheel, { passive: false });
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.visualViewport?.addEventListener("resize", scheduleRecenter, {
+      passive: true,
+    });
 
     return () => {
+      window.history.scrollRestoration = previousScrollRestoration;
+      window.clearTimeout(restoreTimer);
       window.cancelAnimationFrame(initializeFrame);
-      if (frame) window.cancelAnimationFrame(frame);
-      observer.disconnect();
-      window.removeEventListener("scroll", schedule);
-      window.removeEventListener("resize", schedule);
+      if (scrollFrame) window.cancelAnimationFrame(scrollFrame);
+      if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
+      if (releaseFrame) window.cancelAnimationFrame(releaseFrame);
+      if (releaseFrameTwo) window.cancelAnimationFrame(releaseFrameTwo);
+
+      window.removeEventListener("scroll", scheduleScrollUpdate);
+      window.removeEventListener("resize", scheduleRecenter);
+      window.removeEventListener("pageshow", handlePageShow);
+      window.removeEventListener("wheel", handleBoundaryWheel);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.visualViewport?.removeEventListener("resize", scheduleRecenter);
     };
   }, [trackRef]);
 
