@@ -1,4 +1,4 @@
-import { CatmullRomCurve3, MathUtils, Quaternion, Vector3 } from "three";
+import { CatmullRomCurve3, MathUtils, Matrix4, Quaternion, Vector3 } from "three";
 
 const CONTROL_POINTS = [
   new Vector3(-7.2, -4.8, 1.8),
@@ -43,9 +43,7 @@ export function getSceneWheelPose(index: number, count: number, progress: number
   if (right.lengthSq() < 0.0001) right.set(1, 0, 0);
   right.normalize();
   const up = new Vector3().crossVectors(toCamera, right).normalize();
-  const cameraFacing = new Quaternion().setFromRotationMatrix(
-    new (await import("three")).Matrix4().makeBasis(right, up, toCamera),
-  );
+  const cameraFacing = new Quaternion().setFromRotationMatrix(new Matrix4().makeBasis(right, up, toCamera));
   const tangentFacing = new Quaternion().setFromUnitVectors(FORWARD, tangent);
   const depth = MathUtils.clamp((position.z + 13.2) / 17.6, 0, 1);
   const facingBlend = MathUtils.lerp(0.18, 0.68, depth);
