@@ -9,10 +9,11 @@ import { SCENE_WHEEL_CAMERA } from "./curve-model";
 
 type Props = {
   items: readonly SceneLabCollageItem[];
+  onOpen: (item: SceneLabCollageItem) => void;
   targetProgress: MutableRefObject<number>;
 };
 
-function WheelScene({ items, targetProgress }: Props) {
+function WheelScene({ items, onOpen, targetProgress }: Props) {
   const urls = useMemo(() => items.map((item) => item.url), [items]);
   const textures = useLoader(TextureLoader, urls);
   const renderedProgress = useRef(targetProgress.current);
@@ -39,6 +40,8 @@ function WheelScene({ items, targetProgress }: Props) {
           key={item.id}
           count={items.length}
           index={index}
+          item={item}
+          onOpen={onOpen}
           progress={renderedProgress}
           texture={textures[index]}
         />
@@ -59,7 +62,7 @@ export default function SceneWheelCanvas(props: Props) {
         gl.outputColorSpace = SRGBColorSpace;
         gl.toneMapping = NoToneMapping;
         gl.setClearColor(0xfafafa, 1);
-        gl.domElement.setAttribute("data-scene-renderer", "scene-wheel-v2-perspective");
+        gl.domElement.setAttribute("data-scene-renderer", "scene-wheel-v2-linear-glass");
       }}
     >
       <color attach="background" args={["#fafafa"]} />
