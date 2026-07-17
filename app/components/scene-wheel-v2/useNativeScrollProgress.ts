@@ -4,7 +4,7 @@ import { useEffect, useRef, type RefObject } from "react";
 
 const CENTER_FRACTION = 0.5;
 const EDGE_FRACTION = 0.12;
-const CARDS_PER_VIEWPORT = 1.18;
+const CARDS_PER_VIEWPORT = 1.72;
 
 export function useNativeScrollProgress(trackRef: RefObject<HTMLElement | null>) {
   const target = useRef(0);
@@ -29,25 +29,20 @@ export function useNativeScrollProgress(trackRef: RefObject<HTMLElement | null>)
       recentering = true;
       window.scrollTo({ left: 0, top: nextY, behavior: "auto" });
       lastScrollY = nextY;
-      window.requestAnimationFrame(() => {
-        recentering = false;
-      });
+      window.requestAnimationFrame(() => { recentering = false; });
     };
 
     const update = () => {
       frame = 0;
       const current = metrics();
       if (!current || recentering) return;
-
       const nextScrollY = window.scrollY;
       const deltaPixels = nextScrollY - lastScrollY;
       lastScrollY = nextScrollY;
       target.current += (deltaPixels / Math.max(1, window.innerHeight)) * CARDS_PER_VIEWPORT;
-
       const localFraction = (nextScrollY - current.start) / current.distance;
       const displayProgress = ((target.current % 1) + 1) % 1;
       trackRef.current?.style.setProperty("--scene-wheel-progress", displayProgress.toFixed(5));
-
       if (localFraction < EDGE_FRACTION || localFraction > 1 - EDGE_FRACTION) centerScroll();
     };
 
