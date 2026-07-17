@@ -6,7 +6,7 @@
 
 .track {
   position: relative;
-  height: 620vh;
+  height: 900vh;
 }
 
 .sticky {
@@ -98,7 +98,7 @@
   height: 1px;
   background: currentColor;
   transform-origin: left;
-  transform: scaleX(calc(0.16 + var(--scene-wheel-progress, 0) * 0.84));
+  transform: scaleX(calc(0.2 + var(--scene-wheel-progress, 0) * 0.8));
 }
 
 .semanticList {
@@ -113,9 +113,85 @@
   border: 0;
 }
 
+.viewerBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgb(250 250 250 / 78%);
+  backdrop-filter: blur(18px);
+}
+
+.viewer {
+  width: min(1180px, 94vw);
+  max-height: 92vh;
+  overflow: hidden;
+  background: rgb(255 255 255 / 88%);
+  border: 1px solid rgb(17 17 17 / 15%);
+  box-shadow: 0 28px 90px rgb(0 0 0 / 16%);
+  backdrop-filter: blur(20px) saturate(1.08);
+}
+
+.viewerToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 18px 20px;
+  border-bottom: 1px solid rgb(17 17 17 / 12%);
+}
+
+.viewerToolbar p,
+.viewerToolbar h2 {
+  margin: 0;
+}
+
+.viewerToolbar p {
+  margin-bottom: 5px;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.viewerToolbar h2 {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.viewerToolbar button {
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.viewerImage {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  max-height: calc(92vh - 72px);
+  padding: 22px;
+  overflow: auto;
+}
+
+.viewerImage img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(92vh - 116px);
+  object-fit: contain;
+  box-shadow: 0 18px 55px rgb(0 0 0 / 12%);
+}
+
 @media (max-width: 700px) {
   .track {
-    height: 500vh;
+    height: 760vh;
   }
 
   .chrome {
@@ -126,6 +202,8 @@
     left: 18px;
     bottom: 18px;
     display: block;
+    max-width: 58vw;
+    line-height: 1.35;
   }
 
   .caption p + p {
@@ -135,6 +213,19 @@
   .scrollCue {
     right: 18px;
     bottom: 18px;
+  }
+
+  .scrollCue span {
+    display: none;
+  }
+
+  .viewerBackdrop {
+    padding: 12px;
+  }
+
+  .viewer {
+    width: 100%;
+    max-height: 94vh;
   }
 }
 
