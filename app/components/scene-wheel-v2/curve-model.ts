@@ -5,13 +5,17 @@ const RAIL_STEP = new Vector3(1.12, 0.76, -1.32);
 const FRONT_BUFFER = 1.35;
 
 const WORLD_UP = new Vector3(0, 1, 0);
+const CAMERA_FORWARD = new Vector3(0, 0, 1);
 const SCROLL_DIRECTION = RAIL_STEP.clone().multiplyScalar(-1);
-const FACE_NORMAL = new Vector3(SCROLL_DIRECTION.x, 0, SCROLL_DIRECTION.z).normalize();
+const RAIL_FACE_NORMAL = new Vector3(SCROLL_DIRECTION.x, 0, SCROLL_DIRECTION.z).normalize();
+const FACE_NORMAL = CAMERA_FORWARD.clone().lerp(RAIL_FACE_NORMAL, 0.58).normalize();
 const FACE_RIGHT = new Vector3().crossVectors(WORLD_UP, FACE_NORMAL).normalize();
 const FACE_UP = new Vector3().crossVectors(FACE_NORMAL, FACE_RIGHT).normalize();
 const BASE_ORIENTATION = new Quaternion().setFromRotationMatrix(
   new Matrix4().makeBasis(FACE_RIGHT, FACE_UP, FACE_NORMAL),
-);
+).multiply(new Quaternion().setFromAxisAngle(FACE_NORMAL, MathUtils.degToRad(-4)));
+
+export const SCENE_WHEEL_HOVER_OFFSET = new Vector3(1.18, 0.02, 0.24);
 
 export type SceneWheelPose = {
   opacity: number;
