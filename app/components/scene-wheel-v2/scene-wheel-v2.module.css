@@ -1,0 +1,264 @@
+.page {
+  min-height: 100vh;
+  background: #fafafa;
+  color: #111;
+}
+
+.track {
+  position: relative;
+  height: 900vh;
+  overflow-anchor: none;
+}
+
+.sticky {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow: hidden;
+  background: #fafafa;
+}
+
+.canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.chrome {
+  position: absolute;
+  inset: 24px 28px auto;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.11em;
+}
+
+.chrome a,
+.chrome span {
+  color: inherit;
+  text-decoration: none;
+  pointer-events: auto;
+}
+
+.chrome nav {
+  display: flex;
+  gap: 18px;
+}
+
+.chrome nav span {
+  border-bottom: 1px solid currentColor;
+  padding-bottom: 3px;
+}
+
+.brand {
+  font-weight: 600;
+}
+
+.caption {
+  position: absolute;
+  left: 28px;
+  bottom: 24px;
+  z-index: 10;
+  display: flex;
+  gap: 18px;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.1em;
+  pointer-events: none;
+}
+
+.caption p {
+  margin: 0;
+}
+
+.scrollCue {
+  position: absolute;
+  right: 28px;
+  bottom: 24px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  pointer-events: none;
+}
+
+.scrollCue i {
+  display: block;
+  width: 52px;
+  height: 1px;
+  background: currentColor;
+  transform-origin: left;
+  transform: scaleX(calc(0.2 + var(--scene-wheel-progress, 0) * 0.8));
+}
+
+.cursorLabel {
+  position: fixed;
+  z-index: 30;
+  max-width: min(280px, 42vw);
+  padding: 5px 7px 4px;
+  background: #111;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0.065em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate(13px, calc(-100% - 9px));
+  box-shadow: 0 2px 10px rgb(0 0 0 / 14%);
+}
+
+.semanticList {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.viewerBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgb(250 250 250 / 78%);
+  backdrop-filter: blur(18px);
+}
+
+.viewer {
+  width: min(1180px, 94vw);
+  max-height: 92vh;
+  overflow: hidden;
+  background: rgb(255 255 255 / 88%);
+  border: 1px solid rgb(17 17 17 / 15%);
+  box-shadow: 0 28px 90px rgb(0 0 0 / 16%);
+  backdrop-filter: blur(20px) saturate(1.08);
+}
+
+.viewerToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 18px 20px;
+  border-bottom: 1px solid rgb(17 17 17 / 12%);
+}
+
+.viewerToolbar p,
+.viewerToolbar h2 {
+  margin: 0;
+}
+
+.viewerToolbar p {
+  margin-bottom: 5px;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.viewerToolbar h2 {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.viewerToolbar button {
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.viewerImage {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  max-height: calc(92vh - 72px);
+  padding: 22px;
+  overflow: auto;
+}
+
+.viewerImage img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(92vh - 116px);
+  object-fit: contain;
+  box-shadow: 0 18px 55px rgb(0 0 0 / 12%);
+}
+
+@media (max-width: 700px) {
+  .track {
+    height: 760vh;
+  }
+
+  .chrome {
+    inset: 18px 18px auto;
+  }
+
+  .caption {
+    left: 18px;
+    bottom: 18px;
+    display: block;
+    max-width: 58vw;
+    line-height: 1.35;
+  }
+
+  .caption p + p {
+    margin-top: 7px;
+  }
+
+  .scrollCue {
+    right: 18px;
+    bottom: 18px;
+  }
+
+  .scrollCue span {
+    display: none;
+  }
+
+  .cursorLabel {
+    max-width: 62vw;
+    font-size: 8px;
+  }
+
+  .viewerBackdrop {
+    padding: 12px;
+  }
+
+  .viewer {
+    width: 100%;
+    max-height: 94vh;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track {
+    height: 100vh;
+  }
+
+  .scrollCue {
+    display: none;
+  }
+}
