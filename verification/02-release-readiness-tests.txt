@@ -1,0 +1,63 @@
+$ npm run test:release-readiness
+
+> material-collager-web@0.1.0 test:release-readiness
+> node --test tests/release-readiness.test.mjs
+
+TAP version 13
+# Subtest: default rights manifest can be prepared empty but does not pass release mode
+ok 1 - default rights manifest can be prepared empty but does not pass release mode
+  ---
+  duration_ms: 0.873461
+  type: 'test'
+  ...
+# Subtest: eight fully approved rights entries pass release mode
+ok 2 - eight fully approved rights entries pass release mode
+  ---
+  duration_ms: 0.449565
+  type: 'test'
+  ...
+# Subtest: rights validation rejects duplicates and missing download approval
+ok 3 - rights validation rejects duplicates and missing download approval
+  ---
+  duration_ms: 0.198168
+  type: 'test'
+  ...
+# Subtest: Library payload validation enforces final, visible, unexpired records
+ok 4 - Library payload validation enforces final, visible, unexpired records
+  ---
+  duration_ms: 0.958349
+  type: 'test'
+  ...
+# Subtest: release Library validator checks eight records and their image responses
+ok 5 - release Library validator checks eight records and their image responses
+  ---
+  duration_ms: 59.581458
+  type: 'test'
+  ...
+# Subtest: release QA scaffolding creates dated templates outside tracked source
+ok 6 - release QA scaffolding creates dated templates outside tracked source
+  ---
+  duration_ms: 36.520845
+  type: 'test'
+  ...
+# Subtest: Inter is self-hosted globally and Scene Lab no longer declares the temporary font
+ok 7 - Inter is self-hosted globally and Scene Lab no longer declares the temporary font
+  ---
+  duration_ms: 3.095587
+  type: 'test'
+  ...
+# Subtest: Library storage queries only expose final completed records
+ok 8 - Library storage queries only expose final completed records
+  ---
+  duration_ms: 1.286751
+  type: 'test'
+  ...
+1..8
+# tests 8
+# suites 0
+# pass 8
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 457.79753

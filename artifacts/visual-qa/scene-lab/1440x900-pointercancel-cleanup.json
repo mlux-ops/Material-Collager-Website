@@ -1,0 +1,10 @@
+{
+  "before": {
+    "finish": null,
+    "pointerId": "1"
+  },
+  "after": {
+    "finish": "pointercancel",
+    "pointerId": "-1"
+  }
+}

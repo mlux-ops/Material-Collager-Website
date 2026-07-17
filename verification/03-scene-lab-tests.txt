@@ -1,0 +1,101 @@
+$ npm run test:scene-lab
+
+> material-collager-web@0.1.0 test:scene-lab
+> node --experimental-strip-types --test tests/scene-lab.test.mjs
+
+TAP version 13
+# (node:11175) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: populated Library records are ordered, preserved, and repeated deterministically
+ok 1 - populated Library records are ordered, preserved, and repeated deterministically
+  ---
+  duration_ms: 1.910518
+  type: 'test'
+  ...
+# Subtest: empty Library uses only four completed lab collages and five honest repetitions each
+ok 2 - empty Library uses only four completed lab collages and five honest repetitions each
+  ---
+  duration_ms: 0.384157
+  type: 'test'
+  ...
+# Subtest: production empty Library remains empty and never promotes lab fixtures
+ok 3 - production empty Library remains empty and never promotes lab fixtures
+  ---
+  duration_ms: 0.109254
+  type: 'test'
+  ...
+# Subtest: production repetitions remain presentation-only and never use lab labels
+ok 4 - production repetitions remain presentation-only and never use lab labels
+  ---
+  duration_ms: 0.150286
+  type: 'test'
+  ...
+# Subtest: invalid adapter records are excluded without creating reference-asset scene items
+ok 5 - invalid adapter records are excluded without creating reference-asset scene items
+  ---
+  duration_ms: 0.210066
+  type: 'test'
+  ...
+# Subtest: duplicate production IDs retain one newest record and keep semantic counts honest
+ok 6 - duplicate production IDs retain one newest record and keep semantic counts honest
+  ---
+  duration_ms: 0.158438
+  type: 'test'
+  ...
+# Subtest: selection and removal consume the same normalized records as the rendered catalog
+ok 7 - selection and removal consume the same normalized records as the rendered catalog
+  ---
+  duration_ms: 0.264306
+  type: 'test'
+  ...
+# Subtest: a Library larger than the plane field retains every semantic record while presenting a bounded scene window
+ok 8 - a Library larger than the plane field retains every semantic record while presenting a bounded scene window
+  ---
+  duration_ms: 0.314462
+  type: 'test'
+  ...
+# Subtest: production keyboard navigation and removal operate on real collage records, not visual tracks
+ok 9 - production keyboard navigation and removal operate on real collage records, not visual tracks
+  ---
+  duration_ms: 0.535654
+  type: 'test'
+  ...
+# Subtest: Library payload parsing distinguishes valid and malformed responses
+ok 10 - Library payload parsing distinguishes valid and malformed responses
+  ---
+  duration_ms: 0.490096
+  type: 'test'
+  ...
+# Subtest: geometry-derived navigation exposes only reachable tracks at every viewport
+ok 11 - geometry-derived navigation exposes only reachable tracks at every viewport
+  ---
+  duration_ms: 3.770235
+  type: 'test'
+  ...
+# Subtest: navigation prefers focal states and reconciles unavailable mobile tracks
+ok 12 - navigation prefers focal states and reconciles unavailable mobile tracks
+  ---
+  duration_ms: 0.482033
+  type: 'test'
+  ...
+# Subtest: pointer up, cancel, and lost capture share complete drag cleanup
+ok 13 - pointer up, cancel, and lost capture share complete drag cleanup
+  ---
+  duration_ms: 0.348453
+  type: 'test'
+  ...
+# Subtest: pointer cleanup ignores unrelated pointer IDs and preserves tap clicks
+ok 14 - pointer cleanup ignores unrelated pointer IDs and preserves tap clicks
+  ---
+  duration_ms: 0.129183
+  type: 'test'
+  ...
+1..14
+# tests 14
+# suites 0
+# pass 14
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 238.431738

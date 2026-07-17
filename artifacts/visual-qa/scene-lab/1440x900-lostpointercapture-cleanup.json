@@ -1,0 +1,16 @@
+{
+  "before": {
+    "finish": null,
+    "pointerId": "1"
+  },
+  "after": {
+    "finish": "lostpointercapture",
+    "pointerId": "-1"
+  },
+  "dispatch": {
+    "result": {
+      "type": "boolean",
+      "value": true
+    }
+  }
+}

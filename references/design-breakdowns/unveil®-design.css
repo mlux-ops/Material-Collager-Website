@@ -1,0 +1,22 @@
+@theme {
+  /* Colors */
+  --color-black: #000000;
+  --color-white: #ffffff;
+  --color-off-white-surface: #fafafa;
+
+  /* Spacing */
+  --spacing-xs: 4px;
+  --spacing-sm: 7px;
+  --spacing-md: 10px;
+  --spacing-base: 14px;
+  --spacing-lg: 16px;
+  --spacing-xl: 40px;
+  --spacing-unit: 1.5px;
+
+  /* Border Radius */
+  --radius-button-/-pill: 6px;
+
+  /* Fonts */
+  --font-nb_international_proregular: "nb_international_proregular", sans-serif;
+
+}

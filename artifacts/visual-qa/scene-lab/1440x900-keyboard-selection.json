@@ -1,0 +1,261 @@
+{
+  "initial": {
+    "active": "track-07",
+    "progress": "0.400000"
+  },
+  "end": {
+    "active": "track-20",
+    "focused": "track-20",
+    "progress": "1.000000",
+    "tabbable": [
+      "track-20"
+    ]
+  },
+  "selection": {
+    "progress": 1,
+    "phase": "1.0000",
+    "activeTrack": "track-20",
+    "planes": [
+      {
+        "trackId": "track-11",
+        "opacity": 0.14400000000000004,
+        "focal": false,
+        "role": "near",
+        "cornersNormalized": [
+          [
+            -0.144,
+            0.716
+          ],
+          [
+            0.064,
+            0.733
+          ],
+          [
+            0.056,
+            1.196
+          ],
+          [
+            -0.152,
+            1.179
+          ]
+        ]
+      },
+      {
+        "trackId": "track-12",
+        "opacity": 0.14400000000000004,
+        "focal": false,
+        "role": "near",
+        "cornersNormalized": [
+          [
+            -0.013,
+            0.647
+          ],
+          [
+            0.271,
+            0.652
+          ],
+          [
+            0.265,
+            0.946
+          ],
+          [
+            -0.019,
+            0.94
+          ]
+        ]
+      },
+      {
+        "trackId": "track-13",
+        "opacity": 0.15840000000000004,
+        "focal": true,
+        "role": "focal",
+        "cornersNormalized": [
+          [
+            0.164,
+            0.433
+          ],
+          [
+            0.397,
+            0.446
+          ],
+          [
+            0.388,
+            0.82
+          ],
+          [
+            0.155,
+            0.806
+          ]
+        ]
+      },
+      {
+        "trackId": "track-14",
+        "opacity": 0.13760000000000003,
+        "focal": false,
+        "role": "adjacent",
+        "cornersNormalized": [
+          [
+            0.307,
+            0.399
+          ],
+          [
+            0.529,
+            0.404
+          ],
+          [
+            0.525,
+            0.633
+          ],
+          [
+            0.303,
+            0.628
+          ]
+        ]
+      },
+      {
+        "trackId": "track-15",
+        "opacity": 0.13760000000000003,
+        "focal": false,
+        "role": "adjacent",
+        "cornersNormalized": [
+          [
+            0.459,
+            0.266
+          ],
+          [
+            0.598,
+            0.277
+          ],
+          [
+            0.593,
+            0.586
+          ],
+          [
+            0.454,
+            0.575
+          ]
+        ]
+      },
+      {
+        "trackId": "track-16",
+        "opacity": 0.10240000000000002,
+        "focal": false,
+        "role": "mid",
+        "cornersNormalized": [
+          [
+            0.541,
+            0.235
+          ],
+          [
+            0.714,
+            0.239
+          ],
+          [
+            0.711,
+            0.417
+          ],
+          [
+            0.538,
+            0.413
+          ]
+        ]
+      },
+      {
+        "trackId": "track-17",
+        "opacity": 0.10240000000000002,
+        "focal": false,
+        "role": "mid",
+        "cornersNormalized": [
+          [
+            0.654,
+            0.119
+          ],
+          [
+            0.783,
+            0.126
+          ],
+          [
+            0.778,
+            0.334
+          ],
+          [
+            0.649,
+            0.326
+          ]
+        ]
+      },
+      {
+        "trackId": "track-18",
+        "opacity": 0.10240000000000002,
+        "focal": false,
+        "role": "mid",
+        "cornersNormalized": [
+          [
+            0.74,
+            0.054
+          ],
+          [
+            0.875,
+            0.057
+          ],
+          [
+            0.872,
+            0.198
+          ],
+          [
+            0.737,
+            0.195
+          ]
+        ]
+      },
+      {
+        "trackId": "track-19",
+        "opacity": 0.07040000000000002,
+        "focal": false,
+        "role": "far",
+        "cornersNormalized": [
+          [
+            0.856,
+            -0.069
+          ],
+          [
+            0.939,
+            -0.062
+          ],
+          [
+            0.936,
+            0.121
+          ],
+          [
+            0.853,
+            0.114
+          ]
+        ]
+      },
+      {
+        "trackId": "track-20",
+        "opacity": 1,
+        "focal": true,
+        "role": "focal",
+        "cornersNormalized": [
+          [
+            0.29000000000000004,
+            0.3015344603381015
+          ],
+          [
+            0.71,
+            0.3015344603381015
+          ],
+          [
+            0.71,
+            0.7384655396618985
+          ],
+          [
+            0.29000000000000004,
+            0.7384655396618985
+          ]
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,429 @@
+.shell {
+  --chrome-fill: rgba(0, 0, 0, 0.03);
+  --chrome-line: rgba(0, 0, 0, 0.13);
+  background: #fafafa;
+  color: #000;
+  font-family: var(--font-inter), Arial, "Helvetica Neue", sans-serif;
+  height: 100dvh;
+  inset: 0;
+  overflow: hidden;
+  position: fixed;
+  touch-action: none;
+  width: 100vw;
+}
+
+.canvasLayer {
+  background: #fafafa;
+  inset: 0;
+  opacity: 1;
+  position: absolute;
+  transition: opacity 180ms ease;
+  z-index: 1;
+}
+
+.canvasLayer[data-hidden="true"] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.canvasLayer canvas {
+  display: block;
+  height: 100% !important;
+  width: 100% !important;
+}
+
+.header {
+  display: grid;
+  grid-template-columns: 220px 180px 180px;
+  height: 58px;
+  left: 4px;
+  position: fixed;
+  top: 4px;
+  width: 580px;
+  z-index: 2200;
+}
+
+.headerCell,
+.viewControl,
+.cancelSelection,
+.reducedControls button {
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+  background: var(--chrome-fill);
+  border: 1px solid var(--chrome-line);
+  color: #000;
+  font-family: var(--font-inter), Arial, "Helvetica Neue", sans-serif;
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0.1575px;
+  line-height: 11px;
+  text-transform: uppercase;
+}
+
+.headerCell {
+  align-items: flex-end;
+  border-radius: 6px;
+  display: flex;
+  height: 58px;
+  padding: 39px 10px 6px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.headerCell[aria-current="page"] {
+  background: rgba(0, 0, 0, 0.055);
+}
+
+.brandShort {
+  display: none;
+}
+
+.viewControl {
+  border-radius: 6px;
+  bottom: 4px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  height: 40px;
+  overflow: hidden;
+  position: fixed;
+  right: 4px;
+  width: 142px;
+  z-index: 2200;
+}
+
+.viewControl button {
+  background: transparent;
+  border: 0;
+  color: #000;
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: inherit;
+  min-height: 40px;
+  opacity: 0.42;
+  padding: 0;
+}
+
+.viewControl button + button {
+  border-left: 1px solid var(--chrome-line);
+}
+
+.viewControl button[aria-pressed="true"] {
+  background: rgba(0, 0, 0, 0.035);
+  opacity: 1;
+}
+
+.viewControl button:focus-visible,
+.headerCell:focus-visible,
+.cancelSelection:focus-visible,
+.reducedControls button:focus-visible {
+  outline: 2px solid #000;
+  outline-offset: -3px;
+}
+
+.projectCollection {
+  inset: 0;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: absolute;
+  z-index: 1200;
+}
+
+.projectCollection[data-view="scene"] > li {
+  position: absolute;
+}
+
+.projectControl {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: #000;
+  cursor: pointer;
+  display: block;
+  font-family: var(--font-inter), Arial, "Helvetica Neue", sans-serif;
+  height: 100%;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0;
+  position: relative;
+  text-align: left;
+  width: 100%;
+}
+
+.projectCollection[data-view="scene"] .projectControl:focus-visible {
+  outline: 1px solid #000;
+  outline-offset: 3px;
+}
+
+.projectTitle {
+  background: transparent;
+  bottom: 7px;
+  font-size: 10.5px;
+  font-weight: 400;
+  left: 8px;
+  letter-spacing: 0.1575px;
+  line-height: 13px;
+  max-width: calc(100% - 16px);
+  mix-blend-mode: difference;
+  opacity: 0;
+  padding: 2px 3px;
+  pointer-events: none;
+  position: absolute;
+  text-transform: uppercase;
+  transition: opacity 120ms ease;
+  color: #fff;
+}
+
+.instanceMeta {
+  display: none;
+}
+
+.previewFailure {
+  display: none;
+}
+
+.projectControl:hover .projectTitle,
+.projectControl:focus-visible .projectTitle,
+.projectControl[data-active="true"] .projectTitle {
+  opacity: 1;
+}
+
+.indexImage {
+  display: none;
+}
+
+.projectCollection[data-view="index"] {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  overflow: auto;
+  padding: 74px 4px 52px;
+  touch-action: pan-y;
+}
+
+.projectCollection[data-view="index"] > li {
+  aspect-ratio: 1 / 0.72;
+  min-width: 0;
+  position: relative;
+}
+
+.projectCollection[data-view="index"] .projectControl {
+  background: var(--chrome-fill);
+  border: 1px solid var(--chrome-line);
+  min-height: 112px;
+}
+
+.projectCollection[data-view="index"] .projectControl:focus-visible {
+  outline: 2px solid #000;
+  outline-offset: -3px;
+}
+
+.projectCollection[data-view="index"] .indexImage {
+  background-image: var(--asset-url);
+  background-position: center;
+  background-size: cover;
+  display: block;
+  inset: 0;
+  opacity: 0.88;
+  position: absolute;
+}
+
+.projectCollection[data-view="index"] .projectTitle {
+  background: rgba(250, 250, 250, 0.9);
+  bottom: 22px;
+  color: #000;
+  left: 8px;
+  mix-blend-mode: normal;
+  opacity: 1;
+  padding: 2px 3px;
+}
+
+.projectCollection[data-view="index"] .instanceMeta {
+  background: rgba(250, 250, 250, 0.9);
+  bottom: 7px;
+  color: #000;
+  display: block;
+  font-size: 9px;
+  left: 8px;
+  letter-spacing: 0.12px;
+  line-height: 11px;
+  mix-blend-mode: normal;
+  padding: 1px 3px;
+  pointer-events: none;
+  position: absolute;
+  text-transform: uppercase;
+}
+
+.projectCollection[data-view="index"] .previewFailure {
+  background: #fafafa;
+  color: #000;
+  display: block;
+  font-size: 9px;
+  left: 8px;
+  line-height: 11px;
+  padding: 1px 3px;
+  position: absolute;
+  right: auto;
+  top: 7px;
+}
+
+.projectCollection[data-view="index"] > li[data-preview-failed="true"] .indexImage {
+  background-color: #e6e2da;
+  background-image: none;
+}
+
+.activeTitle {
+  bottom: 10px;
+  display: none;
+  font-size: 10.5px;
+  left: 10px;
+  letter-spacing: 0.1575px;
+  margin: 0;
+  position: fixed;
+  text-transform: uppercase;
+  z-index: 2100;
+}
+
+.activeTitle[data-selected="true"] {
+  display: block;
+}
+
+.loading {
+  background: rgba(250, 250, 250, 0.82);
+  font-size: 10.5px;
+  left: 50%;
+  letter-spacing: 0.1575px;
+  margin: 0;
+  padding: 4px 6px;
+  position: fixed;
+  text-transform: uppercase;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2300;
+}
+
+.productionState {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 12px;
+  text-align: center;
+  z-index: 8;
+  font-size: 11px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+/* The shared legacy viewer sits below the spatial semantic overlay by default. */
+:global(.collage-viewer-backdrop) {
+  z-index: 3000;
+}
+
+.productionState p { margin: 0; max-width: 360px; line-height: 1.5; }
+.productionState a,
+.productionState button {
+  justify-self: center;
+  border: 1px solid #161616;
+  background: #fafafa;
+  color: #161616;
+  font: inherit;
+  letter-spacing: inherit;
+  padding: 11px 16px;
+  text-decoration: none;
+}
+
+.catalogNotice,
+.textureNotice {
+  background: rgba(250, 250, 250, 0.94);
+  border: 1px solid var(--chrome-line);
+  font-size: 10.5px;
+  left: 50%;
+  letter-spacing: 0.12px;
+  margin: 0;
+  max-width: min(520px, calc(100vw - 16px));
+  padding: 7px 9px;
+  position: fixed;
+  text-align: center;
+  top: 74px;
+  transform: translateX(-50%);
+  z-index: 2300;
+}
+
+.textureNotice {
+  top: 108px;
+}
+
+.retryTextures {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  margin-left: 6px;
+  padding: 0;
+  text-decoration: underline;
+  text-transform: uppercase;
+}
+
+.cancelSelection {
+  border-radius: 6px;
+  bottom: 4px;
+  cursor: pointer;
+  height: 40px;
+  left: 4px;
+  padding: 0 12px;
+  position: fixed;
+  z-index: 2200;
+}
+
+.reducedControls {
+  bottom: 4px;
+  display: flex;
+  gap: 4px;
+  left: 4px;
+  position: fixed;
+  z-index: 2200;
+}
+
+.reducedControls button {
+  border-radius: 6px;
+  min-height: 44px;
+  min-width: 58px;
+}
+
+@media (max-width: 600px) {
+  .header {
+    grid-template-columns: 152px 115px 115px;
+    width: 382px;
+  }
+
+  .brandFull {
+    display: none;
+  }
+
+  .brandShort {
+    display: inline;
+  }
+
+  .projectCollection[data-view="index"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvasLayer,
+  .projectTitle {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .headerCell,
+  .viewControl,
+  .cancelSelection,
+  .projectCollection[data-view="index"] .projectControl {
+    background: Canvas;
+    border-color: CanvasText;
+    color: CanvasText;
+  }
+}

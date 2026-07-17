@@ -1,0 +1,55 @@
+{
+  "durationMs": 10000,
+  "environment": {
+    "deviceMemory": 32,
+    "hardwareConcurrency": 16,
+    "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 (0x00002704) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+  },
+  "final": {
+    "ready": "true",
+    "view": "scene"
+  },
+  "frameMaxMs": 3,
+  "frameP95Ms": 2.9,
+  "frameSamples": 3600,
+  "framesOver33Ms": 0,
+  "inputEvents": 166,
+  "longTaskMaxMs": 0,
+  "longTasks": [],
+  "longTasksOver100Ms": 0,
+  "profile": "desktop-hardware-warm",
+  "startedAt": "2026-07-13T13:38:18.227Z",
+  "viewport": {
+    "dpr": 1,
+    "height": 900,
+    "width": 1440
+  },
+  "runtime": "built-worker",
+  "cacheProfile": "warm",
+  "telemetry": {
+    "frameMaxMs": 120.1,
+    "frameP95Ms": 2.9,
+    "frameSamples": 180,
+    "geometries": 10,
+    "over100Ms": 0,
+    "rendererDpr": 1,
+    "textureExpected": 20,
+    "textureFailed": 0,
+    "textureFailedTrackIds": [],
+    "textureLoaded": 20,
+    "texturePending": 0,
+    "textures": 4
+  },
+  "cdpSettings": {
+    "cpuSlowdown": 1,
+    "latencyMs": 0,
+    "downloadBytesPerSecond": -1,
+    "uploadBytesPerSecond": -1,
+    "cssViewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "deviceScaleFactor": 1
+  }
+}

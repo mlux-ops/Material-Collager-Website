@@ -1,0 +1,50 @@
+{
+  "name": "material-collager-web",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "vinext dev",
+    "build": "vinext build",
+    "start": "vinext start",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "test:scene-lab": "node --experimental-strip-types --test tests/scene-lab.test.mjs",
+    "db:generate": "drizzle-kit generate",
+    "test:release-readiness": "node --test tests/release-readiness.test.mjs",
+    "validate:rights": "node scripts/validate-release-collage-rights.mjs",
+    "validate:library": "node scripts/validate-release-library.mjs",
+    "qa:scaffold": "node scripts/create-release-qa-run.mjs"
+  },
+  "dependencies": {
+    "@react-three/fiber": "9.6.1",
+    "next": "16.2.6",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "three": "0.182.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.37.1",
+    "@tailwindcss/postcss": "4.2.1",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@types/three": "0.182.0",
+    "@vitejs/plugin-react": "6.0.2",
+    "@vitejs/plugin-rsc": "0.5.26",
+    "drizzle-kit": "0.31.10",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.6",
+    "react-server-dom-webpack": "19.2.6",
+    "tailwindcss": "4.2.1",
+    "typescript": "5.9.3",
+    "vinext": "0.0.50",
+    "vite": "8.0.13",
+    "wrangler": "4.92.0"
+  },
+  "type": "module",
+  "overrides": {
+    "postcss": "8.5.14"
+  }
+}

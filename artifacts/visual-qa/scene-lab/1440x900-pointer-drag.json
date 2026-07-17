@@ -1,0 +1,46 @@
+{
+  "before": {
+    "pointer": null,
+    "progress": null,
+    "target": null
+  },
+  "after": {
+    "finish": "pointerup",
+    "pointer": "-1",
+    "progress": null,
+    "target": null
+  },
+  "input": {
+    "type": "Browser CUA drag",
+    "path": [
+      {
+        "x": 900,
+        "y": 650
+      },
+      {
+        "x": 900,
+        "y": 600
+      },
+      {
+        "x": 900,
+        "y": 540
+      },
+      {
+        "x": 900,
+        "y": 480
+      },
+      {
+        "x": 900,
+        "y": 420
+      },
+      {
+        "x": 900,
+        "y": 360
+      },
+      {
+        "x": 900,
+        "y": 300
+      }
+    ]
+  }
+}

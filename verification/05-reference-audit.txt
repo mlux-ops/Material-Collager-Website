@@ -1,0 +1,2 @@
+$ python3 artifacts/reference-audit/validate_reference_audit.py
+Audit validation PASS: 4 viewports × 6 anchors; geometry, continuity, sources, tolerances, and baseline are valid.

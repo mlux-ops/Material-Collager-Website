@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-07-13T01:02:21.4414639-05:00",
+  "note": "Captured before any scene-lab dependency or application change. Browser/tool outputs are documented in the companion Markdown file.",
+  "environment": {
+    "url": "http://localhost:3000",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "browser": "Codex in-app Browser",
+    "framework": "Next.js 16.2.6 via vinext 0.0.50 / Vite 8.0.13"
+  },
+  "screenshots": {
+    "library": "artifacts/pre-scene-lab-baseline/current-library-1440x900.png",
+    "generator": "artifacts/pre-scene-lab-baseline/current-generator-1440x900.png"
+  },
+  "routes": {
+    "pages": [
+      "/",
+      "/generator"
+    ],
+    "api": [
+      "/api/dry-run",
+      "/api/economy",
+      "/api/economy/output/:id",
+      "/api/generate",
+      "/api/library",
+      "/api/library/:id",
+      "/api/library/:id/image",
+      "/api/references/analyze",
+      "/api/references/complete",
+      "/api/references/import",
+      "/api/references/matches",
+      "/api/references/part",
+      "/api/references/start"
+    ]
+  },
+  "build": {
+    "command": "npm run build",
+    "result": "pass",
+    "note": "vinext build completed all five environments and reported Build complete."
+  },
+  "tests": {
+    "command": "$env:PYTHONPATH='src'; python -m unittest discover -s tests -v",
+    "result": "pass",
+    "count": 11,
+    "duration_seconds": 0.135
+  },
+  "console": {
+    "library": {
+      "errors": 0,
+      "warnings": 0
+    },
+    "generator": {
+      "errors": 0,
+      "warnings": 0
+    }
+  },
+  "generator_smoke": {
+    "result": "pass",
+    "steps": [
+      "Loaded /generator and verified setup, art direction, reference tray, and review regions.",
+      "Changed Board type from Bathroom Fixture Collage to Kitchen Material Palette.",
+      "Verified the reference tray updated to kitchen roles including wood and countertop.",
+      "Restored Board type to Bathroom Fixture Collage.",
+      "Activated Review prompt with zero references and observed expected inline validation: Add at least one reference image for vanity_faucet."
+    ],
+    "destructive_or_external_actions": false
+  }
+}
