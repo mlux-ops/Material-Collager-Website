@@ -17,6 +17,7 @@ import { nearestReachableTrack } from "@/app/lib/scene-lab-navigation";
 import { beginPointerDrag, finishPointerDrag, IDLE_DRAG_STATE, movePointerDrag, type PointerFinishReason } from "@/app/lib/scene-lab-pointer";
 import { useSceneLabQA } from "@/app/hooks/useSceneLabQA";
 import { useVirtualProgress } from "@/app/hooks/useVirtualProgress";
+import { shouldUseWorldSpaceRenderer } from "@/app/lib/world-scene-geometry";
 import { SceneLabChrome, type SceneLabView } from "./SceneLabChrome";
 import { SceneLabIndex } from "./SceneLabIndex";
 import type { TextureLoadState } from "./SceneLabCanvas";
@@ -116,6 +117,7 @@ function useReducedMotion() {
 export default function SceneLabExperience({ surface = "lab" }: { surface?: "lab" | "library" }) {
   const productionLibrary = surface === "library";
   const qa = useSceneLabQA();
+  const worldSpaceRenderer = shouldUseWorldSpaceRenderer(surface, qa.worldSpace);
   const reducedMotion = useReducedMotion();
   const shellRef = useRef<HTMLElement>(null);
   const buttonsRef = useRef(new Map<string, HTMLButtonElement>());
@@ -639,7 +641,7 @@ export default function SceneLabExperience({ surface = "lab" }: { surface?: "lab
       data-library-state={libraryState}
       data-lab-repetition={catalog.repetitionRequired ? "true" : "false"}
       data-persisted-collage-count={catalog.persistedCollageCount}
-      data-scene-renderer={qa.worldSpace && !productionLibrary ? "world-perspective" : "projected-orthographic"}
+      data-scene-renderer={worldSpaceRenderer ? "world-perspective" : "projected-orthographic"}
       data-texture-failed={textureState.failed}
       data-texture-loaded={textureState.loaded}
       data-texture-pending={textureState.pending}
@@ -667,7 +669,7 @@ export default function SceneLabExperience({ surface = "lab" }: { surface?: "lab
             viewportHeight={viewport.height}
             viewportKey={viewportKey}
             viewportWidth={viewport.width}
-            worldSpace={qa.worldSpace && !productionLibrary}
+            worldSpace={worldSpaceRenderer}
           />
         ) : null}
       </div>
