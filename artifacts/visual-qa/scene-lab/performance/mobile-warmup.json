@@ -1,0 +1,31 @@
+{
+  "durationMs": 10000,
+  "environment": {
+    "deviceMemory": 32,
+    "hardwareConcurrency": 16,
+    "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 (0x00002704) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+  },
+  "final": {
+    "ready": "true",
+    "view": "scene"
+  },
+  "frameMaxMs": 11.2,
+  "frameP95Ms": 2.9,
+  "frameSamples": 3443,
+  "framesOver33Ms": 0,
+  "inputEvents": 166,
+  "longTaskMaxMs": 0,
+  "longTasks": [],
+  "longTasksOver100Ms": 0,
+  "profile": "mobile-4x-cpu-150ms-1.6mbps",
+  "startedAt": "2026-07-13T13:39:40.465Z",
+  "viewport": {
+    "dpr": 2,
+    "height": 844,
+    "width": 390
+  },
+  "runtime": "built-worker",
+  "cacheProfile": "warm-up-after-cold",
+  "coldReadyMs": 23630
+}

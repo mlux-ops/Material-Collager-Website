@@ -1,0 +1,40 @@
+:root {
+  /* Colors */
+  --color-black: #000000;
+  --color-white: #ffffff;
+  --color-off-white-surface: #fafafa;
+
+  /* Typography */
+  --font-nav-label-family: nb_international_proregular;
+  --font-nav-label-size: 10.5px;
+  --font-nav-label-weight: 400;
+  --font-nav-label-line-height: 11.025px;
+  --font-nav-label-letter-spacing: 0.1575px;
+  --font-nav-label-alt-family: nb_international_proregular;
+  --font-nav-label-alt-size: 10.5px;
+  --font-nav-label-alt-weight: 400;
+  --font-nav-label-alt-line-height: 13px;
+  --font-nav-label-alt-letter-spacing: 0.1575px;
+  --font-body-/-ui-text-family: nb_international_proregular;
+  --font-body-/-ui-text-size: 16px;
+  --font-body-/-ui-text-weight: 400;
+  --font-body-/-ui-text-line-height: 24px;
+  --font-micro-label-family: nb_international_proregular;
+  --font-micro-label-size: 8.4px;
+  --font-micro-label-weight: 400;
+  --font-micro-label-line-height: 8.82px;
+  --font-micro-label-letter-spacing: 0.1575px;
+
+  /* Spacing */
+  --spacing-xs: 4px;
+  --spacing-sm: 7px;
+  --spacing-md: 10px;
+  --spacing-base: 14px;
+  --spacing-lg: 16px;
+  --spacing-xl: 40px;
+  --spacing-unit: 1.5px;
+
+  /* Border Radius */
+  --radius-button-/-pill: 6px;
+
+}

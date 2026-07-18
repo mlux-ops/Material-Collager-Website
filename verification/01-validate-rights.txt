@@ -1,0 +1,9 @@
+$ npm run validate:rights
+
+> material-collager-web@0.1.0 validate:rights
+> node scripts/validate-release-collage-rights.mjs
+
+Rights manifest: /mnt/data/material-collager-work/docs/release-collage-rights.json
+Mode: schema
+Collages: 0
+Result: PASS

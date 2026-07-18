@@ -1,0 +1,22 @@
+{
+  "export": {
+    "expected": 20,
+    "failed": 1,
+    "failedTrackIds": [
+      "track-07"
+    ],
+    "loaded": 19,
+    "pending": 0,
+    "textures": 5
+  },
+  "failed": "1",
+  "notice": true,
+  "pending": "0",
+  "ready": "true",
+  "retry": true,
+  "viewport": {
+    "height": 900,
+    "key": "1440x900",
+    "width": 1440
+  }
+}

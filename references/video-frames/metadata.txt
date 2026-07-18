@@ -1,0 +1,7 @@
+width=2494
+height=1270
+r_frame_rate=30/1
+avg_frame_rate=30/1
+r_frame_rate=0/0
+avg_frame_rate=0/0
+duration=45.013313

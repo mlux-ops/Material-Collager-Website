@@ -1,0 +1,22 @@
+{
+  "routes": {
+    "library": {
+      "url": "http://localhost:3000/",
+      "title": "Material Collager",
+      "sampleImageLoaded": true
+    },
+    "generator": {
+      "kitchenValue": "kitchen_material_palette",
+      "hasWood": true,
+      "hasCountertop": true,
+      "restoredValue": "bathroom_fixture_collage",
+      "validation": true,
+      "url": "http://localhost:3000/generator",
+      "title": "Material Collager"
+    }
+  },
+  "console": {
+    "errors": 0,
+    "warnings": 0
+  }
+}

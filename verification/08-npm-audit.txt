@@ -1,0 +1,2 @@
+$ npm audit --omit=dev
+found 0 vulnerabilities

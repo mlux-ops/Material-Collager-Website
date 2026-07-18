@@ -1,0 +1,5 @@
+$ npm run lint
+
+> material-collager-web@0.1.0 lint
+> eslint . --ignore-pattern dist --ignore-pattern .next
+

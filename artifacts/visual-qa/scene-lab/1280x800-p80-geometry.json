@@ -1,0 +1,527 @@
+{
+  "anchor": "p80",
+  "content": {
+    "actualCollageCount": 4,
+    "deterministicLabRepetition": true,
+    "libraryMessage": "Library is empty; using four user-provided completed lab collages.",
+    "libraryState": "empty",
+    "persistedCollageCount": 0,
+    "source": "user-provided-lab-collages",
+    "uniqueCollageIds": [
+      "user-finish-collage-01",
+      "user-finish-collage-02",
+      "user-finish-collage-03",
+      "user-finish-collage-04"
+    ]
+  },
+  "deterministic": true,
+  "geometryHash": "36b5e97b",
+  "performance": {
+    "frameMaxMs": 145.6,
+    "frameP95Ms": 3.9,
+    "frameSamples": 60,
+    "geometries": 10,
+    "over100Ms": 0,
+    "rendererDpr": 1,
+    "textureExpected": 20,
+    "textureFailed": 0,
+    "textureFailedTrackIds": [],
+    "textureLoaded": 20,
+    "texturePending": 0,
+    "textures": 4
+  },
+  "planeCount": 10,
+  "planes": [
+    {
+      "collageId": "user-finish-collage-01",
+      "cornersNormalized": [
+        [
+          -0.16,
+          0.758
+        ],
+        [
+          0.089,
+          0.772
+        ],
+        [
+          0.08,
+          1.17
+        ],
+        [
+          -0.169,
+          1.156
+        ]
+      ],
+      "cornersPixels": [
+        [
+          -204.8,
+          606.4
+        ],
+        [
+          113.91999999999999,
+          617.6
+        ],
+        [
+          102.4,
+          936
+        ],
+        [
+          -216.32000000000002,
+          924.8
+        ]
+      ],
+      "focal": false,
+      "instanceId": "scene-lab:user-finish-collage-01:3",
+      "opacity": 0.9,
+      "role": "near",
+      "sourceKind": "user-provided-lab-collage",
+      "trackId": "track-09",
+      "viewportEdges": [
+        "left",
+        "bottom"
+      ],
+      "zRank": 0
+    },
+    {
+      "collageId": "user-finish-collage-02",
+      "cornersNormalized": [
+        [
+          -0.009,
+          0.655
+        ],
+        [
+          0.275,
+          0.66
+        ],
+        [
+          0.269,
+          0.954
+        ],
+        [
+          -0.015,
+          0.948
+        ]
+      ],
+      "cornersPixels": [
+        [
+          -11.52,
+          524
+        ],
+        [
+          352,
+          528
+        ],
+        [
+          344.32000000000005,
+          763.1999999999999
+        ],
+        [
+          -19.2,
+          758.4
+        ]
+      ],
+      "focal": false,
+      "instanceId": "scene-lab:user-finish-collage-02:3",
+      "opacity": 0.9,
+      "role": "near",
+      "sourceKind": "user-provided-lab-collage",
+      "trackId": "track-10",
+      "viewportEdges": [
+        "left"
+      ],
+      "zRank": -1
+    },
+    {
+      "collageId": "user-finish-collage-03",
+      "cornersNormalized": [
+        [
+          0.186,
+          0.409
+        ],
+        [
+          0.381,
+          0.425
+        ],
+        [
+          0.374,
+          0.859
+        ],
+        [
+          0.179,
+          0.843
+        ]
+      ],
+      "cornersPixels": [
+        [
+          238.07999999999998,
+          327.2
+        ],
+        [
+          487.68,
+          340
+        ],
+        [
+          478.72,
+          687.2
+        ],
+        [
+          229.12,
+          674.4
+        ]
+      ],
+      "focal": true,
+      "instanceId": "scene-lab:user-finish-collage-03:3",
+      "opacity": 0.99,
+      "role": "focal",
+      "sourceKind": "user-provided-lab-collage",
+      "trackId": "track-11",
+      "viewportEdges": [],
+      "zRank": -2
+    },
+    {
+      "collageId": "user-finish-collage-04",
+      "cornersNormalized": [
+        [
+          0.311,
+          0.407
+        ],
+        [
+          0.533,
+          0.412
+        ],
+        [
+          0.529,
+          0.641
+        ],
+        [
+          0.307,
+          0.636
+        ]
+      ],
+      "cornersPixels": [
+        [
+          398.08,
+          325.59999999999997
+        ],
+        [
+          682.24,
+          329.59999999999997
+        ],
+        [
+          677.12,
+          512.8
+        ],
+        [
+          392.96,
+          508.8
+        ]
+      ],
+      "focal": false,
+      "instanceId": "scene-lab:user-finish-collage-04:3",
+      "opacity": 0.86,
+      "role": "adjacent",
+      "sourceKind": "user-provided-lab-collage",
+      "trackId": "track-12",
+      "viewportEdges": [],
+      "zRank": -3
+    },
+    {
+      "collageId": "user-finish-collage-01",
+      "cornersNormalized": [
+        [
+          0.45,
+          0.296
+        ],
+        [
+          0.616,
+          0.306
+        ],
+        [
+          0.61,
+          0.572
+        ],
+        [
+          0.444,
+          0.562
+        ]
+      ],
+      "cornersPixels": [
+        [
+          576,
+          236.79999999999998
+        ],
+        [
+          788.48,
+          244.79999999999998
+        ],
+        [
+          780.8,
+          457.59999999999997
+        ],
+        [
+          568.32,
+          449.6
+        ]
+      ],
+      "focal": false,
+      "instanceId": "scene-lab:user-finish-collage-01:4",
+      "opacity": 0.86,
+      "role": "adjacent",
+      "sourceKind": "user-provided-lab-collage",
+      "trackId": "track-13",
+      "viewportEdges": [],
+      "zRank": -4
+    },
+    {
+      "collageId": "user-finish-collage-02",
+      "cornersNormalized": [
+        [
+          0.545,
+          0.243
+        ],
+        [
+          0.718,
+          0.247
+        ],
+        [
+          0.715,
+          0.425
+        ],
+        [
+          0.542,
+          0.421
+        ]
+      ],
+      "cornersPixels": [
+        [
+          697.6,
+          194.4
+        ],
+        [
+          919.04,
+          197.6
+        ],
+        [
+          915.1999999999999,
+          340
+        ],
+        [
+          693.76,
+          336.8
+        ]
+      ],
+      "focal": false,
+      "instanceId": "scene-lab:user-finish-collage-02:4",
+      "opacity": 0.64,
+      "role": "mid",
+      "sourceKind": "user-provided-lab-collage",
+      "trackId": "track-14",
+      "viewportEdges": [],
+      "zRank": -5
+    },
+    {
+      "collageId": "user-finish-collage-03",
+      "cornersNormalized": [
+        [
+          0.668,
+          0.109
+        ],
+        [
+          0.776,
+          0.118
+        ],
+        [
+          0.772,
+          0.359
+        ],
+        [
+          0.664,
+          0.35
+        ]
+      ],
+      "cornersPixels": [
+        [
+          855.0400000000001,
+          87.2
+        ],
+        [
+          993.28,
+          94.39999999999999
+        ],
+        [
+          988.1600000000001,
+          287.2
+        ],
+        [
+          849.9200000000001,
+          280
+        ]
+      ],
+      "focal": false,
+      "instanceId": "scene-lab:user-finish-collage-03:4",
+      "opacity": 0.64,
+      "role": "mid",
+      "sourceKind": "user-provided-lab-collage",
+      "trackId": "track-15",
+      "viewportEdges": [],
+      "zRank": -6
+    },
+    {
+      "collageId": "user-finish-collage-04",
+      "cornersNormalized": [
+        [
+          0.744,
+          0.063
+        ],
+        [
+          0.879,
+          0.065
+        ],
+        [
+          0.876,
+          0.206
+        ],
+        [
+          0.741,
+          0.203
+        ]
+      ],
+      "cornersPixels": [
+        [
+          952.3199999999999,
+          50.4
+        ],
+        [
+          1125.12,
+          52
+        ],
+        [
+          1121.28,
+          164.79999999999998
+        ],
+        [
+          948.48,
+          162.4
+        ]
+      ],
+      "focal": false,
+      "instanceId": "scene-lab:user-finish-collage-04:4",
+      "opacity": 0.64,
+      "role": "mid",
+      "sourceKind": "user-provided-lab-collage",
+      "trackId": "track-16",
+      "viewportEdges": [],
+      "zRank": -7
+    },
+    {
+      "collageId": "user-finish-collage-01",
+      "cornersNormalized": [
+        [
+          0.853,
+          -0.048
+        ],
+        [
+          0.951,
+          -0.042
+        ],
+        [
+          0.947,
+          0.116
+        ],
+        [
+          0.849,
+          0.11
+        ]
+      ],
+      "cornersPixels": [
+        [
+          1091.84,
+          -38.4
+        ],
+        [
+          1217.28,
+          -33.6
+        ],
+        [
+          1212.1599999999999,
+          92.80000000000001
+        ],
+        [
+          1086.72,
+          88
+        ]
+      ],
+      "focal": false,
+      "instanceId": "scene-lab:user-finish-collage-01:5",
+      "opacity": 0.44,
+      "role": "far",
+      "sourceKind": "user-provided-lab-collage",
+      "trackId": "track-17",
+      "viewportEdges": [
+        "top"
+      ],
+      "zRank": -8
+    },
+    {
+      "collageId": "user-finish-collage-02",
+      "cornersNormalized": [
+        [
+          0.932,
+          -0.108
+        ],
+        [
+          1.03,
+          -0.106
+        ],
+        [
+          1.028,
+          -0.004
+        ],
+        [
+          0.93,
+          -0.006
+        ]
+      ],
+      "cornersPixels": [
+        [
+          1192.96,
+          -86.4
+        ],
+        [
+          1318.4,
+          -84.8
+        ],
+        [
+          1315.8400000000001,
+          -3.2
+        ],
+        [
+          1190.4,
+          -4.8
+        ]
+      ],
+      "focal": false,
+      "instanceId": "scene-lab:user-finish-collage-02:5",
+      "opacity": 0.44,
+      "role": "far",
+      "sourceKind": "user-provided-lab-collage",
+      "trackId": "track-18",
+      "viewportEdges": [],
+      "zRank": -9
+    }
+  ],
+  "policies": {
+    "alpha": "opaque renderer, straight-alpha material opacity, premultipliedAlpha false",
+    "depthTest": true,
+    "depthWrite": false,
+    "rendererOutput": "sRGB",
+    "toneMapping": "none"
+  },
+  "progress": 0.8,
+  "referencePath": "artifacts/reference-audit/raw/unveil-live-iab-20260712-224258-cdt/1280x800-p80.png",
+  "viewport": {
+    "height": 800,
+    "key": "1280x800",
+    "width": 1280
+  }
+}

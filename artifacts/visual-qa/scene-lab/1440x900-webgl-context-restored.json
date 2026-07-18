@@ -1,0 +1,15 @@
+{
+  "state": {
+    "failed": 0,
+    "geometries": 10,
+    "pending": 0,
+    "ready": "true",
+    "textures": 4,
+    "view": "scene",
+    "viewport": {
+      "height": 900,
+      "key": "1440x900",
+      "width": 1440
+    }
+  }
+}

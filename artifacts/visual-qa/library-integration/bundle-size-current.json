@@ -1,0 +1,20 @@
+{
+  "generatedAt": "2026-07-13",
+  "command": "npm run build",
+  "clientAssets": {
+    "SceneLabCanvas-50OJO4KU.js": 874447,
+    "SceneLabExperience-DQg2NPUV.js": 32960,
+    "generator-page-B1JJ8qxD.js": 49595,
+    "library-page-Dl5f22Z7.js": 829
+  },
+  "routeIsolation": {
+    "libraryPage": "dynamically imports SceneLabExperience with ssr:false",
+    "generatorPage": "does not import SceneLabExperience or SceneLabCanvas",
+    "sceneCanvas": "remains the only >500 kB emitted client JavaScript chunk"
+  },
+  "comparison": {
+    "before": null,
+    "after": "Current build only; no trustworthy pre-integration chunk manifest exists, so no before/after reduction is claimed."
+  },
+  "limitation": "Chunk size is a route-load artifact, not GPU or physical-device performance acceptance."
+}

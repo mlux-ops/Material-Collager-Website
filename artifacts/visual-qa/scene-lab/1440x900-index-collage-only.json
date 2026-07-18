@@ -1,0 +1,128 @@
+{
+  "items": [
+    {
+      "collageId": "user-finish-collage-01",
+      "instance": "scene-lab:user-finish-collage-01:1",
+      "sourceKind": "user-provided-lab-collage",
+      "track": "track-01"
+    },
+    {
+      "collageId": "user-finish-collage-02",
+      "instance": "scene-lab:user-finish-collage-02:1",
+      "sourceKind": "user-provided-lab-collage",
+      "track": "track-02"
+    },
+    {
+      "collageId": "user-finish-collage-03",
+      "instance": "scene-lab:user-finish-collage-03:1",
+      "sourceKind": "user-provided-lab-collage",
+      "track": "track-03"
+    },
+    {
+      "collageId": "user-finish-collage-04",
+      "instance": "scene-lab:user-finish-collage-04:1",
+      "sourceKind": "user-provided-lab-collage",
+      "track": "track-04"
+    },
+    {
+      "collageId": "user-finish-collage-01",
+      "instance": "scene-lab:user-finish-collage-01:2",
+      "sourceKind": "user-provided-lab-collage",
+      "track": "track-05"
+    },
+    {
+      "collageId": "user-finish-collage-02",
+      "instance": "scene-lab:user-finish-collage-02:2",
+      "sourceKind": "user-provided-lab-collage",
+      "track": "track-06"
+    },
+    {
+      "collageId": "user-finish-collage-03",
+      "instance": "scene-lab:user-finish-collage-03:2",
+      "sourceKind": "user-provided-lab-collage",
+      "track": "track-07"
+    },
+    {
+      "collageId": "user-finish-collage-04",
+      "instance": "scene-lab:user-finish-collage-04:2",
+      "sourceKind": "user-provided-lab-collage",
+      "track": "track-08"
+    },
+    {
+      "collageId": "user-finish-collage-01",
+      "instance": "scene-lab:user-finish-collage-01:3",
+      "sourceKind": "user-provided-lab-collage",
+      "track": "track-09"
+    },
+    {
+      "collageId": "user-finish-collage-02",
+      "instance": "scene-lab:user-finish-collage-02:3",
+      "sourceKind": "user-provided-lab-collage",
+      "track": "track-10"
+    },
+    {
+      "collageId": "user-finish-collage-03",
+      "instance": "scene-lab:user-finish-collage-03:3",
+      "sourceKind": "user-provided-lab-collage",
+      "track": "track-11"
+    },
+    {
+      "collageId": "user-finish-collage-04",
+      "instance": "scene-lab:user-finish-collage-04:3",
+      "sourceKind": "user-provided-lab-collage",
+      "track": "track-12"
+    },
+    {
+      "collageId": "user-finish-collage-01",
+      "instance": "scene-lab:user-finish-collage-01:4",
+      "sourceKind": "user-provided-lab-collage",
+      "track": "track-13"
+    },
+    {
+      "collageId": "user-finish-collage-02",
+      "instance": "scene-lab:user-finish-collage-02:4",
+      "sourceKind": "user-provided-lab-collage",
+      "track": "track-14"
+    },
+    {
+      "collageId": "user-finish-collage-03",
+      "instance": "scene-lab:user-finish-collage-03:4",
+      "sourceKind": "user-provided-lab-collage",
+      "track": "track-15"
+    },
+    {
+      "collageId": "user-finish-collage-04",
+      "instance": "scene-lab:user-finish-collage-04:4",
+      "sourceKind": "user-provided-lab-collage",
+      "track": "track-16"
+    },
+    {
+      "collageId": "user-finish-collage-01",
+      "instance": "scene-lab:user-finish-collage-01:5",
+      "sourceKind": "user-provided-lab-collage",
+      "track": "track-17"
+    },
+    {
+      "collageId": "user-finish-collage-02",
+      "instance": "scene-lab:user-finish-collage-02:5",
+      "sourceKind": "user-provided-lab-collage",
+      "track": "track-18"
+    },
+    {
+      "collageId": "user-finish-collage-03",
+      "instance": "scene-lab:user-finish-collage-03:5",
+      "sourceKind": "user-provided-lab-collage",
+      "track": "track-19"
+    },
+    {
+      "collageId": "user-finish-collage-04",
+      "instance": "scene-lab:user-finish-collage-04:5",
+      "sourceKind": "user-provided-lab-collage",
+      "track": "track-20"
+    }
+  ],
+  "pressed": [
+    "INDEX"
+  ],
+  "view": "index"
+}
