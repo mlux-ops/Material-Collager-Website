@@ -37,8 +37,21 @@ function WheelScene({ items, onHover, onOpen, targetProgress }: Props) {
   const textures = useLoader(TextureLoader, urls);
   const renderedProgress = useRef(targetProgress.current);
   const velocity = useRef(0);
+  const freezeQaProgress = useMemo(() => {
+    if (process.env.NODE_ENV === "production" || typeof window === "undefined") return false;
+    const query = new URLSearchParams(window.location.search);
+    return query.get("qa") === "1"
+      && query.has("progress")
+      && Number.isFinite(Number(query.get("progress")));
+  }, []);
 
   useFrame((_, rawDelta) => {
+    if (freezeQaProgress) {
+      renderedProgress.current = targetProgress.current;
+      velocity.current = 0;
+      return;
+    }
+
     const delta = Math.min(0.05, Math.max(0.001, rawDelta));
     const stiffness = 92;
     const damping = 2 * Math.sqrt(stiffness);

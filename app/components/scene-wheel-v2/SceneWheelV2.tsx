@@ -18,6 +18,7 @@ const SceneWheelCanvas = dynamic(() => import("./SceneWheelCanvas"), { ssr: fals
 
 export default function SceneWheelV2() {
   const trackRef = useRef<HTMLElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const targetProgress = useNativeScrollProgress(trackRef);
   const [records, setRecords] = useState<LibraryCollageRecord[]>([]);
   const [libraryState, setLibraryState] = useState<"loading" | "ready" | "fallback">("loading");
@@ -48,11 +49,30 @@ export default function SceneWheelV2() {
 
   useEffect(() => {
     if (!selectedItem) return;
+
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const focusFrame = window.requestAnimationFrame(() => {
+      closeButtonRef.current?.focus({ preventScroll: true });
+    });
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setSelectedItem(null);
     };
+
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousBodyOverflow;
+      if (previouslyFocused && previouslyFocused !== document.body) {
+        previouslyFocused.focus({ preventScroll: true });
+      }
+    };
   }, [selectedItem]);
 
   useEffect(() => {
@@ -68,7 +88,13 @@ export default function SceneWheelV2() {
 
   return (
     <main className={styles.page}>
-      <section ref={trackRef} className={styles.track} aria-label="Experimental linear material rail">
+      <section
+        ref={trackRef}
+        className={styles.track}
+        aria-label="Experimental linear material rail"
+        aria-hidden={selectedItem ? true : undefined}
+        inert={selectedItem ? true : undefined}
+      >
         <div className={styles.sticky}>
           <div className={styles.canvas} onPointerLeave={() => setHoverState(null)}>
             {catalog.items.length > 0 ? (
@@ -136,7 +162,7 @@ export default function SceneWheelV2() {
         <div
           className={styles.viewerBackdrop}
           role="presentation"
-          onMouseDown={(event) => {
+          onPointerDown={(event) => {
             if (event.target === event.currentTarget) setSelectedItem(null);
           }}
         >
@@ -146,7 +172,7 @@ export default function SceneWheelV2() {
                 <p>Material rail</p>
                 <h2 id="scene-wheel-viewer-title">{selectedItem.title}</h2>
               </div>
-              <button type="button" onClick={() => setSelectedItem(null)}>Close</button>
+              <button ref={closeButtonRef} type="button" onClick={() => setSelectedItem(null)}>Close</button>
             </div>
             <div className={styles.viewerImage}>
               {/* eslint-disable-next-line @next/next/no-img-element */}

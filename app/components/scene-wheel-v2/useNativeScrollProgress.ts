@@ -13,6 +13,20 @@ export function useNativeScrollProgress(
   const target = useRef(0);
 
   useEffect(() => {
+    if (process.env.NODE_ENV !== "production") {
+      const query = new URLSearchParams(window.location.search);
+      const requestedProgress = Number(query.get("progress"));
+      if (query.get("qa") === "1" && query.has("progress") && Number.isFinite(requestedProgress)) {
+        const frozenProgress = Math.min(1, Math.max(0, requestedProgress));
+        target.current = frozenProgress;
+        trackRef.current?.style.setProperty(
+          "--scene-wheel-progress",
+          frozenProgress.toFixed(5),
+        );
+        return;
+      }
+    }
+
     let scrollFrame = 0;
     let resizeFrame = 0;
     let releaseFrame = 0;
