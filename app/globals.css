@@ -2790,7 +2790,13 @@ body {
 }
 
 @media (max-width: 760px) {
-  .site-navigation { height: 52px; padding: 0 8px; }
+  .site-navigation {
+    height: 52px;
+    padding: 0 8px;
+    top: env(safe-area-inset-top);
+    right: env(safe-area-inset-right);
+    left: env(safe-area-inset-left);
+  }
   .site-wordmark { min-width: 0; margin-right: auto; }
   .site-wordmark,
   .site-navigation nav a { font-size: 9px; padding: 0 7px 8px; }
@@ -2808,11 +2814,28 @@ body {
   .collage-viewer-backdrop { padding: 0; }
   .collage-viewer { border-left: 0; border-right: 0; height: 100dvh; width: 100vw; }
   .viewer-meta { gap: 6px 10px; }
-  .generator-shell { padding: 0 5px 5px; }
-  .generator-shell .workbench { display: grid; grid-template-columns: 1fr; margin-top: 58px; }
+  .generator-shell {
+    padding: 0 5px max(5px, env(safe-area-inset-bottom));
+  }
+  .generator-shell .workbench {
+    display: grid;
+    grid-template-columns: 1fr;
+    margin-top: calc(58px + env(safe-area-inset-top));
+  }
   .generator-shell .controls-surface,
   .generator-shell .references-surface,
   .generator-shell .output-surface { grid-column: 1; max-height: none; min-height: 0; position: static; }
+  .generator-shell .controls-surface { overflow-x: hidden; }
+  .generator-shell .controls-surface .surface-divider {
+    margin-right: -13px;
+    margin-left: -13px;
+  }
+  .generator-shell button,
+  .generator-shell input,
+  .generator-shell select,
+  .generator-shell textarea,
+  .generator-shell .download-button,
+  .generator-shell .library-link-button { min-height: 44px; }
   .generator-shell .items-list { grid-template-columns: 1fr; }
 }
 

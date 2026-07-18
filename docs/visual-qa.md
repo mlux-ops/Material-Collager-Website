@@ -59,3 +59,15 @@ Date: 2026-07-18
 - Reproduced the deployed regression: downward mouse-wheel input left both `window.scrollY` and scene progress unchanged.
 - Changed Scene Lab V2 to consume wheel deltas directly and advance the glass rail in either direction, while preserving native-scroll updates for keyboard and scrollbar input.
 - Browser acceptance requires forward wheel input to increase progress and reverse wheel input to return toward the starting composition without console errors.
+
+## iPhone 15 Pro Max responsive pass
+
+Date: 2026-07-18
+
+- Target viewport: `430 x 932` CSS pixels, portrait orientation.
+- Mobile navigation must fit the usable viewport with three 58 px touch targets and the approved `MATERIAL COLL.` abbreviation.
+- Mobile WebGL framing uses the same rail geometry with a portrait-specific camera fit so the diagonal pane field fills the viewport instead of collapsing into a clipped sliver.
+- The page opts into `viewport-fit=cover`; navigation, captions, and the viewer account for iPhone safe-area insets.
+- The rail preserves vertical touch panning, and the full-screen viewer exposes a 44 px minimum Close target.
+- The Generator fits the phone viewport without inner horizontal overflow, respects top/bottom safe areas, and exposes 44 px minimum form and button targets without changing application behavior.
+- Desktop camera values remain unchanged.

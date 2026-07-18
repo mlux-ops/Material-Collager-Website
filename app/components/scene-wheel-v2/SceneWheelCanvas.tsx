@@ -1,11 +1,11 @@
 "use client";
 
-import { Suspense, useMemo, useRef, type MutableRefObject } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { Canvas, useFrame, useLoader } from "@react-three/fiber";
 import { NoToneMapping, SRGBColorSpace, TextureLoader } from "three";
 import type { SceneLabCollageItem } from "@/app/lib/scene-lab-assets";
 import { SceneCard, type SceneWheelHoverState } from "./SceneCard";
-import { SCENE_WHEEL_CAMERA } from "./curve-model";
+import { SCENE_WHEEL_CAMERA, SCENE_WHEEL_MOBILE_CAMERA } from "./curve-model";
 
 type Props = {
   items: readonly SceneLabCollageItem[];
@@ -13,6 +13,24 @@ type Props = {
   onOpen: (item: SceneLabCollageItem) => void;
   targetProgress: MutableRefObject<number>;
 };
+
+function useMobileSceneFraming() {
+  const [isMobile, setIsMobile] = useState(() => (
+    typeof window !== "undefined"
+      && window.matchMedia("(max-width: 700px) and (max-aspect-ratio: 18 / 25)").matches
+  ));
+
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 700px) and (max-aspect-ratio: 18 / 25)");
+    const sync = () => setIsMobile(query.matches);
+
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
+
+  return isMobile;
+}
 
 function WheelScene({ items, onHover, onOpen, targetProgress }: Props) {
   const urls = useMemo(() => items.map((item) => item.url), [items]);
@@ -53,10 +71,13 @@ function WheelScene({ items, onHover, onOpen, targetProgress }: Props) {
 }
 
 export default function SceneWheelCanvas(props: Props) {
+  const useMobileFraming = useMobileSceneFraming();
+
   return (
     <Canvas
+      key={useMobileFraming ? "mobile" : "desktop"}
       aria-hidden="true"
-      camera={SCENE_WHEEL_CAMERA}
+      camera={useMobileFraming ? SCENE_WHEEL_MOBILE_CAMERA : SCENE_WHEEL_CAMERA}
       dpr={[1, 2]}
       frameloop="always"
       gl={{ alpha: false, antialias: true, powerPreference: "high-performance", premultipliedAlpha: false }}

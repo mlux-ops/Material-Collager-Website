@@ -85,8 +85,14 @@ export default function SceneWheelV2() {
           </div>
 
           <header className={styles.chrome} aria-label="Material Collager">
-            <Link href="/" className={`${styles.chromeCell} ${styles.brand}`}>
-              MATERIAL COLLAGER
+            <Link
+              href="/"
+              className={`${styles.chromeCell} ${styles.brand}`}
+              aria-label="Material Collager"
+              title="MATERIAL COLLAGER"
+            >
+              <span className={styles.brandFull}>MATERIAL COLLAGER</span>
+              <span className={styles.brandShort} aria-hidden="true">MATERIAL COLL.</span>
             </Link>
             <nav aria-label="Primary navigation">
               <Link href="/" className={styles.chromeCell} aria-current="page">
@@ -99,7 +105,10 @@ export default function SceneWheelV2() {
           </header>
 
           <div className={styles.caption}>
-            <p>LINEAR GLASS MATERIAL RAIL · CONTINUOUS NATIVE SCROLL</p>
+            <p>
+              <span className={styles.captionFull}>LINEAR GLASS MATERIAL RAIL · CONTINUOUS NATIVE SCROLL</span>
+              <span className={styles.captionShort}>LINEAR GLASS RAIL</span>
+            </p>
             <p>{libraryState === "ready" ? "LIVE LIBRARY" : "LAB COLLAGES"}</p>
           </div>
 

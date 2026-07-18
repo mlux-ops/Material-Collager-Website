@@ -67,3 +67,9 @@ export const SCENE_WHEEL_CAMERA = {
   near: 0.1,
   position: [0, 0.15, 12.4] as [number, number, number],
 };
+
+export const SCENE_WHEEL_MOBILE_CAMERA = {
+  ...SCENE_WHEEL_CAMERA,
+  fov: 50,
+  position: [-1.3, -0.35, 12.4] as [number, number, number],
+};
