@@ -117,25 +117,30 @@ export function useNativeScrollProgress(
       });
     };
 
-    const handleBoundaryWheel = (event: WheelEvent) => {
+    const handleWheel = (event: WheelEvent) => {
+      if (event.ctrlKey) return;
+
       const current = metrics();
       if (!current) return;
 
-      const localFraction =
-        (window.scrollY - current.start) / current.distance;
-      const blockedAtStart =
-        localFraction <= EDGE_FRACTION && event.deltaY < 0;
-      const blockedAtEnd =
-        localFraction >= 1 - EDGE_FRACTION && event.deltaY > 0;
-
-      if (!blockedAtStart && !blockedAtEnd) return;
-
       event.preventDefault();
+
+      const deltaPixels = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? event.deltaY * 16
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? event.deltaY * window.innerHeight
+          : event.deltaY;
+
       target.current +=
-        (event.deltaY / Math.max(1, window.innerHeight)) *
+        (deltaPixels / Math.max(1, window.innerHeight)) *
         CARDS_PER_VIEWPORT;
       writeProgress();
-      recenter();
+
+      if (Math.abs(window.scrollY - current.centerY) > 2) {
+        recenter();
+      } else {
+        lastScrollY = window.scrollY;
+      }
     };
 
     const handlePageShow = () => {
@@ -156,7 +161,7 @@ export function useNativeScrollProgress(
     window.addEventListener("scroll", scheduleScrollUpdate, { passive: true });
     window.addEventListener("resize", scheduleRecenter, { passive: true });
     window.addEventListener("pageshow", handlePageShow);
-    window.addEventListener("wheel", handleBoundaryWheel, { passive: false });
+    window.addEventListener("wheel", handleWheel, { passive: false });
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.visualViewport?.addEventListener("resize", scheduleRecenter, {
       passive: true,
@@ -174,7 +179,7 @@ export function useNativeScrollProgress(
       window.removeEventListener("scroll", scheduleScrollUpdate);
       window.removeEventListener("resize", scheduleRecenter);
       window.removeEventListener("pageshow", handlePageShow);
-      window.removeEventListener("wheel", handleBoundaryWheel);
+      window.removeEventListener("wheel", handleWheel);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.visualViewport?.removeEventListener("resize", scheduleRecenter);
     };

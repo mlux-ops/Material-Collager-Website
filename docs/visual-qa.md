@@ -51,3 +51,11 @@ Date: 2026-07-18
 - Confirmed `GENERATOR` navigates from `/` to `/generator` and the working Board setup screen renders.
 - Confirmed no framework overlay and no Browser console errors or warnings.
 - Mobile navigation remains outside this acceptance scope at the user's direction.
+
+## Wheel interaction repair
+
+Date: 2026-07-18
+
+- Reproduced the deployed regression: downward mouse-wheel input left both `window.scrollY` and scene progress unchanged.
+- Changed Scene Lab V2 to consume wheel deltas directly and advance the glass rail in either direction, while preserving native-scroll updates for keyboard and scrollbar input.
+- Browser acceptance requires forward wheel input to increase progress and reverse wheel input to return toward the starting composition without console errors.
