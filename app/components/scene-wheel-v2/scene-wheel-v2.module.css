@@ -30,37 +30,61 @@
 }
 
 .chrome {
+  --chrome-fill: rgb(250 250 250 / 38%);
+  --chrome-line: rgb(0 0 0 / 13%);
   position: absolute;
-  inset: 24px 28px auto;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  pointer-events: none;
-  font-size: 11px;
-  line-height: 1;
-  letter-spacing: 0.11em;
-}
-
-.chrome a,
-.chrome span {
-  color: inherit;
-  text-decoration: none;
-  pointer-events: auto;
+  top: 4px;
+  left: 4px;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: 220px 360px;
+  width: 580px;
+  height: 58px;
 }
 
 .chrome nav {
-  display: flex;
-  gap: 18px;
+  display: grid;
+  grid-template-columns: 180px 180px;
 }
 
-.chrome nav span {
-  border-bottom: 1px solid currentColor;
-  padding-bottom: 3px;
+.chromeCell {
+  display: flex;
+  align-items: flex-end;
+  height: 58px;
+  padding: 39px 10px 6px;
+  border: 1px solid var(--chrome-line);
+  border-radius: 6px;
+  background: var(--chrome-fill);
+  color: #000;
+  font-size: 10.5px;
+  font-weight: 400;
+  line-height: 11px;
+  letter-spacing: 0.015em;
+  text-decoration: none;
+  text-transform: uppercase;
+  white-space: nowrap;
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.chromeCell[aria-current="page"] {
+  background: rgb(250 250 250 / 62%);
+}
+
+.chromeCell:hover,
+.chromeCell:focus-visible {
+  background: #111;
+  color: #fff;
+}
+
+.chromeCell:focus-visible {
+  outline: 2px solid #000;
+  outline-offset: 2px;
 }
 
 .brand {
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .caption {
@@ -214,7 +238,14 @@
   }
 
   .chrome {
-    inset: 18px 18px auto;
+    top: 4px;
+    left: 4px;
+    grid-template-columns: 152px 280px;
+    width: 432px;
+  }
+
+  .chrome nav {
+    grid-template-columns: 140px 140px;
   }
 
   .caption {

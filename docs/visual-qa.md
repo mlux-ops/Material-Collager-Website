@@ -41,3 +41,13 @@ The previous deployment promoted a separate world-space QA prototype. The tested
 
 - Mobile acceptance is intentionally out of scope at the user's direction.
 - The original `/scene-lab` remains available as V1 and is not the production homepage.
+
+## Navigation restoration
+
+Date: 2026-07-18
+
+- Restored the approved 580 px desktop navigation cluster: `MATERIAL COLLAGER / LIBRARY / GENERATOR`.
+- Confirmed all three controls are visible above the Scene Lab V2 canvas at `1280 x 720`.
+- Confirmed `GENERATOR` navigates from `/` to `/generator` and the working Board setup screen renders.
+- Confirmed no framework overlay and no Browser console errors or warnings.
+- Mobile navigation remains outside this acceptance scope at the user's direction.

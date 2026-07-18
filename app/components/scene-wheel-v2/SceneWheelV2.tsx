@@ -84,11 +84,17 @@ export default function SceneWheelV2() {
             ) : null}
           </div>
 
-          <header className={styles.chrome}>
-            <Link href="/" className={styles.brand}>MATERIAL COLLAGER</Link>
-            <nav aria-label="Scene comparison">
-              <Link href="/scene-lab">V1</Link>
-              <span aria-current="page">V2</span>
+          <header className={styles.chrome} aria-label="Material Collager">
+            <Link href="/" className={`${styles.chromeCell} ${styles.brand}`}>
+              MATERIAL COLLAGER
+            </Link>
+            <nav aria-label="Primary navigation">
+              <Link href="/" className={styles.chromeCell} aria-current="page">
+                LIBRARY
+              </Link>
+              <Link href="/generator" className={styles.chromeCell}>
+                GENERATOR
+              </Link>
             </nav>
           </header>
 
