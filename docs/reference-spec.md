@@ -112,6 +112,27 @@ These color-derived values remain useful as diagnostics only. The geometric fiel
 - Planes have square texture edges, no card shell, no radius, no caption container, and no box shadow.
 - Foreground planes overlap the next 1–3 planes by roughly 18–55% of the smaller plane's projected area. Far planes overlap more tightly because of perspective compression.
 
+### Approved geometry amendment — parallel world-space frames
+
+Approved 2026-07-16 after direct comparison of the recording, live reference, and current implementation.
+
+- Overview panels are one family of very thin world-space frames with a shared orientation. Their surface normals remain parallel and align with the near/far direction of the row while the camera/field advances through depth. Do not billboard panels toward the camera, independently keyframe panel orientation, or reconstruct the overview by deforming four screen-space corners.
+- Mild differences in projected edge angle come from perspective and each frame's world position, not independent per-panel yaw. The earlier yaw ranges are screen-space observations, not permission to assign unrelated rotations. A selected frame may interpolate away from the shared row-facing orientation only after selection begins. During extraction it moves out of the row and rotates toward a camera-facing, upright presentation; no unselected, hovered, or merely focal frame may perform that turn.
+- Use a perspective camera and meaningful world-space z separation. Scroll changes the relative camera/field transform so near frames exhibit stronger parallax and scale change than far frames.
+- Frames have a restrained physical edge. At 1440 × 900 the visible side treatment should normally read as approximately 1–3 CSS pixels at oblique edges, without a card shell, radius, drop shadow, or decorative border.
+- Every frame inherits its texture's decoded intrinsic aspect ratio. World geometry must satisfy `frameWidth / frameHeight = sourceWidth / sourceHeight`; placement scale multiplies both dimensions uniformly.
+- Use the complete source UV domain for Overview. Do not crop, stretch, or resample a texture to match a slot. Aspect classes remain placement hints only. Composition corrections must change world position, spacing, camera parameters, or uniform scale. Viewport-edge clipping remains intentional.
+- Selection and centered presentation preserve the same intrinsic ratio and contain the complete source image.
+
+Prototype acceptance adds these gates:
+
+- overview panel-normal angular variance no greater than 0.5°;
+- world-geometry/source-aspect error no greater than 0.1%;
+- complete `[0,1] × [0,1]` source UV coverage;
+- visible near/far parallax under one deterministic scroll trace;
+- no per-panel camera-facing rotation before selection;
+- p00, p40, and p80 at 1440 × 900 approved before expanding to all anchors and responsive viewports.
+
 ## 4. Panel geometry and render order
 
 The following table records six captured visual anchors in normalized viewport coordinates. `x` and `y` are top-left; `w` and `h` are projected size. Values outside 0–1 indicate intentional crop. `z-rank 0` is nearest. Rotation is screen-space yaw/roll. Opacity and blur are apparent observations, not measured shader constants. The opacity and blur ranges are initial tuning ranges; acceptance uses the perceived sharpness hierarchy unless a later documented measurement method produces direct values.

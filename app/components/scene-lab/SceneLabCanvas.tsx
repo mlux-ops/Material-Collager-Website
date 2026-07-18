@@ -23,6 +23,7 @@ import {
 } from "@/app/lib/scene-lab-geometry";
 import type { VirtualProgressController } from "@/app/hooks/useVirtualProgress";
 import { ScenePlane, type ScenePlaneHandle } from "./ScenePlane";
+import { WorldScenePlane } from "./WorldScenePlane";
 
 type Props = {
   activeId: string;
@@ -38,6 +39,7 @@ type Props = {
   viewportKey: ViewportKey;
   viewportWidth: number;
   textureRetryNonce: number;
+  worldSpace: boolean;
 };
 
 export type TextureLoadState = {
@@ -211,7 +213,7 @@ function SceneField({
   viewportHeight,
   viewportKey,
   viewportWidth,
-}: Omit<Props, "frozen" | "initialProgress" | "onContextState" | "onTextureState" | "textureRetryNonce"> & {
+}: Omit<Props, "frozen" | "initialProgress" | "onContextState" | "onTextureState" | "textureRetryNonce" | "worldSpace"> & {
   onWindowChange: (ids: string[]) => void;
   planeRefs: Map<string, RefObject<ScenePlaneHandle | null>>;
   reportEveryFrame: boolean;
@@ -269,7 +271,8 @@ function SceneField({
     for (const asset of assets) {
       const handle = planeRefs.get(asset.id)?.current;
       if (handle) registeredHandles += 1;
-      if (handle?.update(byId.get(asset.id) ?? null, asset.id === activeId)) drawablePlanes += 1;
+      const presentationPhase = asset.id === selectedTrackRef.current ? selectionRef.current : 0;
+      if (handle?.update(byId.get(asset.id) ?? null, asset.id === activeId, presentationPhase)) drawablePlanes += 1;
     }
     if (reportEveryFrame || frameNumberRef.current % 10 === 0) {
       canvasRef.current?.setAttribute("data-scene-handles", String(registeredHandles));
@@ -313,6 +316,7 @@ export default function SceneLabCanvas(props: Props) {
     gl.setClearColor(0xfafafa, 1);
     const canvas = gl.domElement;
     canvas.setAttribute("aria-hidden", "true");
+    canvas.setAttribute("data-scene-renderer", props.worldSpace ? "world-perspective" : "projected-orthographic");
     const lost = (event: Event) => {
       event.preventDefault();
       onContextState(true);
@@ -324,22 +328,26 @@ export default function SceneLabCanvas(props: Props) {
       canvas.removeEventListener("webglcontextlost", lost, false);
       canvas.removeEventListener("webglcontextrestored", restored, false);
     };
-  }, [onContextState]);
+  }, [onContextState, props.worldSpace]);
 
   useEffect(() => () => contextCleanupRef.current?.(), []);
 
   return (
     <Canvas
       aria-hidden="true"
-      orthographic
-      camera={{ far: 10, near: 0.1, position: [0, 0, 2], zoom: 1 }}
+      orthographic={!props.worldSpace}
+      camera={props.worldSpace
+        ? { far: 40, fov: 35, near: 0.1, position: [0, 0, 8] }
+        : { far: 10, near: 0.1, position: [0, 0, 2], zoom: 1 }}
       dpr={[1, 1.25]}
       frameloop="always"
       gl={{ alpha: false, antialias: true, powerPreference: "high-performance", premultipliedAlpha: false }}
       onCreated={handleCreated}
     >
       <color attach="background" args={["#fafafa"]} />
-      {props.assets.map((asset) => (
+      {props.assets.map((asset) => props.worldSpace ? (
+        <WorldScenePlane key={asset.id} ref={planeRefs.get(asset.id)} texture={textures.get(asset.id) ?? null} />
+      ) : (
         <ScenePlane key={asset.id} ref={planeRefs.get(asset.id)} asset={asset} texture={textures.get(asset.id) ?? null} />
       ))}
       <SceneField

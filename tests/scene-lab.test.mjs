@@ -17,6 +17,7 @@ import {
   IDLE_DRAG_STATE,
   movePointerDrag,
 } from "../app/lib/scene-lab-pointer.ts";
+import { getIntrinsicFrameSize, WORLD_FRAME_NORMAL } from "../app/lib/world-scene-geometry.ts";
 
 const geometry = JSON.parse(await readFile(new URL("../artifacts/reference-audit/reference-geometry.json", import.meta.url), "utf8"));
 const anchorProgress = new Map([["p00", 0], ["p20", 0.2], ["p40", 0.4], ["p60", 0.6], ["p80", 0.8], ["p100", 1]]);
@@ -201,4 +202,25 @@ test("pointer cleanup ignores unrelated pointer IDs and preserves tap clicks", (
   const finished = finishPointerDrag(tap, 3, "pointerup");
   assert.equal(finished.suppressClick, false);
   assert.deepEqual(finished.drag, IDLE_DRAG_STATE);
+});
+
+test("world-space frames preserve every decoded source aspect without slot cropping", () => {
+  for (const sourceAspect of [0.625, 1, 1.5, 1.777]) {
+    const frame = getIntrinsicFrameSize({
+      normalizedArea: 0.08,
+      sourceAspect,
+      viewportHeight: 900,
+      viewportWidth: 1440,
+      visibleHeight: 5.1,
+      visibleWidth: 8.16,
+    });
+    assert.ok(Math.abs(frame.width / frame.height - sourceAspect) < 0.001, `${sourceAspect} must remain intrinsic`);
+  }
+});
+
+test("the world-space overview exposes one shared row-aligned frame normal", () => {
+  assert.equal(WORLD_FRAME_NORMAL.length, 3);
+  assert.ok(WORLD_FRAME_NORMAL.every(Number.isFinite));
+  assert.ok(Math.abs(Math.hypot(...WORLD_FRAME_NORMAL) - 1) < 0.01);
+  assert.ok(WORLD_FRAME_NORMAL[2] > 0);
 });

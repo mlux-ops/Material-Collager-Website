@@ -9,6 +9,7 @@ export type SceneLabQAState = {
   failedTextureTrack: string | null;
   frozen: boolean;
   progress: number;
+  worldSpace: boolean;
 };
 
 export function useSceneLabQA(): SceneLabQAState {
@@ -25,6 +26,7 @@ export function useSceneLabQA(): SceneLabQAState {
       : Number.isFinite(developmentProgress)
         ? Math.max(0, Math.min(1, developmentProgress))
         : 0;
-    return { anchor, enabled, failedTextureTrack, frozen: enabled && anchor !== null, progress };
+    const worldSpace = enabled && params.get("render") === "world";
+    return { anchor, enabled, failedTextureTrack, frozen: enabled && anchor !== null, progress, worldSpace };
   }, []);
 }

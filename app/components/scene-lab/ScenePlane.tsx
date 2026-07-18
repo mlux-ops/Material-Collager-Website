@@ -16,7 +16,7 @@ import type { SceneLabCollageItem } from "@/app/lib/scene-lab-assets";
 import type { ScenePlaneState } from "@/app/lib/scene-lab-geometry";
 
 export type ScenePlaneHandle = {
-  update: (state: ScenePlaneState | null, active: boolean) => boolean;
+  update: (state: ScenePlaneState | null, active: boolean, presentationPhase?: number) => boolean;
 };
 
 type ImageLike = { height?: number; naturalHeight?: number; naturalWidth?: number; width?: number };

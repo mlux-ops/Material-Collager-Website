@@ -639,6 +639,7 @@ export default function SceneLabExperience({ surface = "lab" }: { surface?: "lab
       data-library-state={libraryState}
       data-lab-repetition={catalog.repetitionRequired ? "true" : "false"}
       data-persisted-collage-count={catalog.persistedCollageCount}
+      data-scene-renderer={qa.worldSpace && !productionLibrary ? "world-perspective" : "projected-orthographic"}
       data-texture-failed={textureState.failed}
       data-texture-loaded={textureState.loaded}
       data-texture-pending={textureState.pending}
@@ -666,6 +667,7 @@ export default function SceneLabExperience({ surface = "lab" }: { surface?: "lab
             viewportHeight={viewport.height}
             viewportKey={viewportKey}
             viewportWidth={viewport.width}
+            worldSpace={qa.worldSpace && !productionLibrary}
           />
         ) : null}
       </div>
