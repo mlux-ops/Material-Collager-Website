@@ -55,3 +55,8 @@ public/screenshot.png
 /artifacts/release-qa/*/
 !/artifacts/release-qa/templates/
 !/artifacts/release-qa/templates/**
+
+# Ephemeral Sites packages and local server output
+/.sites-package-stage-*/
+/material-collager-site-*.tar.gz
+/*-dev-server*.log
