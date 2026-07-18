@@ -1,16 +1,22 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import styles from "./scene-lab/scene-lab.module.css";
 
-const LibraryScene = dynamic(
-  () => import("./components/scene-lab/SceneLabExperience"),
+const LibrarySceneV2 = dynamic(
+  () => import("./components/scene-wheel-v2/SceneWheelV2"),
   {
     ssr: false,
-    loading: () => <main className={styles.shell} aria-busy="true"><p className={styles.loading}>Loading completed finish collages</p></main>,
+    loading: () => (
+      <main
+        aria-busy="true"
+        style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "#fafafa" }}
+      >
+        <p style={{ fontSize: 11, letterSpacing: "0.1em" }}>LOADING SPATIAL MATERIAL WHEEL...</p>
+      </main>
+    ),
   },
 );
 
 export default function LibraryPage() {
-  return <LibraryScene surface="library" />;
+  return <LibrarySceneV2 />;
 }

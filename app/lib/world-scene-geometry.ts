@@ -10,10 +10,6 @@ export type IntrinsicFrameSizeInput = {
 /** Near-facing normal of the diagonal frame row; every overview frame shares it. */
 export const WORLD_FRAME_NORMAL = [-0.72, -0.5, 0.48] as const;
 
-export function shouldUseWorldSpaceRenderer(surface: "lab" | "library", qaWorldSpace: boolean) {
-  return surface === "library" || qaWorldSpace;
-}
-
 export function getIntrinsicFrameSize({
   normalizedArea,
   sourceAspect,

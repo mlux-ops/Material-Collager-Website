@@ -17,7 +17,7 @@ import {
   IDLE_DRAG_STATE,
   movePointerDrag,
 } from "../app/lib/scene-lab-pointer.ts";
-import { getIntrinsicFrameSize, shouldUseWorldSpaceRenderer, WORLD_FRAME_NORMAL } from "../app/lib/world-scene-geometry.ts";
+import { getIntrinsicFrameSize, WORLD_FRAME_NORMAL } from "../app/lib/world-scene-geometry.ts";
 
 const geometry = JSON.parse(await readFile(new URL("../artifacts/reference-audit/reference-geometry.json", import.meta.url), "utf8"));
 const anchorProgress = new Map([["p00", 0], ["p20", 0.2], ["p40", 0.4], ["p60", 0.6], ["p80", 0.8], ["p100", 1]]);
@@ -223,11 +223,4 @@ test("the world-space overview exposes one shared row-aligned frame normal", () 
   assert.ok(WORLD_FRAME_NORMAL.every(Number.isFinite));
   assert.ok(Math.abs(Math.hypot(...WORLD_FRAME_NORMAL) - 1) < 0.01);
   assert.ok(WORLD_FRAME_NORMAL[2] > 0);
-});
-
-test("the production Library always uses the world-space renderer", () => {
-  assert.equal(shouldUseWorldSpaceRenderer("library", false), true);
-  assert.equal(shouldUseWorldSpaceRenderer("library", true), true);
-  assert.equal(shouldUseWorldSpaceRenderer("lab", false), false);
-  assert.equal(shouldUseWorldSpaceRenderer("lab", true), true);
 });
