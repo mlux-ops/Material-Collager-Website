@@ -91,7 +91,6 @@ export const ScenePlane = forwardRef<ScenePlaneHandle, { asset: SceneLabCollageI
           positions.setXYZ(index, (x - 0.5) * viewportSize.width, (0.5 - y) * viewportSize.height, 0);
         });
         positions.needsUpdate = true;
-        geometry.computeBoundingSphere();
 
         if (Math.abs(lastAspectRef.current - state.projectedAspect) > 0.001) {
           const uv = geometry.getAttribute("uv") as BufferAttribute;

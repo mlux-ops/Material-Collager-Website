@@ -131,8 +131,18 @@ function interpolateShared(a: ScenePlaneState, b: ScenePlaneState, t: number): S
   };
 }
 
+// Anchor states derive from static JSON and are never mutated by consumers,
+// so each viewport/anchor pair is materialized once.
+const anchorPlaneCache = new Map<string, ScenePlaneState[]>();
+
 export function getAnchorPlanes(viewportKey: ViewportKey, anchor: SceneAnchor) {
-  return GEOMETRY.viewports[viewportKey].anchors[anchor].planes.map(toPlaneState);
+  const cacheKey = `${viewportKey}|${anchor}`;
+  let planes = anchorPlaneCache.get(cacheKey);
+  if (!planes) {
+    planes = GEOMETRY.viewports[viewportKey].anchors[anchor].planes.map(toPlaneState);
+    anchorPlaneCache.set(cacheKey, planes);
+  }
+  return planes;
 }
 
 export function getInterpolatedPlanes(viewportKey: ViewportKey, rawProgress: number) {

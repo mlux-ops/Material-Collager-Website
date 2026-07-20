@@ -38,18 +38,29 @@ export function useNativeScrollProgress(
     const previousScrollRestoration = window.history.scrollRestoration;
     window.history.scrollRestoration = "manual";
 
+    // Layout reads are cached so per-wheel/per-scroll handlers avoid forced
+    // reflow; the cache is invalidated on resize and around recenter scrolls.
+    let cachedMetrics: { centerY: number; distance: number; start: number } | null = null;
+
+    const invalidateMetrics = () => {
+      cachedMetrics = null;
+    };
+
     const metrics = () => {
+      if (cachedMetrics) return cachedMetrics;
+
       const track = trackRef.current;
       if (!track) return null;
 
       const start = window.scrollY + track.getBoundingClientRect().top;
       const distance = Math.max(1, track.offsetHeight - window.innerHeight);
 
-      return {
+      cachedMetrics = {
         centerY: start + distance * CENTER_FRACTION,
         distance,
         start,
       };
+      return cachedMetrics;
     };
 
     const writeProgress = () => {
@@ -81,6 +92,7 @@ export function useNativeScrollProgress(
       suppressScroll = true;
       window.scrollTo({ left: 0, top: current.centerY, behavior: "auto" });
       lastScrollY = current.centerY;
+      invalidateMetrics();
       writeProgress();
       releaseScrollSuppression();
     };
@@ -124,6 +136,7 @@ export function useNativeScrollProgress(
     };
 
     const scheduleRecenter = () => {
+      invalidateMetrics();
       if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
       resizeFrame = window.requestAnimationFrame(() => {
         resizeFrame = 0;

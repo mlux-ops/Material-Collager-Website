@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   adaptCompletedCollages,
   normalizeLibraryCollageRecords,
@@ -22,8 +22,39 @@ export default function SceneWheelV2() {
   const targetProgress = useNativeScrollProgress(trackRef);
   const [records, setRecords] = useState<LibraryCollageRecord[]>([]);
   const [libraryState, setLibraryState] = useState<"loading" | "ready" | "fallback">("loading");
-  const [hoverState, setHoverState] = useState<SceneWheelHoverState>(null);
+  const [hoveredItem, setHoveredItem] = useState<SceneLabCollageItem | null>(null);
   const [selectedItem, setSelectedItem] = useState<SceneLabCollageItem | null>(null);
+  const cursorLabelRef = useRef<HTMLParagraphElement>(null);
+  const hoverPointRef = useRef({ x: 0, y: 0 });
+
+  const positionCursorLabel = useCallback(() => {
+    const label = cursorLabelRef.current;
+    if (!label) return;
+    label.style.left = `${hoverPointRef.current.x + 14}px`;
+    label.style.top = `${hoverPointRef.current.y}px`;
+  }, []);
+
+  // Pointer moves position the label imperatively; state only tracks which
+  // item is hovered, so per-move re-renders never touch the canvas tree.
+  const handleHover = useCallback((state: SceneWheelHoverState) => {
+    if (state) {
+      hoverPointRef.current = { x: state.clientX, y: state.clientY };
+      positionCursorLabel();
+    }
+    setHoveredItem((current: SceneLabCollageItem | null) => {
+      const next = state?.item ?? null;
+      return current?.id === next?.id ? current : next;
+    });
+  }, [positionCursorLabel]);
+
+  const handleOpen = useCallback((item: SceneLabCollageItem) => {
+    setHoveredItem(null);
+    setSelectedItem(item);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (hoveredItem) positionCursorLabel();
+  }, [hoveredItem, positionCursorLabel]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -76,7 +107,7 @@ export default function SceneWheelV2() {
   }, [selectedItem]);
 
   useEffect(() => {
-    const clearHover = () => setHoverState(null);
+    const clearHover = () => setHoveredItem(null);
     window.addEventListener("blur", clearHover);
     return () => window.removeEventListener("blur", clearHover);
   }, []);
@@ -96,15 +127,12 @@ export default function SceneWheelV2() {
         inert={selectedItem ? true : undefined}
       >
         <div className={styles.sticky}>
-          <div className={styles.canvas} onPointerLeave={() => setHoverState(null)}>
-            {catalog.items.length > 0 ? (
+          <div className={styles.canvas} onPointerLeave={() => setHoveredItem(null)}>
+            {libraryState !== "loading" && catalog.items.length > 0 ? (
               <SceneWheelCanvas
                 items={catalog.items}
-                onHover={setHoverState}
-                onOpen={(item) => {
-                  setHoverState(null);
-                  setSelectedItem(item);
-                }}
+                onHover={handleHover}
+                onOpen={handleOpen}
                 targetProgress={targetProgress}
               />
             ) : null}
@@ -143,12 +171,9 @@ export default function SceneWheelV2() {
             <i />
           </div>
 
-          {hoverState ? (
-            <p
-              className={styles.cursorLabel}
-              style={{ left: hoverState.clientX + 14, top: hoverState.clientY }}
-            >
-              {hoverState.item.title}
+          {hoveredItem ? (
+            <p ref={cursorLabelRef} className={styles.cursorLabel}>
+              {hoveredItem.title}
             </p>
           ) : null}
 

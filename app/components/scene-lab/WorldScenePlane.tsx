@@ -43,14 +43,24 @@ function frameDepth(zRank: number) {
   return 0.65 + zRank * 0.34;
 }
 
-function uprightQuaternion(normal: Vector3) {
-  const normalized = normal.clone().normalize();
-  const worldUp = new Vector3(0, 1, 0);
-  const right = new Vector3().crossVectors(worldUp, normalized);
-  if (right.lengthSq() < 0.0001) right.set(1, 0, 0);
-  right.normalize();
-  const up = new Vector3().crossVectors(normalized, right).normalize();
-  return new Quaternion().setFromRotationMatrix(new Matrix4().makeBasis(right, up, normalized));
+// Shared scratch for the per-frame update path so it never allocates.
+const WORLD_UP = new Vector3(0, 1, 0);
+const SCRATCH_NORMAL = new Vector3();
+const SCRATCH_RIGHT = new Vector3();
+const SCRATCH_UP = new Vector3();
+const SCRATCH_BASIS = new Matrix4();
+const SCRATCH_RAY = new Vector3();
+const SCRATCH_POSITION = new Vector3();
+const SCRATCH_VIEW_DIRECTION = new Vector3();
+const SCRATCH_CAMERA_QUATERNION = new Quaternion();
+
+function uprightQuaternion(normal: Vector3, target: Quaternion) {
+  SCRATCH_NORMAL.copy(normal).normalize();
+  SCRATCH_RIGHT.crossVectors(WORLD_UP, SCRATCH_NORMAL);
+  if (SCRATCH_RIGHT.lengthSq() < 0.0001) SCRATCH_RIGHT.set(1, 0, 0);
+  SCRATCH_RIGHT.normalize();
+  SCRATCH_UP.crossVectors(SCRATCH_NORMAL, SCRATCH_RIGHT).normalize();
+  return target.setFromRotationMatrix(SCRATCH_BASIS.makeBasis(SCRATCH_RIGHT, SCRATCH_UP, SCRATCH_NORMAL));
 }
 
 export const WorldScenePlane = forwardRef<ScenePlaneHandle, { texture: Texture | null }>(
@@ -60,7 +70,7 @@ export const WorldScenePlane = forwardRef<ScenePlaneHandle, { texture: Texture |
     const faceMaterialRef = useRef<MeshBasicMaterial>(null);
     const { camera, size } = useThree();
     const rowNormal = useMemo(() => new Vector3(...WORLD_FRAME_NORMAL).normalize(), []);
-    const rowQuaternion = useMemo(() => uprightQuaternion(rowNormal), [rowNormal]);
+    const rowQuaternion = useMemo(() => uprightQuaternion(rowNormal, new Quaternion()), [rowNormal]);
 
     useEffect(() => {
       if (!texture) return;
@@ -85,10 +95,12 @@ export const WorldScenePlane = forwardRef<ScenePlaneHandle, { texture: Texture |
         const centerX = state.corners.reduce((sum, corner) => sum + corner[0], 0) / state.corners.length;
         const centerY = state.corners.reduce((sum, corner) => sum + corner[1], 0) / state.corners.length;
         const z = frameDepth(state.zRank);
-        const rayPoint = new Vector3(centerX * 2 - 1, 1 - centerY * 2, 0.5).unproject(perspective);
-        const rayDirection = rayPoint.sub(perspective.position).normalize();
+        const rayDirection = SCRATCH_RAY.set(centerX * 2 - 1, 1 - centerY * 2, 0.5)
+          .unproject(perspective)
+          .sub(perspective.position)
+          .normalize();
         const rayDistance = (z - perspective.position.z) / rayDirection.z;
-        const position = perspective.position.clone().add(rayDirection.multiplyScalar(rayDistance));
+        const position = SCRATCH_POSITION.copy(perspective.position).addScaledVector(rayDirection, rayDistance);
 
         const distance = Math.max(0.1, perspective.position.z - z);
         const visibleHeight = 2 * Math.tan(MathUtils.degToRad(perspective.fov / 2)) * distance;
@@ -105,7 +117,7 @@ export const WorldScenePlane = forwardRef<ScenePlaneHandle, { texture: Texture |
         });
         const phase = Math.max(0, Math.min(1, presentationPhase));
         const easedPhase = phase * phase * (3 - 2 * phase);
-        const viewDirection = perspective.position.clone().sub(position).normalize();
+        const viewDirection = SCRATCH_VIEW_DIRECTION.copy(perspective.position).sub(position).normalize();
         const rowForeshortening = Math.max(0.25, Math.abs(rowNormal.dot(viewDirection)));
         const rowScaleCompensation = 1 / Math.sqrt(rowForeshortening);
         const scaleCompensation = rowScaleCompensation + (1 - rowScaleCompensation) * easedPhase;
@@ -114,7 +126,7 @@ export const WorldScenePlane = forwardRef<ScenePlaneHandle, { texture: Texture |
         group.position.copy(position);
         group.scale.set(frameSize.width * scaleCompensation, frameSize.height * scaleCompensation, 1);
         if (easedPhase > 0) {
-          const cameraQuaternion = uprightQuaternion(viewDirection);
+          const cameraQuaternion = uprightQuaternion(viewDirection, SCRATCH_CAMERA_QUATERNION);
           group.quaternion.copy(rowQuaternion).slerp(cameraQuaternion, easedPhase);
         } else {
           group.quaternion.copy(rowQuaternion);
