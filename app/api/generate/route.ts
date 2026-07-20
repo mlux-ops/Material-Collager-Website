@@ -42,7 +42,12 @@ type ImageEditRequest = {
 };
 
 type PreparedReference = {
-  blob: Blob;
+  // A reference is carried either as raw bytes (direct multipart uploads from
+  // the Studio/draft path) or as an OpenAI file ID (the full-quality final
+  // path). Final renders never download the bytes into the worker, so large
+  // references cannot exhaust the edge runtime's memory.
+  blob?: Blob;
+  fileId?: string;
   filename: string;
 };
 
@@ -166,17 +171,22 @@ export async function POST(request: Request) {
       if (remoteReferences.length !== expectedReferences) {
         throw new Error("The approved draft or one of its full-quality references is no longer available. Upload it again and retry.");
       }
-      preparedReferences = await retrieveReferences(apiKey, remoteReferences, attempts);
+      // Keep full quality by referencing the uploaded files by ID instead of
+      // pulling every image back into the worker and re-uploading it.
+      preparedReferences = remoteReferences.map((reference) => ({
+        fileId: reference.fileId,
+        filename: safeReferenceFilename(reference.filename),
+      }));
     } else {
       throw new Error("One or more reference images were missing from the generation request.");
     }
     const productReferences = payload.layoutReference && !selectiveEdit ? preparedReferences.slice(1) : preparedReferences;
-    diagnostics.totalReferenceBytes = preparedReferences.reduce((sum, reference) => sum + reference.blob.size, 0);
-    diagnostics.largestReferenceBytes = Math.max(...preparedReferences.map((reference) => reference.blob.size), 0);
+    diagnostics.totalReferenceBytes = preparedReferences.reduce((sum, reference) => sum + (reference.blob?.size ?? 0), 0);
+    diagnostics.largestReferenceBytes = Math.max(...preparedReferences.map((reference) => reference.blob?.size ?? 0), 0);
     diagnostics.references = preparedReferences.map((reference) => ({
       filename: reference.filename,
-      bytes: reference.blob.size,
-      mimeType: reference.blob.type,
+      bytes: reference.blob?.size ?? 0,
+      mimeType: reference.blob?.type ?? "image/png",
     }));
     let generationReferences = preparedReferences;
     let editMask: PreparedReference | undefined;
@@ -338,24 +348,45 @@ async function createImageEdit(apiKey: string, body: ImageEditRequest, diagnosti
   for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
     const startedAt = Date.now();
     try {
-      const form = new FormData();
-      form.append("model", body.model);
-      form.append("prompt", body.prompt);
-      form.append("size", body.size);
-      form.append("quality", body.quality);
-      form.append("background", body.background);
-      form.append("output_format", body.output_format);
-      // GPT Image 2 uses high-fidelity image inputs automatically and rejects input_fidelity.
-      for (const reference of body.references) {
-        form.append("image[]", reference.blob, reference.filename);
-      }
-      if (body.mask) form.append("mask", body.mask.blob, body.mask.filename);
+      // Final renders reference their full-quality inputs by file ID, so the
+      // worker never buffers the image bytes. Everything else uploads bytes
+      // directly as multipart form data.
+      const usingFileIds = body.references.every((reference) => reference.fileId && !reference.blob);
+      let response: Response;
+      if (usingFileIds) {
+        response = await fetch("https://api.openai.com/v1/images/edits", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: body.model,
+            prompt: body.prompt,
+            size: body.size,
+            quality: body.quality,
+            background: body.background,
+            output_format: body.output_format,
+            images: body.references.map((reference) => ({ file_id: reference.fileId })),
+          }),
+        });
+      } else {
+        const form = new FormData();
+        form.append("model", body.model);
+        form.append("prompt", body.prompt);
+        form.append("size", body.size);
+        form.append("quality", body.quality);
+        form.append("background", body.background);
+        form.append("output_format", body.output_format);
+        // GPT Image 2 uses high-fidelity image inputs automatically and rejects input_fidelity.
+        for (const reference of body.references) {
+          if (reference.blob) form.append("image[]", reference.blob, reference.filename);
+        }
+        if (body.mask?.blob) form.append("mask", body.mask.blob, body.mask.filename);
 
-      const response = await fetch("https://api.openai.com/v1/images/edits", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}` },
-        body: form,
-      });
+        response = await fetch("https://api.openai.com/v1/images/edits", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${apiKey}` },
+          body: form,
+        });
+      }
       const data = await readOpenAIResponse<OpenAIImageResponse>(response);
       diagnostics.push({ stage: "image_edit", outcome: "succeeded", attempt: attempt + 1, durationMs: Date.now() - startedAt, size: body.size });
       return { data, attempts: attempt + 1 };
@@ -368,9 +399,9 @@ async function createImageEdit(apiKey: string, body: ImageEditRequest, diagnosti
           transport: "multipart",
           quality: body.quality,
           referenceCount: body.references.length,
-          totalReferenceBytes: body.references.reduce((sum, reference) => sum + reference.blob.size, 0),
-          largestReferenceBytes: Math.max(...body.references.map((reference) => reference.blob.size), 0),
-          references: body.references.map((reference) => ({ filename: reference.filename, bytes: reference.blob.size, mimeType: reference.blob.type })),
+          totalReferenceBytes: body.references.reduce((sum, reference) => sum + (reference.blob?.size ?? 0), 0),
+          largestReferenceBytes: Math.max(...body.references.map((reference) => reference.blob?.size ?? 0), 0),
+          references: body.references.map((reference) => ({ filename: reference.filename, bytes: reference.blob?.size ?? 0, mimeType: reference.blob?.type ?? "image/png" })),
           attempts: diagnostics,
         });
       }
@@ -379,39 +410,6 @@ async function createImageEdit(apiKey: string, body: ImageEditRequest, diagnosti
   }
 
   throw lastError instanceof Error ? lastError : new Error("OpenAI image generation failed.");
-}
-
-async function retrieveReferences(
-  apiKey: string,
-  references: Array<{ fileId: string; filename: string }>,
-  diagnostics: AttemptDiagnostic[],
-) {
-  const prepared: PreparedReference[] = [];
-
-  for (const reference of references) {
-    const startedAt = Date.now();
-    let source: Blob;
-    let response: Response;
-    try {
-      response = await fetch(`https://api.openai.com/v1/files/${encodeURIComponent(reference.fileId)}/content`, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-      });
-      if (!response.ok) await readOpenAIResponse<never>(response);
-      source = await response.blob();
-      if (!source.size) throw new Error(`Reference ${reference.filename} could not be read.`);
-      diagnostics.push({ stage: "reference_fetch", outcome: "succeeded", attempt: prepared.length + 1, durationMs: Date.now() - startedAt });
-    } catch (error) {
-      diagnostics.push(diagnosticFor(error, "reference_fetch", prepared.length + 1, Date.now() - startedAt));
-      throw error;
-    }
-    const contentType = referenceContentType(response.headers.get("content-type"), reference.filename);
-    prepared.push({
-      blob: source.type === contentType ? source : source.slice(0, source.size, contentType),
-      filename: safeReferenceFilename(reference.filename),
-    });
-  }
-
-  return prepared;
 }
 
 function diagnosticFor(error: unknown, stage: AttemptDiagnostic["stage"], attempt: number, durationMs: number, size?: string): AttemptDiagnostic {
@@ -427,14 +425,6 @@ function diagnosticFor(error: unknown, stage: AttemptDiagnostic["stage"], attemp
     requestId: openAIError?.requestId,
     error: error instanceof Error ? error.message.slice(0, 500) : "Unknown error.",
   };
-}
-
-function referenceContentType(header: string | null, filename: string) {
-  if (header?.toLowerCase().startsWith("image/")) return header.split(";")[0].trim();
-  const lower = filename.toLowerCase();
-  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
-  if (lower.endsWith(".webp")) return "image/webp";
-  return "image/png";
 }
 
 function safeReferenceFilename(value: string) {
@@ -537,11 +527,13 @@ For every item ID, return an item verdict and a tight bounding box [x, y, width,
   ];
 
   for (const reference of references) {
-    content.push({
-      type: "input_image",
-      image_url: await blobDataUrl(reference.blob),
-      detail: "original",
-    });
+    // Full-quality final references are passed by file ID so the review request
+    // does not have to base64-encode multi-megabyte images inline.
+    if (reference.fileId) {
+      content.push({ type: "input_image", file_id: reference.fileId, detail: "original" });
+    } else if (reference.blob) {
+      content.push({ type: "input_image", image_url: await blobDataUrl(reference.blob), detail: "original" });
+    }
   }
 
   const response = await fetch("https://api.openai.com/v1/responses", {
