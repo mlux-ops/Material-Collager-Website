@@ -1,19 +1,22 @@
 .page {
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
   background: #fafafa;
   color: #111;
 }
 
 .track {
   position: relative;
-  height: 900vh;
+  height: 100%;
   overflow-anchor: none;
+  overscroll-behavior: none;
+  touch-action: none;
 }
 
 .sticky {
-  position: sticky;
-  top: 0;
-  height: 100vh;
+  position: relative;
+  height: 100%;
   overflow: hidden;
   background: #fafafa;
 }
@@ -247,9 +250,8 @@
   }
 
   .track {
-    height: 760vh;
-    min-height: 100dvh;
-    touch-action: pan-y;
+    height: 100%;
+    touch-action: none;
   }
 
   .sticky {
@@ -257,7 +259,7 @@
   }
 
   .canvas {
-    touch-action: pan-y;
+    touch-action: none;
   }
 
   .chrome {
@@ -388,10 +390,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .track {
-    height: 100vh;
-  }
-
   .scrollCue {
     display: none;
   }

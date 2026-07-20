@@ -44,9 +44,12 @@ function WheelScene({ items, onHover, onOpen, targetProgress }: Props) {
       && query.has("progress")
       && Number.isFinite(Number(query.get("progress")));
   }, []);
+  const reduceMotion = useMemo(() => (
+    typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  ), []);
 
   useFrame((_, rawDelta) => {
-    if (freezeQaProgress) {
+    if (freezeQaProgress || reduceMotion) {
       renderedProgress.current = targetProgress.current;
       velocity.current = 0;
       return;
@@ -98,7 +101,7 @@ export default function SceneWheelCanvas(props: Props) {
         gl.outputColorSpace = SRGBColorSpace;
         gl.toneMapping = NoToneMapping;
         gl.setClearColor(0xfafafa, 1);
-        gl.domElement.setAttribute("data-scene-renderer", "scene-wheel-v2-linear-glass");
+        gl.domElement.setAttribute("data-scene-renderer", "scene-wheel-v2-spatial-glass");
       }}
       onPointerMissed={() => props.onHover(null)}
     >

@@ -1,10 +1,10 @@
 # Material Collager landing reference specification
 
-Status: reference audit complete; implementation not started
+Status: approved refinement slice implemented and locally validated; awaiting final visual approval before deployment
 
-Audit date: 2026-07-12 (America/Chicago)
+Audit dates: 2026-07-12 and 2026-07-18 (America/Chicago)
 
-Canonical Browser session: `unveil-live-iab-20260712-224258-cdt`
+Canonical Browser sessions: `unveil-live-iab-20260712-224258-cdt` and `Unveil vs Material Collager scroll audit`
 
 This document is a measurement and behavior specification. It does not authorize implementation, asset copying, font copying, or deployment. Where the available evidence cannot prove a behavior, the text says so and defines an accessibility contract rather than presenting a guess as reference fact.
 
@@ -417,7 +417,47 @@ The detailed staged plan and exact future files are in `docs/implementation-plan
 
 Reject `/scene-lab` for any high-severity mismatch in geometric composition, crop, z-order, fixed chrome treatment, motion direction, responsive behavior, selection continuity, or accessibility. Do not reject the isolated lab solely for the approved substitute differing from the reference face, pending public asset rights, absent Contact, production routing, final details, or draft restoration. Those become blockers at their later phase gates. Production integration/deployment is rejected for missing font evidence or unlicensed assets, unresolved product IA, modified generator functionality, or deployment before local approval.
 
-## 12. Open questions
+## 12. 2026-07-18 live refinement audit
+
+This audit compared the current deployed Library at `https://material-collager.shb-studio-7543.chatgpt.site/` with `https://unveil.fr/?ref=siteinspire` at a 1440 x 900 CSS viewport. The in-app Browser supplied same-delta forward and reverse wheel input. Opera GX independently confirmed the reference response with real window-level wheel input. No application code or deployment changed during this audit.
+
+### Measured input architecture
+
+| Property | Unveil reference | Current Material Collager |
+|---|---:|---:|
+| CSS viewport | 1440 x 900 | 1440 x 900 |
+| Canvas bounds | 1440 x 900 | 1440 x 900 |
+| Document/body height | 900 / 900 px | 8100 / 8100 px |
+| `window.scrollY` before and after wheel input | 0 px | 3600 px recenter position |
+| Root/body overflow | hidden / hidden | visible / hidden |
+| Input model | viewport-locked virtual scene progress | native 900vh scroll track with midpoint recentering and wheel interception |
+
+The reference never moves the document. Wheel impulses move the WebGL field while fixed DOM chrome remains in a one-viewport document. The current build visually hides body overflow but retains an 8100 px document and continuously recenters at 3600 px. This is the primary interaction mismatch and explains the less direct, less stable wheel feel despite bidirectional movement working.
+
+### Visual and behavior gap ledger
+
+| Severity | Gap | Evidence | Refinement requirement |
+|---|---|---|---|
+| High | Scroll state is coupled to a tall native document and recenter loop. | Live DOM metrics and equal-delta forward/reverse wheel tests. | Replace the scroll track with a viewport-locked virtual progress controller. Preserve wheel, trackpad, touch, keyboard, soft endpoints, and reduced motion. |
+| High | The current field reads as one regular diagonal stack; the reference reads as a spatial camera path with more varied scale, spacing, occlusion, and edge fragments. | Same-viewport screenshots before and after a 600 px wheel delta. | Tune world-path anchors and camera framing from `reference-geometry.json`, not by applying another global scale or diagonal offset. |
+| High | Current depth separation is mostly size and low opacity. Reference depth also uses stronger softening/transmission and selective focal sharpness. | Live screen comparison and current `SceneCard` material structure. | Add a deterministic depth-role material model: focal sharp, adjacent softened, far softened/transmissive, with stable transparent sorting. |
+| High | Current source aspect is clamped to 0.72-1.65. | `curve-model.ts`. | Preserve decoded source aspect exactly; use UV crop anchors for framing instead of changing plane aspect. |
+| Medium | The current foreground planes are repeatedly large and similarly weighted, which crowds the center and weakens the reference's depth hierarchy. | Same-delta forward and reverse captures. | Vary projected size and occlusion by measured role; keep only one dominant focal plane at a time. |
+| Medium | Current image labels appear frequently as black hover/title chips; the reference uses much quieter project labels and fixed Overview/Index chrome. | Live screenshots and DOM snapshots. | Separate active/focus accessibility feedback from default visual labelling; implement the approved fixed view control behavior. |
+| Medium | Header content is intentionally product-specific, but its field width differs from the approved reference geometry. | Live 1440 px screenshots. | Keep Material Collager labels while restoring the approved chrome cell proportions and fixed positioning. |
+| Later phase | Reference selection extracts the chosen plane into a centered detail transition; the current Library opens product UI with a different treatment. | Approved recording and existing route behavior. | Do not fold this into the scroll-controller change. Specify and approve it as a separate transition slice so generator and Library data behavior remain intact. |
+
+### Approved refinement order proposed by this audit
+
+1. Replace only the input/progress layer with a viewport-locked virtual controller and deterministic trace output.
+2. Refit world-path and camera geometry to the six approved anchor states at all required viewports.
+3. Rebuild the depth-role material/sharpness model and transparent ordering.
+4. Reconcile fixed Overview/Index and header chrome without copying Unveil branding.
+5. Treat selection/detail extraction as a separate approved slice.
+
+The next implementation slice should stop after items 1-3, run the required 24 deterministic captures, update `docs/visual-qa.md`, and return for local approval. It must not redesign the generator or deploy.
+
+## 13. Open questions
 
 1. Which Material Collager images are approved for public use, in what stable order, with what titles, routes, and crop anchors?
 2. Does the approved Inter substitute preserve the required line wrapping and chrome geometry in release-candidate captures?

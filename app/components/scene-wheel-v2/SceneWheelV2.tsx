@@ -11,7 +11,7 @@ import {
   type SceneLabCollageItem,
 } from "@/app/lib/scene-lab-assets";
 import type { SceneWheelHoverState } from "./SceneCard";
-import { useNativeScrollProgress } from "./useNativeScrollProgress";
+import { useVirtualScrollProgress } from "./useVirtualScrollProgress";
 import styles from "./scene-wheel-v2.module.css";
 
 const SceneWheelCanvas = dynamic(() => import("./SceneWheelCanvas"), { ssr: false });
@@ -19,7 +19,7 @@ const SceneWheelCanvas = dynamic(() => import("./SceneWheelCanvas"), { ssr: fals
 export default function SceneWheelV2() {
   const trackRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const targetProgress = useNativeScrollProgress(trackRef);
+  const targetProgress = useVirtualScrollProgress(trackRef);
   const [records, setRecords] = useState<LibraryCollageRecord[]>([]);
   const [libraryState, setLibraryState] = useState<"loading" | "ready" | "fallback">("loading");
   const [hoverState, setHoverState] = useState<SceneWheelHoverState>(null);
@@ -132,8 +132,8 @@ export default function SceneWheelV2() {
 
           <div className={styles.caption}>
             <p>
-              <span className={styles.captionFull}>LINEAR GLASS MATERIAL RAIL · CONTINUOUS NATIVE SCROLL</span>
-              <span className={styles.captionShort}>LINEAR GLASS RAIL</span>
+              <span className={styles.captionFull}>SPATIAL GLASS MATERIAL FIELD · VIRTUAL SCROLL</span>
+              <span className={styles.captionShort}>SPATIAL GLASS FIELD</span>
             </p>
             <p>{libraryState === "ready" ? "LIVE LIBRARY" : "LAB COLLAGES"}</p>
           </div>

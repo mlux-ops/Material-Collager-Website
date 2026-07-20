@@ -7,10 +7,12 @@ import {
   Group,
   LinearFilter,
   LinearMipmapLinearFilter,
-  MeshBasicMaterial,
+  Mesh,
   MeshPhysicalMaterial,
+  ShaderMaterial,
   SRGBColorSpace,
   Texture,
+  Vector2,
 } from "three";
 import type { SceneLabCollageItem } from "@/app/lib/scene-lab-assets";
 import { getSceneWheelPose, SCENE_WHEEL_HOVER_OFFSET } from "./curve-model";
@@ -48,6 +50,40 @@ const CARD_HEIGHT = 2.52;
 const CARD_DEPTH = 0.045;
 const IMAGE_INSET = 0.018;
 
+const IMAGE_VERTEX_SHADER = `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const IMAGE_FRAGMENT_SHADER = `
+  uniform sampler2D uMap;
+  uniform float uOpacity;
+  uniform float uBlur;
+  uniform vec2 uTexelSize;
+  varying vec2 vUv;
+
+  void main() {
+    vec2 radius = uTexelSize * mix(0.35, 3.25, uBlur);
+    vec4 sharp = texture2D(uMap, vUv);
+    vec4 softened = sharp * 0.28;
+    softened += texture2D(uMap, vUv + vec2(radius.x, 0.0)) * 0.12;
+    softened += texture2D(uMap, vUv - vec2(radius.x, 0.0)) * 0.12;
+    softened += texture2D(uMap, vUv + vec2(0.0, radius.y)) * 0.12;
+    softened += texture2D(uMap, vUv - vec2(0.0, radius.y)) * 0.12;
+    softened += texture2D(uMap, vUv + radius) * 0.06;
+    softened += texture2D(uMap, vUv - radius) * 0.06;
+    softened += texture2D(uMap, vUv + vec2(radius.x, -radius.y)) * 0.06;
+    softened += texture2D(uMap, vUv + vec2(-radius.x, radius.y)) * 0.06;
+    vec4 color = mix(sharp, softened, uBlur * 0.82);
+    gl_FragColor = vec4(color.rgb, color.a * uOpacity);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+  }
+`;
+
 // The reference field mixes clearer and smokier panes. Variation is stable by
 // track index so the composition does not flicker or change between renders.
 const PANE_PROFILES: readonly PaneProfile[] = [
@@ -61,7 +97,10 @@ const PANE_PROFILES: readonly PaneProfile[] = [
 
 export function SceneCard({ count, index, item, onHover, onOpen, progress, texture }: Props) {
   const groupRef = useRef<Group>(null);
-  const imageMaterialRef = useRef<MeshBasicMaterial>(null);
+  const shellRef = useRef<Mesh>(null);
+  const imageRef = useRef<Mesh>(null);
+  const glassRef = useRef<Mesh>(null);
+  const imageMaterialRef = useRef<ShaderMaterial>(null);
   const glassMaterialRef = useRef<MeshPhysicalMaterial>(null);
   const edgeMaterialRef = useRef<MeshPhysicalMaterial>(null);
   const hoverTarget = useRef(0);
@@ -72,7 +111,7 @@ export function SceneCard({ count, index, item, onHover, onOpen, progress, textu
     const image = texture.image as ImageLike;
     const width = image.naturalWidth ?? image.width ?? 1;
     const height = image.naturalHeight ?? image.height ?? 1;
-    return Math.max(0.72, Math.min(1.65, width / Math.max(1, height)));
+    return width / Math.max(1, height);
   }, [texture]);
 
   const profile = PANE_PROFILES[index % PANE_PROFILES.length];
@@ -90,6 +129,18 @@ export function SceneCard({ count, index, item, onHover, onOpen, progress, textu
   }, [maxAnisotropy, texture]);
 
   useEffect(() => () => configuredTexture.dispose(), [configuredTexture]);
+
+  const imageUniforms = useMemo(() => {
+    const image = texture.image as ImageLike;
+    const sourceWidth = image.naturalWidth ?? image.width ?? 1;
+    const sourceHeight = image.naturalHeight ?? image.height ?? 1;
+    return {
+      uBlur: { value: 0 },
+      uMap: { value: configuredTexture },
+      uOpacity: { value: profile.imageOpacity },
+      uTexelSize: { value: new Vector2(1 / sourceWidth, 1 / sourceHeight) },
+    };
+  }, [configuredTexture, profile.imageOpacity, texture]);
 
   const reportHover = (event: ThreeEvent<PointerEvent>) => {
     const nativeEvent = event.nativeEvent as PointerEvent;
@@ -114,16 +165,25 @@ export function SceneCard({ count, index, item, onHover, onOpen, progress, textu
 
     // One image layer preserves clarity. The independent shell and face layers
     // provide the glass veil without sampling or blurring neighboring texels.
-    imageMaterial.opacity = pose.opacity
-      * Math.min(0.995, profile.imageOpacity + hoverValue.current * 0.055);
+    imageMaterial.uniforms.uOpacity.value = pose.opacity
+      * Math.min(0.995, profile.imageOpacity * (0.72 + pose.focus * 0.31) + hoverValue.current * 0.045);
+    imageMaterial.uniforms.uBlur.value = Math.max(
+      0,
+      pose.depthSoftness * 0.78 - hoverValue.current * 0.24,
+    );
     glassMaterial.opacity = pose.opacity
-      * Math.max(0.018, profile.glassOpacity - hoverValue.current * 0.012);
-    edgeMaterial.opacity = pose.opacity * (0.075 + profile.glassOpacity * 0.35);
+      * Math.max(0.018, profile.glassOpacity + pose.depthSoftness * 0.065 - pose.focus * 0.018 - hoverValue.current * 0.012);
+    edgeMaterial.opacity = pose.opacity * (0.065 + profile.glassOpacity * 0.32 + pose.depthSoftness * 0.025);
+
+    const order = Math.round((12 - pose.relative) * 100) * 3 + index;
+    if (shellRef.current) shellRef.current.renderOrder = order;
+    if (imageRef.current) imageRef.current.renderOrder = order + 1;
+    if (glassRef.current) glassRef.current.renderOrder = order + 2;
   });
 
   return (
     <group ref={groupRef}>
-      <mesh renderOrder={0}>
+      <mesh ref={shellRef}>
         <boxGeometry args={[width, CARD_HEIGHT, CARD_DEPTH]} />
         <meshPhysicalMaterial
           ref={edgeMaterialRef}
@@ -143,23 +203,24 @@ export function SceneCard({ count, index, item, onHover, onOpen, progress, textu
         />
       </mesh>
 
-      <mesh position={[0, 0, CARD_DEPTH / 2 + 0.001]} renderOrder={1}>
+      <mesh ref={imageRef} position={[0, 0, CARD_DEPTH / 2 + 0.001]}>
         <planeGeometry args={[width - IMAGE_INSET, CARD_HEIGHT - IMAGE_INSET]} />
-        <meshBasicMaterial
+        <shaderMaterial
           ref={imageMaterialRef}
           depthTest
           depthWrite={false}
-          map={configuredTexture}
-          opacity={profile.imageOpacity}
           side={DoubleSide}
           toneMapped={false}
           transparent
+          uniforms={imageUniforms}
+          vertexShader={IMAGE_VERTEX_SHADER}
+          fragmentShader={IMAGE_FRAGMENT_SHADER}
         />
       </mesh>
 
       <mesh
+        ref={glassRef}
         position={[0, 0, CARD_DEPTH / 2 + 0.004]}
-        renderOrder={2}
         onClick={(event) => {
           event.stopPropagation();
           onOpen(item);

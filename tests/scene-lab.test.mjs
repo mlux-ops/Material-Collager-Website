@@ -18,6 +18,8 @@ import {
   movePointerDrag,
 } from "../app/lib/scene-lab-pointer.ts";
 import { getIntrinsicFrameSize, WORLD_FRAME_NORMAL } from "../app/lib/world-scene-geometry.ts";
+import { getSceneWheelPose, getSceneWheelScreenPathAlignment } from "../app/components/scene-wheel-v2/curve-model.ts";
+import { normalizeSceneWheelDelta } from "../app/components/scene-wheel-v2/useVirtualScrollProgress.ts";
 
 const geometry = JSON.parse(await readFile(new URL("../artifacts/reference-audit/reference-geometry.json", import.meta.url), "utf8"));
 const anchorProgress = new Map([["p00", 0], ["p20", 0.2], ["p40", 0.4], ["p60", 0.6], ["p80", 0.8], ["p100", 1]]);
@@ -223,4 +225,22 @@ test("the world-space overview exposes one shared row-aligned frame normal", () 
   assert.ok(WORLD_FRAME_NORMAL.every(Number.isFinite));
   assert.ok(Math.abs(Math.hypot(...WORLD_FRAME_NORMAL) - 1) < 0.01);
   assert.ok(WORLD_FRAME_NORMAL[2] > 0);
+});
+
+test("virtual wheel input is viewport-relative and bidirectional without document coordinates", () => {
+  assert.equal(normalizeSceneWheelDelta(900, 0, 900), 1.58);
+  assert.equal(normalizeSceneWheelDelta(-450, 0, 900), -0.79);
+  assert.equal(normalizeSceneWheelDelta(2, 1, 800), 0.0632);
+  assert.equal(normalizeSceneWheelDelta(1, 2, 800), 1.58);
+});
+
+test("spatial wheel panels are perpendicular to the visible path tangent", () => {
+  const poses = Array.from({ length: 8 }, (_, index) => getSceneWheelPose(index, 20, 0));
+  poses.forEach((pose) => {
+    assert.ok(Math.abs(getSceneWheelScreenPathAlignment(pose.relative) - 1) < 0.000001);
+  });
+  assert.ok(new Set(poses.map((pose) => pose.scale.toFixed(3))).size >= 6);
+  assert.ok(poses.some((pose) => pose.focus > 0.9));
+  assert.ok(poses.some((pose) => pose.depthSoftness > 0.5));
+  assert.ok(poses.every((pose) => pose.opacity >= 0 && pose.opacity <= 1));
 });
