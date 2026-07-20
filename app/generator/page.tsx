@@ -1394,38 +1394,61 @@ export default function Home() {
     setOverallProgress(0);
     setReferenceProgress({});
     try {
-      const fileIds = await ensureFullQualityReferenceIds(controller);
-      setWorkingStage("Uploading approved composition");
       const layoutFile = await dataUrlFile(result.dataUrl, "approved-draft.png");
-      const layoutFileId = await uploadReferenceFile(layoutFile, apiKey, controller.signal, (progress) => {
-        setOverallProgress(Math.round(90 + progress * 10));
-      });
-      const payload: CollageRequestInput = {
-        ...makePayload(false, fileIds),
-        orientation: finalFormat,
-        quality: "high",
-        outputResolution: "final",
-        runQa: true,
-        layoutReference: true,
-        layoutReferenceFileId: layoutFileId,
-        renderKind: "final",
-      };
-      validateCollageRequest(payload);
+
       if (mode === "economy") {
+        // Economy uses the OpenAI Batch API, whose inputs can only be referenced
+        // by uploaded file ID, so it still depends on the Uploads API.
+        const fileIds = await ensureFullQualityReferenceIds(controller);
+        setWorkingStage("Uploading approved composition");
+        const layoutFileId = await uploadReferenceFile(layoutFile, apiKey, controller.signal, (progress) => {
+          setOverallProgress(Math.round(90 + progress * 10));
+        });
+        const economyPayload: CollageRequestInput = {
+          ...makePayload(false, fileIds),
+          orientation: finalFormat,
+          quality: "high",
+          outputResolution: "final",
+          runQa: true,
+          layoutReference: true,
+          layoutReferenceFileId: layoutFileId,
+          renderKind: "final",
+        };
+        validateCollageRequest(economyPayload);
         setWorkingStage("Sending final render to Economy");
         const queued = await fetch("/api/economy", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
-          body: JSON.stringify({ payload }),
+          body: JSON.stringify({ payload: economyPayload }),
         }).then((value) => readApiResponse<{ ok: boolean; error?: string; jobId: string; status: string; estimatedUsd: number }>(value));
         setPanelText(`Final render queued in Economy. Estimated generation cost: $${queued.estimatedUsd.toFixed(2)} plus reference input. It will remain in History for 30 days.`);
         await refreshJobs();
         return;
       }
+
+      // Immediate Final sends the approved draft plus full-quality references
+      // directly as multipart, exactly like the Studio render, so it never
+      // touches the OpenAI Uploads API (which returns 500 in this hosting
+      // environment). The draft is sent first so the server treats it as the
+      // layout reference.
+      const payload: CollageRequestInput = {
+        ...makePayload(false),
+        orientation: finalFormat,
+        quality: "high",
+        outputResolution: "final",
+        runQa: true,
+        layoutReference: true,
+        renderKind: "final",
+      };
+      validateCollageRequest(payload);
       setWorkingStage("Rendering final at maximum quality");
+      const productFiles = items.flatMap((item) => item.references.map((reference) => reference.file));
       const form = new FormData();
       form.append("payload", JSON.stringify(payload));
+      form.append("image[]", layoutFile, layoutFile.name);
+      for (const file of productFiles) form.append("image[]", file, file.name);
+      setOverallProgress(100);
       const response = await fetch("/api/generate", { method: "POST", signal: controller.signal, body: form })
         .then((value) => readApiResponse<GenerateResponse>(value));
       if (!response.imageBase64) throw new Error("Final rendering completed without an image.");
