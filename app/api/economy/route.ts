@@ -39,38 +39,7 @@ export async function POST(request: Request) {
     const apiKey = resolveOpenAIKey();
     const prompt = buildGenerationPrompt(payload);
     const jobId = crypto.randomUUID();
-    const requestLine = JSON.stringify({
-      custom_id: jobId,
-      method: "POST",
-      url: "/v1/images/edits",
-      body: {
-        model: "gpt-image-2",
-        prompt,
-        images: allImageIds.map((fileId) => ({ file_id: fileId })),
-        size: resolvedSize(payload),
-        quality: "high",
-        background: "opaque",
-        output_format: "png",
-      },
-    });
-    const fileForm = new FormData();
-    fileForm.append("purpose", "batch");
-    fileForm.append("file", new Blob([`${requestLine}\n`], { type: "application/jsonl" }), `${jobId}.jsonl`);
-    const inputFile = await readOpenAIResponse<{ id: string }>(await fetch("https://api.openai.com/v1/files", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: fileForm,
-    }));
-    const batch = await readOpenAIResponse<BatchResponse>(await fetch("https://api.openai.com/v1/batches", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        input_file_id: inputFile.id,
-        endpoint: "/v1/images/edits",
-        completion_window: "24h",
-        metadata: { material_collager_job: jobId },
-      }),
-    }));
+    const batch = await submitEconomyBatch(apiKey, jobId, prompt, allImageIds, resolvedSize(payload));
 
     const now = Date.now();
     const DB = await ensureJobStorage();
@@ -104,9 +73,11 @@ export async function GET() {
   try {
     await cleanupExpiredJobs();
     const DB = await ensureJobStorage();
-    const pending = await DB.prepare("SELECT * FROM generation_jobs WHERE mode = 'economy' AND output_key IS NULL AND status NOT IN ('failed', 'expired', 'cancelled') ORDER BY created_at DESC LIMIT 8")
+    const pending = await DB.prepare("SELECT * FROM generation_jobs WHERE mode = 'economy' AND output_key IS NULL AND status NOT IN ('failed', 'expired', 'cancelled') ORDER BY updated_at ASC LIMIT 8")
       .all<JobRow>();
-    for (const row of pending.results) await refreshJob(row);
+    // Refresh jobs independently: one job with an unreadable batch output must
+    // not take down the whole history listing for its 30-day lifetime.
+    await Promise.allSettled(pending.results.map((row: JobRow) => refreshJob(row)));
     const jobs = await DB.prepare("SELECT * FROM generation_jobs ORDER BY created_at DESC LIMIT 30").all<JobRow>();
     return Response.json({ ok: true, jobs: jobs.results.map(publicJob) });
   } catch (error) {
@@ -114,11 +85,58 @@ export async function GET() {
   }
 }
 
+async function submitEconomyBatch(apiKey: string, jobId: string, prompt: string, imageFileIds: string[], size: string) {
+  const requestLine = JSON.stringify({
+    custom_id: jobId,
+    method: "POST",
+    url: "/v1/images/edits",
+    body: {
+      model: "gpt-image-2",
+      prompt,
+      images: imageFileIds.map((fileId) => ({ file_id: fileId })),
+      size,
+      quality: "high",
+      background: "opaque",
+      output_format: "png",
+    },
+  });
+  const fileForm = new FormData();
+  fileForm.append("purpose", "batch");
+  fileForm.append("file", new Blob([`${requestLine}\n`], { type: "application/jsonl" }), `${jobId}.jsonl`);
+  const inputFile = await readOpenAIResponse<{ id: string }>(await fetch("https://api.openai.com/v1/files", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(60_000),
+    body: fileForm,
+  }));
+  return readOpenAIResponse<BatchResponse>(await fetch("https://api.openai.com/v1/batches", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(60_000),
+    body: JSON.stringify({
+      input_file_id: inputFile.id,
+      endpoint: "/v1/images/edits",
+      completion_window: "24h",
+      metadata: { material_collager_job: jobId },
+    }),
+  }));
+}
+
+// The 2K final sizes are the ones the image model intermittently rejects; a
+// failed batch at one of them is resubmitted once at the standard size below
+// (never looping, since the retried row's format is no longer a 2K size).
+const FINAL_SIZE_FALLBACKS: Record<string, string> = {
+  "2560x1440": "1536x1024",
+  "1440x2560": "1024x1536",
+  "2048x2048": "1024x1024",
+};
+
 async function refreshJob(row: JobRow) {
   if (!row.openai_batch_id) return;
   const apiKey = resolveOpenAIKey();
   const batch = await readOpenAIResponse<BatchResponse>(await fetch(`https://api.openai.com/v1/batches/${encodeURIComponent(row.openai_batch_id)}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(30_000),
   }));
   const DB = await ensureJobStorage();
   if (!COMPLETE_STATUSES.has(batch.status)) {
@@ -128,26 +146,48 @@ async function refreshJob(row: JobRow) {
   }
   if (batch.status !== "completed" || !batch.output_file_id) {
     const error = batch.errors?.data?.map((entry) => entry.message).filter(Boolean).join(" ") || `Economy render ${batch.status}.`;
+    const fallbackSize = batch.status !== "cancelled" ? FINAL_SIZE_FALLBACKS[row.format] : undefined;
+    if (fallbackSize) {
+      const referenceIds = JSON.parse(row.reference_ids_json) as string[];
+      const payload = JSON.parse(row.payload_json) as CollageRequestInput;
+      const allImageIds = payload.layoutReferenceFileId ? [payload.layoutReferenceFileId, ...referenceIds] : referenceIds;
+      const retried = await submitEconomyBatch(apiKey, row.id, row.prompt, allImageIds, fallbackSize);
+      await DB.prepare("UPDATE generation_jobs SET status = ?, openai_batch_id = ?, format = ?, error = ?, updated_at = ? WHERE id = ?")
+        .bind(retried.status || "validating", retried.id, fallbackSize, `Retrying at ${fallbackSize} after: ${error}`, Date.now(), row.id).run();
+      return;
+    }
     await DB.prepare("UPDATE generation_jobs SET status = ?, error = ?, updated_at = ? WHERE id = ?")
       .bind(batch.status, error, Date.now(), row.id).run();
     return;
   }
+  // Claim the row before the expensive download + paid QA review so two
+  // overlapping polls (multiple tabs) cannot both process the same batch. A
+  // stale claim (worker died mid-finalize) becomes reclaimable after 5 minutes.
+  const claim = await DB.prepare("UPDATE generation_jobs SET status = 'finalizing', updated_at = ? WHERE id = ? AND output_key IS NULL AND (status != 'finalizing' OR updated_at < ?)")
+    .bind(Date.now(), row.id, Date.now() - 5 * 60 * 1000).run();
+  if (!claim.meta.changes) return;
+  const failJob = async (message: string) => {
+    await DB.prepare("UPDATE generation_jobs SET status = 'failed', error = ?, updated_at = ? WHERE id = ?")
+      .bind(message, Date.now(), row.id).run();
+  };
   const outputResponse = await fetch(`https://api.openai.com/v1/files/${encodeURIComponent(batch.output_file_id)}/content`, {
     headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(120_000),
   });
   if (!outputResponse.ok) await readOpenAIResponse<never>(outputResponse);
   const outputText = await outputResponse.text();
   const line = outputText.split(/\r?\n/).find(Boolean);
-  if (!line) throw new Error("The completed Economy job returned an empty result.");
+  if (!line) {
+    await failJob("The completed Economy job returned an empty result.");
+    return;
+  }
   const result = JSON.parse(line) as {
     response?: { status_code?: number; body?: { data?: Array<{ b64_json?: string }>; usage?: Record<string, unknown>; error?: { message?: string } } };
     error?: { message?: string };
   };
   const imageBase64 = result.response?.body?.data?.[0]?.b64_json;
   if (!imageBase64) {
-    const message = result.response?.body?.error?.message || result.error?.message || "The Economy render completed without an image.";
-    await DB.prepare("UPDATE generation_jobs SET status = 'failed', error = ?, updated_at = ? WHERE id = ?")
-      .bind(message, Date.now(), row.id).run();
+    await failJob(result.response?.body?.error?.message || result.error?.message || "The Economy render completed without an image.");
     return;
   }
   const bytes = Uint8Array.from(atob(imageBase64), (character) => character.charCodeAt(0));
@@ -184,6 +224,7 @@ async function reviewEconomyResult(apiKey: string, payload: CollageRequestInput,
   const response = await readOpenAIResponse<{ output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }> }>(await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(180_000),
     body: JSON.stringify({
       model: process.env.MATERIAL_COLLAGER_QA_MODEL || "gpt-5.6-terra",
       reasoning: { effort: "low" },

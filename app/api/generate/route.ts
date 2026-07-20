@@ -1,4 +1,5 @@
 import {
+  MAX_REFERENCE_FILE_BYTES,
   activeItems,
   buildGenerationPrompt,
   buildSummary,
@@ -44,6 +45,10 @@ type ImageEditRequest = {
 type PreparedReference = {
   blob: Blob;
   filename: string;
+  // Present when the reference also exists as an uploaded OpenAI file (the
+  // full-quality final path); lets QA reference it by ID instead of inlining
+  // a multi-MB base64 copy into the review request.
+  fileId?: string;
 };
 
 type QaItemReview = {
@@ -111,6 +116,10 @@ export async function POST(request: Request) {
 
     const items = activeItems(payload);
     const directFiles = incoming.getAll("image[]").filter((value): value is File => value instanceof File);
+    for (const file of directFiles) {
+      if (!file.type.startsWith("image/")) throw new Error(`Reference ${file.name || "image"} is not an image file.`);
+      if (file.size >= MAX_REFERENCE_FILE_BYTES) throw new Error(`Reference ${file.name || "image"} must be under 50 MB.`);
+    }
     const selectedIds = new Set(payload.qaSelection?.itemIds ?? []);
     const selectiveEdit = selectedIds.size > 0;
     const boardReferenceCount = items.reduce(
@@ -359,6 +368,7 @@ async function createImageEdit(apiKey: string, body: ImageEditRequest, diagnosti
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}` },
         body: form,
+        signal: AbortSignal.timeout(300_000),
       });
       const data = await readOpenAIResponse<OpenAIImageResponse>(response);
       diagnostics.push({ stage: "image_edit", outcome: "succeeded", attempt: attempt + 1, durationMs: Date.now() - startedAt, size: body.size });
@@ -390,32 +400,32 @@ async function retrieveReferences(
   references: Array<{ fileId: string; filename: string }>,
   diagnostics: AttemptDiagnostic[],
 ) {
-  const prepared: PreparedReference[] = [];
-
-  for (const reference of references) {
+  // Fetch all references concurrently — serialized multi-MB downloads add
+  // many seconds of wall time to a final render before generation starts.
+  return Promise.all(references.map(async (reference, index): Promise<PreparedReference> => {
     const startedAt = Date.now();
     let source: Blob;
     let response: Response;
     try {
       response = await fetch(`https://api.openai.com/v1/files/${encodeURIComponent(reference.fileId)}/content`, {
         headers: { Authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(120_000),
       });
       if (!response.ok) await readOpenAIResponse<never>(response);
       source = await response.blob();
       if (!source.size) throw new Error(`Reference ${reference.filename} could not be read.`);
-      diagnostics.push({ stage: "reference_fetch", outcome: "succeeded", attempt: prepared.length + 1, durationMs: Date.now() - startedAt });
+      diagnostics.push({ stage: "reference_fetch", outcome: "succeeded", attempt: index + 1, durationMs: Date.now() - startedAt });
     } catch (error) {
-      diagnostics.push(diagnosticFor(error, "reference_fetch", prepared.length + 1, Date.now() - startedAt));
+      diagnostics.push(diagnosticFor(error, "reference_fetch", index + 1, Date.now() - startedAt));
       throw error;
     }
     const contentType = referenceContentType(response.headers.get("content-type"), reference.filename);
-    prepared.push({
+    return {
       blob: source.type === contentType ? source : source.slice(0, source.size, contentType),
       filename: safeReferenceFilename(reference.filename),
-    });
-  }
-
-  return prepared;
+      fileId: reference.fileId,
+    };
+  }));
 }
 
 function diagnosticFor(error: unknown, stage: AttemptDiagnostic["stage"], attempt: number, durationMs: number, size?: string): AttemptDiagnostic {
@@ -541,11 +551,13 @@ For every item ID, return an item verdict and a tight bounding box [x, y, width,
   ];
 
   for (const reference of references) {
-    content.push({
-      type: "input_image",
-      image_url: await blobDataUrl(reference.blob),
-      detail: "original",
-    });
+    // Reference already-uploaded files by ID (as the Economy QA does) rather
+    // than inflating multi-MB blobs into base64 inside one JSON body.
+    if (reference.fileId) {
+      content.push({ type: "input_image", file_id: reference.fileId, detail: "original" });
+    } else {
+      content.push({ type: "input_image", image_url: await blobDataUrl(reference.blob), detail: "original" });
+    }
   }
 
   const response = await fetch("https://api.openai.com/v1/responses", {
@@ -554,6 +566,7 @@ For every item ID, return an item verdict and a tight bounding box [x, y, width,
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
+    signal: AbortSignal.timeout(180_000),
     body: JSON.stringify({
       model: process.env.MATERIAL_COLLAGER_QA_MODEL || "gpt-5.6",
       reasoning: { effort: "low" },

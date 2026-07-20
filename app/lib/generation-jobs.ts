@@ -58,7 +58,20 @@ export function runtimeStorage() {
   return env as unknown as RuntimeEnv;
 }
 
-export async function ensureJobStorage() {
+// The schema is idempotent but costs several D1 round trips; run it once per
+// isolate instead of on every request (reset on failure so a transient D1
+// error does not poison the isolate).
+let schemaReady: Promise<D1Database> | null = null;
+
+export function ensureJobStorage() {
+  schemaReady ??= initJobStorage().catch((error) => {
+    schemaReady = null;
+    throw error;
+  });
+  return schemaReady;
+}
+
+async function initJobStorage() {
   const { DB } = runtimeStorage();
   if (!DB) throw new Error("Generation history is not configured on this deployment.");
   await DB.prepare(`CREATE TABLE IF NOT EXISTS generation_jobs (
@@ -106,7 +119,13 @@ export async function ensureJobStorage() {
   return DB;
 }
 
+let lastCleanupAt = 0;
+
 export async function cleanupExpiredJobs() {
+  // Rows expire on a 30-day horizon; sweeping once per isolate per 10 minutes
+  // is plenty and keeps polled endpoints from paying the cleanup on every hit.
+  if (Date.now() - lastCleanupAt < 10 * 60 * 1000) return;
+  lastCleanupAt = Date.now();
   const DB = await ensureJobStorage();
   const { OUTPUTS } = runtimeStorage();
   const now = Date.now();

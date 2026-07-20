@@ -16,6 +16,7 @@ export async function POST(request: Request) {
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(120_000),
       body: JSON.stringify({
         model: process.env.MATERIAL_COLLAGER_MATCH_MODEL || "gpt-5.4-mini",
         reasoning: { effort: "low" },
@@ -112,6 +113,7 @@ async function isRemoteImage(url: string) {
     const response = await fetch(url, {
       headers: { Accept: "image/png,image/jpeg,image/webp", Range: "bytes=0-0" },
       redirect: "follow",
+      signal: AbortSignal.timeout(8_000),
     });
     const finalUrl = safeHttps(response.url);
     const contentType = (response.headers.get("content-type") || "").split(";")[0].trim();
@@ -127,17 +129,40 @@ async function discoverProductImage(pageUrl: string) {
     const response = await fetch(pageUrl, {
       headers: { Accept: "text/html,application/xhtml+xml" },
       redirect: "follow",
+      signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok || !safeHttps(response.url)) return "";
     const contentType = response.headers.get("content-type") || "";
-    const contentLength = Number(response.headers.get("content-length") || 0);
-    if (!contentType.includes("text/html") || contentLength > 5 * 1024 * 1024) return "";
-    const html = await response.text();
+    if (!contentType.includes("text/html")) return "";
+    // Content-Length is often absent on chunked/compressed responses, so cap
+    // the read itself instead of trusting the header.
+    const html = await readCappedText(response.body, 5 * 1024 * 1024);
     const metadataImage = extractOpenGraphImage(html) || extractJsonLdImage(html);
     return metadataImage ? safeHttps(new URL(metadataImage, response.url).toString()) : "";
   } catch {
     return "";
   }
+}
+
+// Reads at most `limit` bytes of text, cancelling the stream once reached —
+// metadata tags live near the top of the document anyway.
+async function readCappedText(body: ReadableStream<Uint8Array> | null, limit: number) {
+  if (!body) return "";
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    text += decoder.decode(value, { stream: true });
+    if (total >= limit) {
+      await reader.cancel();
+      break;
+    }
+  }
+  return text + decoder.decode();
 }
 
 function extractOpenGraphImage(html: string) {

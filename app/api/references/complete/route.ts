@@ -35,6 +35,7 @@ export async function POST(request: Request) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ part_ids: body.partIds }),
+        signal: AbortSignal.timeout(60_000),
       },
     );
     const completed = await readOpenAIResponse<CompletedUpload>(response);

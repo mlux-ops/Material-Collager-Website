@@ -21,6 +21,7 @@ export async function POST(request: Request) {
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(120_000),
       body: JSON.stringify({
         model: process.env.MATERIAL_COLLAGER_ANALYSIS_MODEL || "gpt-5-mini",
         reasoning: { effort: "low" },
