@@ -80,6 +80,14 @@ type UiItem = Omit<CollageItemInput, "imageKeys" | "imageNames" | "imageFileIds"
 
 type DraftReference = Omit<UiReference, "preview">;
 
+// Persisted draft references keep only a pointer (fileKey) to the blob, which
+// is stored under its own IndexedDB key. This lets a metadata-only change
+// (editing a note, toggling a setting) rewrite the small record without
+// re-serializing every full-quality reference image.
+type PersistedReference = Omit<DraftReference, "file"> & { fileKey: string };
+type PersistedItem = Omit<DraftItem, "references" | "files"> & { references: PersistedReference[] };
+type StoredDraft = Omit<SavedDraft, "items"> & { format: "split"; items: PersistedItem[] };
+
 type DraftItem = Omit<CollageItemInput, "imageKeys" | "imageNames" | "imageFileIds"> & {
   uiKey?: string;
   references?: DraftReference[];
@@ -172,6 +180,15 @@ type GenerationJob = {
   createdAt: number;
 };
 
+type ResultState = {
+  dataUrl: string;
+  filename: string;
+  qa: QaResult | null;
+  kind: "draft" | "studio" | "final";
+  jobId?: string;
+  libraryVisible: boolean;
+};
+
 type GenerationDiagnostics = {
   model: string;
   transport: string;
@@ -210,6 +227,9 @@ const SELECTIVE_EDIT_REFERENCE_BUDGET = 250 * 1024;
 const DRAFT_DB_NAME = "material-collager-drafts";
 const DRAFT_STORE_NAME = "drafts";
 const CURRENT_DRAFT_KEY = "current";
+const BLOB_KEY_PREFIX = "blob:";
+const blobKey = (fileKey: string) => `${BLOB_KEY_PREFIX}${fileKey}`;
+const TERMINAL_JOB_STATUSES = new Set(["completed", "failed", "expired", "cancelled"]);
 
 function createUiKey() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
@@ -417,20 +437,43 @@ async function compositeSelectiveEdit(
 
   context.drawImage(original, 0, 0, width, height);
   context.drawImage(editedLayer, 0, 0);
-  return canvas.toDataURL("image/png");
+  return URL.createObjectURL(await canvasBlob(canvas, "image/png"));
 }
 
 async function optimizeReferencesForTransport(files: File[], budget = DIRECT_REQUEST_REFERENCE_BUDGET) {
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
   if (totalBytes <= budget) return files;
 
-  const targetBytes = Math.floor(budget / Math.max(files.length, 1));
+  // Redistribute the budget left over by small files to the oversized ones,
+  // so one large photo isn't crushed while tiny swatches waste their share.
+  const fairShare = Math.floor(budget / Math.max(files.length, 1));
+  const surplus = files.reduce((sum, file) => sum + Math.max(0, fairShare - file.size), 0);
+  const oversizedCount = files.filter((file) => file.size > fairShare).length;
+  const targetBytes = fairShare + Math.floor(surplus / Math.max(oversizedCount, 1));
   return Promise.all(files.map((file) => optimizeReferenceForTransport(file, targetBytes)));
 }
 
+// Compressing a reference is expensive (decode + multiple canvas encodes on
+// the main thread) and the same files are re-sent on every iterative
+// generation, so cache results per source file and target size.
+const transportCache = new Map<string, File>();
+const TRANSPORT_CACHE_LIMIT = 64;
+
 async function optimizeReferenceForTransport(file: File, targetBytes: number) {
   if (file.size <= targetBytes) return file;
+  const cacheKey = `${fileFingerprint(file)}|${targetBytes}`;
+  const cached = transportCache.get(cacheKey);
+  if (cached) return cached;
+  const optimized = await compressReferenceForTransport(file, targetBytes);
+  if (transportCache.size >= TRANSPORT_CACHE_LIMIT) {
+    const oldest = transportCache.keys().next().value;
+    if (oldest !== undefined) transportCache.delete(oldest);
+  }
+  transportCache.set(cacheKey, optimized);
+  return optimized;
+}
 
+async function compressReferenceForTransport(file: File, targetBytes: number) {
   const bitmap = await createImageBitmap(file);
   let scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));
   let best: Blob | null = null;
@@ -469,6 +512,11 @@ async function optimizeReferenceForTransport(file: File, targetBytes: number) {
   return transportFile(best, file.name);
 }
 
+function base64ImageToObjectUrl(base64: string, mimeType: string) {
+  const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
+  return URL.createObjectURL(new Blob([bytes], { type: mimeType || "image/png" }));
+}
+
 function transportFile(blob: Blob, originalName: string) {
   const base = originalName.replace(/\.[^.]+$/, "") || "reference";
   return new File([blob], `${base}-optimized.jpg`, { type: "image/jpeg", lastModified: Date.now() });
@@ -492,10 +540,39 @@ async function readSavedDraft() {
   const db = await openDraftDatabase();
   return new Promise<SavedDraft | null>((resolve, reject) => {
     const transaction = db.transaction(DRAFT_STORE_NAME, "readonly");
-    const request = transaction.objectStore(DRAFT_STORE_NAME).get(CURRENT_DRAFT_KEY);
-    request.onsuccess = () => resolve((request.result as SavedDraft | undefined) ?? null);
-    request.onerror = () => reject(request.error || new Error("Could not read saved draft."));
-    transaction.oncomplete = () => db.close();
+    const store = transaction.objectStore(DRAFT_STORE_NAME);
+    const metaRequest = store.get(CURRENT_DRAFT_KEY);
+    const blobRequests: Array<{ fileKey: string; request: IDBRequest }> = [];
+    metaRequest.onsuccess = () => {
+      const record = metaRequest.result as (StoredDraft & { format?: string }) | undefined;
+      if (record?.format !== "split") return;
+      // Issue the blob reads within this same transaction so it stays open.
+      for (const item of record.items) {
+        for (const reference of item.references) {
+          blobRequests.push({ fileKey: reference.fileKey, request: store.get(blobKey(reference.fileKey)) });
+        }
+      }
+    };
+    transaction.oncomplete = () => {
+      db.close();
+      const record = metaRequest.result as (SavedDraft & { format?: string }) | undefined;
+      if (!record) return resolve(null);
+      // Legacy drafts stored the File inline on each reference — return as-is.
+      if (record.format !== "split") return resolve(record as SavedDraft);
+      const blobs = new Map<string, File>();
+      for (const { fileKey, request } of blobRequests) {
+        const file = request.result as File | undefined;
+        if (file) blobs.set(fileKey, file);
+      }
+      const stored = record as unknown as StoredDraft;
+      const items = stored.items.map((item) => ({
+        ...item,
+        references: item.references
+          .filter((reference) => blobs.has(reference.fileKey))
+          .map(({ fileKey, ...reference }) => ({ ...reference, file: blobs.get(fileKey)! })),
+      }));
+      resolve({ ...stored, items } as unknown as SavedDraft);
+    };
     transaction.onerror = () => {
       db.close();
       reject(transaction.error || new Error("Could not read saved draft."));
@@ -505,9 +582,42 @@ async function readSavedDraft() {
 
 async function writeSavedDraft(draft: SavedDraft) {
   const db = await openDraftDatabase();
+  const blobsByKey = new Map<string, File>();
+  const stored: StoredDraft = {
+    ...draft,
+    format: "split",
+    items: draft.items.map((item) => {
+      const { files: _legacyFiles, references = [], ...rest } = item;
+      return {
+        ...rest,
+        references: references.map((reference) => {
+          const fileKey = fileFingerprint(reference.file);
+          blobsByKey.set(fileKey, reference.file);
+          const { file: _file, ...meta } = reference;
+          return { ...meta, fileKey };
+        }),
+      };
+    }),
+  };
   return new Promise<void>((resolve, reject) => {
     const transaction = db.transaction(DRAFT_STORE_NAME, "readwrite");
-    transaction.objectStore(DRAFT_STORE_NAME).put(draft, CURRENT_DRAFT_KEY);
+    const store = transaction.objectStore(DRAFT_STORE_NAME);
+    store.put(stored, CURRENT_DRAFT_KEY);
+    const keysRequest = store.getAllKeys();
+    keysRequest.onsuccess = () => {
+      const existing = new Set((keysRequest.result as IDBValidKey[]).map(String));
+      const needed = new Set<string>();
+      // Write each blob only if it isn't already stored — the expensive part.
+      for (const [fileKey, file] of blobsByKey) {
+        const key = blobKey(fileKey);
+        needed.add(key);
+        if (!existing.has(key)) store.put(file, key);
+      }
+      // Drop blobs no longer referenced by the current board.
+      for (const key of existing) {
+        if (key.startsWith(BLOB_KEY_PREFIX) && !needed.has(key)) store.delete(key);
+      }
+    };
     transaction.oncomplete = () => {
       db.close();
       resolve();
@@ -523,7 +633,8 @@ async function removeSavedDraft() {
   const db = await openDraftDatabase();
   return new Promise<void>((resolve, reject) => {
     const transaction = db.transaction(DRAFT_STORE_NAME, "readwrite");
-    transaction.objectStore(DRAFT_STORE_NAME).delete(CURRENT_DRAFT_KEY);
+    // Clear the metadata record and every stored blob, not just the record.
+    transaction.objectStore(DRAFT_STORE_NAME).clear();
     transaction.oncomplete = () => {
       db.close();
       resolve();
@@ -653,19 +764,28 @@ export default function Home() {
   const [overallProgress, setOverallProgress] = useState(0);
   const [referenceProgress, setReferenceProgress] = useState<Record<string, number>>({});
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
-  const [result, setResult] = useState<{
-    dataUrl: string;
-    filename: string;
-    qa: QaResult | null;
-    kind: "draft" | "studio" | "final";
-    jobId?: string;
-    libraryVisible: boolean;
-  } | null>(null);
+  const [result, setResult] = useState<ResultState | null>(null);
+  const resultUrlRef = useRef<string | null>(null);
+  // Store the generated image as an object URL, not a multi-MB base64 string
+  // held in React state and diffed into DOM attributes on every re-render.
+  const commitResult = (next: ResultState | null) => {
+    if (resultUrlRef.current && resultUrlRef.current !== next?.dataUrl) {
+      URL.revokeObjectURL(resultUrlRef.current);
+      resultUrlRef.current = null;
+    }
+    if (next?.dataUrl.startsWith("blob:")) resultUrlRef.current = next.dataUrl;
+    setResult(next);
+  };
   const [finalFormat, setFinalFormat] = useState<"landscape" | "square">("landscape");
   const [jobs, setJobs] = useState<GenerationJob[]>([]);
   const [qaRedoSelection, setQaRedoSelection] = useState<Record<string, boolean>>({});
   const hasLoadedDraft = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  // Token per item so a slower analyze response for a superseded reference
+  // can't overwrite the fields of whatever is primary now.
+  const analyzeTokens = useRef<Map<string, number>>(new Map());
+  const analysisCache = useRef<Map<string, ReferenceAnalysis>>(new Map());
+  const jobsRef = useRef<GenerationJob[]>([]);
 
   const totalReferences = useMemo(
     () => items.reduce((total, item) => total + item.references.length, 0),
@@ -713,8 +833,24 @@ export default function Home() {
 
   useEffect(() => {
     void refreshJobs();
-    const interval = window.setInterval(() => void refreshJobs(), 30000);
-    return () => window.clearInterval(interval);
+    // Only poll while a queued job is still running and the tab is visible;
+    // otherwise the endpoint is hit every 30s forever for no reason.
+    const hasPending = () => jobsRef.current.some((job) => !TERMINAL_JOB_STATUSES.has(job.status));
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== "hidden" && hasPending()) void refreshJobs();
+    }, 30000);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible" && hasPending()) void refreshJobs();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
+  useEffect(() => () => {
+    if (resultUrlRef.current) URL.revokeObjectURL(resultUrlRef.current);
   }, []);
 
   useEffect(() => {
@@ -746,15 +882,13 @@ export default function Home() {
 
   function changeType(nextType: CollageType) {
     if (hasFiles && !window.confirm("Change board type and remove the references currently on this board?")) return;
-    setItems((current) => {
-      revokeItemPreviews(current);
-      return presetItems(nextType);
-    });
+    revokeItemPreviews(items);
+    setItems(presetItems(nextType));
     setCollageType(nextType);
     setOrientation("default");
     setStyling(nextType === "appliance_collage" ? "materials_only" : "botanical_linen");
     setHeroItemId("");
-    setResult(null);
+    commitResult(null);
     setDiagnostics(null);
     setPromptPreview("");
     setPanelText("Board ready.");
@@ -762,12 +896,10 @@ export default function Home() {
 
   function resetPreset() {
     if (hasFiles && !window.confirm("Reset this board and remove its current references?")) return;
-    setItems((current) => {
-      revokeItemPreviews(current);
-      return presetItems(collageType);
-    });
+    revokeItemPreviews(items);
+    setItems(presetItems(collageType));
     setHeroItemId("");
-    setResult(null);
+    commitResult(null);
     setPromptPreview("");
     setPanelText("Preset reset.");
   }
@@ -783,9 +915,32 @@ export default function Home() {
     }));
   }
 
+  function applyAnalysis(itemKey: string, token: number, analysis: ReferenceAnalysis, roleForMessage: string) {
+    if (analyzeTokens.current.get(itemKey) !== token) return;
+    setItems((current) => current.map((item) => item.uiKey === itemKey ? {
+      ...item,
+      role: item.role.trim() || (analysis.itemType.confidence >= 70 ? analysis.itemType.value : ""),
+      brand: item.brand?.trim() ? item.brand : (analysis.brand.confidence >= 70 ? analysis.brand.value : ""),
+      name: item.name?.trim() ? item.name : (analysis.product.confidence >= 70 ? analysis.product.value : ""),
+      finish: item.finish?.trim() ? item.finish : (analysis.finish.confidence >= 70 ? analysis.finish.value : ""),
+      notes: item.notes?.trim() ? item.notes : (analysis.notes.confidence >= 70 ? analysis.notes.value : ""),
+      analysis,
+      analysisStatus: "ready",
+    } : item));
+    setPanelText(`Reference analyzed for ${roleForMessage || "this item"}. Review the suggested details before generating.`);
+  }
+
   async function analyzePrimaryReference(itemKey: string, file: File) {
     const currentItem = items.find((item) => item.uiKey === itemKey);
     if (!currentItem) return;
+    const token = (analyzeTokens.current.get(itemKey) ?? 0) + 1;
+    analyzeTokens.current.set(itemKey, token);
+    const cached = analysisCache.current.get(fileFingerprint(file));
+    if (cached) {
+      updateItem(itemKey, { candidates: [], matchStatus: "idle" });
+      applyAnalysis(itemKey, token, cached, currentItem.role);
+      return;
+    }
     updateItem(itemKey, { analysisStatus: "analyzing", candidates: [], matchStatus: "idle" });
     try {
       const optimized = await optimizeReferenceForTransport(file, 450 * 1024);
@@ -795,18 +950,11 @@ export default function Home() {
       form.append("image", optimized, optimized.name);
       const response = await fetch("/api/references/analyze", { method: "POST", body: form })
         .then((value) => readApiResponse<{ ok: boolean; error?: string; analysis: ReferenceAnalysis }>(value));
-      setItems((current) => current.map((item) => item.uiKey === itemKey ? {
-        ...item,
-        role: item.role.trim() || (response.analysis.itemType.confidence >= 70 ? response.analysis.itemType.value : ""),
-        brand: item.brand?.trim() ? item.brand : (response.analysis.brand.confidence >= 70 ? response.analysis.brand.value : ""),
-        name: item.name?.trim() ? item.name : (response.analysis.product.confidence >= 70 ? response.analysis.product.value : ""),
-        finish: item.finish?.trim() ? item.finish : (response.analysis.finish.confidence >= 70 ? response.analysis.finish.value : ""),
-        notes: item.notes?.trim() ? item.notes : (response.analysis.notes.confidence >= 70 ? response.analysis.notes.value : ""),
-        analysis: response.analysis,
-        analysisStatus: "ready",
-      } : item));
-      setPanelText(`Reference analyzed for ${currentItem.role || "this item"}. Review the suggested details before generating.`);
+      analysisCache.current.set(fileFingerprint(file), response.analysis);
+      applyAnalysis(itemKey, token, response.analysis, currentItem.role);
     } catch (error) {
+      // Only report failure if this is still the item's latest request.
+      if (analyzeTokens.current.get(itemKey) !== token) return;
       updateItem(itemKey, { analysisStatus: "error" });
       setPanelText(`Reference analysis failed: ${error instanceof Error ? error.message : "Could not analyze image."}`);
     }
@@ -1043,34 +1191,36 @@ export default function Home() {
   }
 
   function restoreDraft(draft: SavedDraft) {
-    setItems((current) => {
-      revokeItemPreviews(current);
-      return draft.items.map((item) => {
-        const savedReferences: DraftReference[] = item.references?.length
-          ? item.references
-          : (item.files ?? []).map((file) => ({ uiKey: createUiKey(), file, primary: false, provenance: "upload" }));
-        return {
-          id: item.id,
-          role: item.role,
-          brand: item.brand ?? "",
-          name: item.name ?? "",
-          finish: item.finish ?? "",
-          notes: item.notes ?? "",
-          required: item.required,
-          uiKey: item.uiKey || createUiKey(),
-          analysis: item.analysis,
-          analysisStatus: item.analysis ? "ready" : "idle",
-          references: savedReferences
-            .sort((left, right) => Number(Boolean(right.primary)) - Number(Boolean(left.primary)))
-            .map((reference, index) => ({
-              ...reference,
-              primary: index === 0,
-              uiKey: reference.uiKey || createUiKey(),
-              preview: URL.createObjectURL(reference.file),
-            })),
-        };
-      });
+    // Build the next items (allocating object URLs) once, outside the state
+    // updater — React can invoke an updater more than once, which would leak a
+    // duplicate object URL per reference.
+    revokeItemPreviews(items);
+    const nextItems: UiItem[] = draft.items.map((item) => {
+      const savedReferences: DraftReference[] = item.references?.length
+        ? item.references
+        : (item.files ?? []).map((file) => ({ uiKey: createUiKey(), file, primary: false, provenance: "upload" }));
+      return {
+        id: item.id,
+        role: item.role,
+        brand: item.brand ?? "",
+        name: item.name ?? "",
+        finish: item.finish ?? "",
+        notes: item.notes ?? "",
+        required: item.required,
+        uiKey: item.uiKey || createUiKey(),
+        analysis: item.analysis,
+        analysisStatus: item.analysis ? "ready" : "idle",
+        references: savedReferences
+          .sort((left, right) => Number(Boolean(right.primary)) - Number(Boolean(left.primary)))
+          .map((reference, index) => ({
+            ...reference,
+            primary: index === 0,
+            uiKey: reference.uiKey || createUiKey(),
+            preview: URL.createObjectURL(reference.file),
+          })),
+      };
     });
+    setItems(nextItems);
     setCollageType(draft.collageType);
     setOrientation(draft.orientation);
     setQuality(draft.quality);
@@ -1082,7 +1232,7 @@ export default function Home() {
     setHeroItemId(draft.heroItemId ?? "");
     setOutputFilename(draft.outputFilename);
     setRunQa(draft.runQa ?? true);
-    setResult(null);
+    commitResult(null);
     setPromptPreview("");
   }
 
@@ -1168,6 +1318,7 @@ export default function Home() {
     try {
       const response = await fetch("/api/economy", { cache: "no-store" })
         .then((value) => readApiResponse<{ ok: boolean; error?: string; jobs: GenerationJob[] }>(value));
+      jobsRef.current = response.jobs;
       setJobs(response.jobs);
     } catch {
       // History remains optional in local development before storage bindings exist.
@@ -1197,12 +1348,16 @@ export default function Home() {
     const fileIds = new Map<string, string>();
     const references = items.flatMap((item) => item.references.map((reference) => ({ itemKey: item.uiKey, reference })));
     let complete = 0;
-    for (const entry of references) {
+    const markComplete = () => {
+      complete += 1;
+      setWorkingStage(`Uploading full-quality references ${complete}/${references.length}`);
+      setOverallProgress(Math.round((complete / Math.max(references.length + 1, 1)) * 100));
+    };
+    const uploadOne = async (entry: (typeof references)[number]) => {
       const cached = entry.reference.remote;
       if (cached?.credentialFingerprint === fingerprint && cached.fileFingerprint === fileFingerprint(entry.reference.file)) {
         fileIds.set(entry.reference.uiKey, cached.fileId);
       } else {
-        setWorkingStage(`Uploading full-quality references ${complete + 1}/${references.length}`);
         const fileId = await uploadReferenceFile(entry.reference.file, apiKey, controller.signal, (progress) => {
           setReferenceProgress((current) => ({ ...current, [entry.reference.uiKey]: progress }));
         });
@@ -1210,9 +1365,16 @@ export default function Home() {
         updateReferenceRemote(entry.itemKey, entry.reference.uiKey, remote);
         fileIds.set(entry.reference.uiKey, fileId);
       }
-      complete += 1;
-      setOverallProgress(Math.round((complete / Math.max(references.length + 1, 1)) * 100));
-    }
+      markComplete();
+    };
+    // Upload a few references at a time instead of strictly one-by-one; each
+    // upload is itself several chunked round trips, so serial finalization of a
+    // full board adds minutes on a slow uplink.
+    const queue = [...references];
+    const workers = Array.from({ length: Math.min(3, queue.length) }, async () => {
+      for (let entry = queue.shift(); entry; entry = queue.shift()) await uploadOne(entry);
+    });
+    await Promise.all(workers);
     return fileIds;
   }
 
@@ -1263,8 +1425,8 @@ export default function Home() {
       const response = await fetch("/api/generate", { method: "POST", signal: controller.signal, body: form })
         .then((value) => readApiResponse<GenerateResponse>(value));
       if (!response.imageBase64) throw new Error("Final rendering completed without an image.");
-      const dataUrl = `data:${response.mimeType || "image/png"};base64,${response.imageBase64}`;
-      setResult({
+      const dataUrl = base64ImageToObjectUrl(response.imageBase64, response.mimeType || "image/png");
+      commitResult({
         dataUrl,
         filename: response.filename || outputFilename,
         qa: response.qa ?? null,
@@ -1295,6 +1457,8 @@ export default function Home() {
   }
 
   async function dryRun() {
+    const controller = new AbortController();
+    abortRef.current = controller;
     setIsWorking(true);
     setWorkingStage("Reviewing board");
     try {
@@ -1303,6 +1467,7 @@ export default function Home() {
       const response = await fetch("/api/dry-run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify(payload),
       }).then((value) =>
         readApiResponse<{ ok: boolean; error?: string; summary?: string; prompt?: string }>(value),
@@ -1310,10 +1475,15 @@ export default function Home() {
       setPromptPreview(response.prompt || "");
       setPanelText(response.summary || "Board prompt is ready.");
     } catch (error) {
-      setPanelText(`Review failed: ${error instanceof Error ? error.message : "Could not review board."}`);
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setPanelText("Board review cancelled.");
+      } else {
+        setPanelText(`Review failed: ${error instanceof Error ? error.message : "Could not review board."}`);
+      }
     } finally {
       setIsWorking(false);
       setWorkingStage("");
+      abortRef.current = null;
     }
   }
 
@@ -1323,7 +1493,7 @@ export default function Home() {
     abortRef.current = controller;
     setIsWorking(true);
     if (!qaRedo) {
-      setResult(null);
+      commitResult(null);
       setQaRedoSelection({});
     }
     setPromptPreview("");
@@ -1384,8 +1554,8 @@ export default function Home() {
       if (diagnosticMode && response.diagnosticComplete) {
         setDiagnostics(response.diagnostics ?? null);
         if (response.imageBase64) {
-          setResult({
-            dataUrl: `data:${response.mimeType || "image/png"};base64,${response.imageBase64}`,
+          commitResult({
+            dataUrl: base64ImageToObjectUrl(response.imageBase64, response.mimeType || "image/png"),
             filename: response.filename || "isolation-test.png",
             qa: null,
             kind: "studio",
@@ -1401,19 +1571,21 @@ export default function Home() {
       }
 
       if (!response.imageBase64) throw new Error("Generation completed without an image.");
-      const generatedDataUrl = `data:${response.mimeType || "image/png"};base64,${response.imageBase64}`;
-      let dataUrl = generatedDataUrl;
+      const generatedUrl = base64ImageToObjectUrl(response.imageBase64, response.mimeType || "image/png");
+      let dataUrl = generatedUrl;
       if (qaRedo && selectiveAssets) {
         setWorkingStage("Mending protected edges");
         dataUrl = await compositeSelectiveEdit(
           qaRedo.sourceDataUrl,
-          generatedDataUrl,
+          generatedUrl,
           selectiveAssets.boxes,
           selectiveAssets.protectedBoxes,
         );
+        // The pre-composite render was only an input to the merge.
+        URL.revokeObjectURL(generatedUrl);
       }
       const qa = response.qa ?? null;
-      setResult({
+      commitResult({
         dataUrl,
         filename: response.filename || outputFilename || "material-collage.png",
         qa,
