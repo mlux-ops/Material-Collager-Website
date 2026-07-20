@@ -1280,6 +1280,11 @@ export default function Home() {
       if (error instanceof DOMException && error.name === "AbortError") {
         setPanelText("Final rendering cancelled. Your draft and references are unchanged.");
       } else {
+        // Surface the failed request's diagnostics so Troubleshooting shows the
+        // failing stage instead of stale data from the previous draft render.
+        if (error instanceof ApiResponseError && error.payload.diagnostics) {
+          setDiagnostics(error.payload.diagnostics as GenerationDiagnostics);
+        }
         setPanelText(`Final rendering failed: ${error instanceof Error ? error.message : "Unknown error."}`);
       }
     } finally {
