@@ -591,7 +591,11 @@ async function writeSavedDraft(draft: SavedDraft) {
       return {
         ...rest,
         references: references.map((reference) => {
-          const fileKey = fileFingerprint(reference.file);
+          // Key the blob by the reference's unique uiKey, not the file
+          // fingerprint: two genuinely different files can share
+          // name/size/lastModified/type, and a fingerprint key would merge
+          // them so both restore to the same image.
+          const fileKey = reference.uiKey;
           blobsByKey.set(fileKey, reference.file);
           const { file: _file, ...meta } = reference;
           return { ...meta, fileKey };
@@ -1437,7 +1441,10 @@ export default function Home() {
       setQaRedoSelection(Object.fromEntries((response.qa?.items ?? []).map((item) => [item.id, !item.passed && Boolean(item.box)])));
       setPromptPreview(response.prompt || "");
       setDiagnostics(response.diagnostics ?? null);
-      setPanelText(`Final ${finalFormat} render complete at ${finalFormat === "square" ? "2048x2048" : "2560x1440"}. Full-quality product references were used.`);
+      // Only assert the max resolution when the server did not fall back; a
+      // notice means it downgraded, so show that instead of a false size.
+      const finalSizeLabel = finalFormat === "square" ? "2048x2048" : "2560x1440";
+      setPanelText(`Final ${finalFormat} render complete${response.notice ? "" : ` at ${finalSizeLabel}`}. Full-quality product references were used.${response.notice ? `\n\n${response.notice}` : ""}`);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         setPanelText("Final rendering cancelled. Your draft and references are unchanged.");

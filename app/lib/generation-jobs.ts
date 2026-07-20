@@ -42,6 +42,7 @@ export type JobRow = {
   usage_json: string | null;
   qa_json: string | null;
   error: string | null;
+  finalize_attempts: number;
   created_at: number;
   updated_at: number;
   expires_at: number;
@@ -93,6 +94,7 @@ async function initJobStorage() {
     usage_json TEXT,
     qa_json TEXT,
     error TEXT,
+    finalize_attempts INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     expires_at INTEGER NOT NULL
@@ -104,6 +106,7 @@ async function initJobStorage() {
     ["collage_type", "ALTER TABLE generation_jobs ADD COLUMN collage_type TEXT NOT NULL DEFAULT 'bathroom_fixture_collage'"],
     ["library_visible", "ALTER TABLE generation_jobs ADD COLUMN library_visible INTEGER NOT NULL DEFAULT 1"],
     ["title", "ALTER TABLE generation_jobs ADD COLUMN title TEXT NOT NULL DEFAULT ''"],
+    ["finalize_attempts", "ALTER TABLE generation_jobs ADD COLUMN finalize_attempts INTEGER NOT NULL DEFAULT 0"],
   ] as const;
   for (const [name, statement] of upgrades) {
     if (!names.has(name)) {

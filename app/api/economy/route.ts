@@ -148,6 +148,11 @@ async function refreshJob(row: JobRow) {
     const error = batch.errors?.data?.map((entry) => entry.message).filter(Boolean).join(" ") || `Economy render ${batch.status}.`;
     const fallbackSize = batch.status !== "cancelled" ? FINAL_SIZE_FALLBACKS[row.format] : undefined;
     if (fallbackSize) {
+      // Claim the row (matching the still-2K format) before submitting the
+      // fallback so two overlapping polls can't each create a paid batch.
+      const claim = await DB.prepare("UPDATE generation_jobs SET status = 'resubmitting', updated_at = ? WHERE id = ? AND format = ? AND (status != 'resubmitting' OR updated_at < ?)")
+        .bind(Date.now(), row.id, row.format, Date.now() - 5 * 60 * 1000).run();
+      if (!claim.meta.changes) return;
       const referenceIds = JSON.parse(row.reference_ids_json) as string[];
       const payload = JSON.parse(row.payload_json) as CollageRequestInput;
       const allImageIds = payload.layoutReferenceFileId ? [payload.layoutReferenceFileId, ...referenceIds] : referenceIds;
@@ -163,48 +168,62 @@ async function refreshJob(row: JobRow) {
   // Claim the row before the expensive download + paid QA review so two
   // overlapping polls (multiple tabs) cannot both process the same batch. A
   // stale claim (worker died mid-finalize) becomes reclaimable after 5 minutes.
-  const claim = await DB.prepare("UPDATE generation_jobs SET status = 'finalizing', updated_at = ? WHERE id = ? AND output_key IS NULL AND (status != 'finalizing' OR updated_at < ?)")
+  const claim = await DB.prepare("UPDATE generation_jobs SET status = 'finalizing', finalize_attempts = finalize_attempts + 1, updated_at = ? WHERE id = ? AND output_key IS NULL AND (status != 'finalizing' OR updated_at < ?)")
     .bind(Date.now(), row.id, Date.now() - 5 * 60 * 1000).run();
   if (!claim.meta.changes) return;
   const failJob = async (message: string) => {
     await DB.prepare("UPDATE generation_jobs SET status = 'failed', error = ?, updated_at = ? WHERE id = ?")
       .bind(message, Date.now(), row.id).run();
   };
-  const outputResponse = await fetch(`https://api.openai.com/v1/files/${encodeURIComponent(batch.output_file_id)}/content`, {
-    headers: { Authorization: `Bearer ${apiKey}` },
-    signal: AbortSignal.timeout(120_000),
-  });
-  if (!outputResponse.ok) await readOpenAIResponse<never>(outputResponse);
-  const outputText = await outputResponse.text();
-  const line = outputText.split(/\r?\n/).find(Boolean);
-  if (!line) {
-    await failJob("The completed Economy job returned an empty result.");
+  // Bound retries: after a few finalize attempts a permanently unreadable
+  // output should fail terminally instead of re-downloading and re-running the
+  // paid QA review every stale-claim window forever.
+  if (row.finalize_attempts + 1 > 3) {
+    await failJob("The Economy render could not be finalized after multiple attempts.");
     return;
   }
-  const result = JSON.parse(line) as {
-    response?: { status_code?: number; body?: { data?: Array<{ b64_json?: string }>; usage?: Record<string, unknown>; error?: { message?: string } } };
-    error?: { message?: string };
-  };
-  const imageBase64 = result.response?.body?.data?.[0]?.b64_json;
-  if (!imageBase64) {
-    await failJob(result.response?.body?.error?.message || result.error?.message || "The Economy render completed without an image.");
-    return;
-  }
-  const bytes = Uint8Array.from(atob(imageBase64), (character) => character.charCodeAt(0));
-  const outputKey = `generation-outputs/${row.id}.png`;
-  const bucket = runtimeStorage().OUTPUTS;
-  if (!bucket) throw new Error("Generated-output storage is not configured.");
-  await bucket.put(outputKey, bytes, { httpMetadata: { contentType: "image/png" } });
-  const payload = JSON.parse(row.payload_json) as CollageRequestInput;
-  const referenceIds = JSON.parse(row.reference_ids_json) as string[];
-  let qa: Record<string, unknown> | null = null;
   try {
-    qa = await reviewEconomyResult(apiKey, payload, imageBase64, referenceIds);
-  } catch (error) {
-    qa = { reviewFailed: true, passed: false, score: 0, findings: [], recommendation: error instanceof Error ? error.message : "Accuracy review failed.", items: [] };
+    const outputResponse = await fetch(`https://api.openai.com/v1/files/${encodeURIComponent(batch.output_file_id)}/content`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!outputResponse.ok) await readOpenAIResponse<never>(outputResponse);
+    const outputText = await outputResponse.text();
+    const line = outputText.split(/\r?\n/).find(Boolean);
+    if (!line) {
+      await failJob("The completed Economy job returned an empty result.");
+      return;
+    }
+    const result = JSON.parse(line) as {
+      response?: { status_code?: number; body?: { data?: Array<{ b64_json?: string }>; usage?: Record<string, unknown>; error?: { message?: string } } };
+      error?: { message?: string };
+    };
+    const imageBase64 = result.response?.body?.data?.[0]?.b64_json;
+    if (!imageBase64) {
+      await failJob(result.response?.body?.error?.message || result.error?.message || "The Economy render completed without an image.");
+      return;
+    }
+    const bytes = Uint8Array.from(atob(imageBase64), (character) => character.charCodeAt(0));
+    const outputKey = `generation-outputs/${row.id}.png`;
+    const bucket = runtimeStorage().OUTPUTS;
+    if (!bucket) throw new Error("Generated-output storage is not configured.");
+    await bucket.put(outputKey, bytes, { httpMetadata: { contentType: "image/png" } });
+    const payload = JSON.parse(row.payload_json) as CollageRequestInput;
+    const referenceIds = JSON.parse(row.reference_ids_json) as string[];
+    let qa: Record<string, unknown> | null = null;
+    try {
+      qa = await reviewEconomyResult(apiKey, payload, imageBase64, referenceIds);
+    } catch (error) {
+      qa = { reviewFailed: true, passed: false, score: 0, findings: [], recommendation: error instanceof Error ? error.message : "Accuracy review failed.", items: [] };
+    }
+    await DB.prepare("UPDATE generation_jobs SET status = 'completed', output_key = ?, usage_json = ?, qa_json = ?, updated_at = ? WHERE id = ?")
+      .bind(outputKey, JSON.stringify(result.response?.body?.usage ?? {}), JSON.stringify(qa), Date.now(), row.id).run();
+  } catch {
+    // Leave the row in 'finalizing'; the stale-claim window retries it, bounded
+    // by the finalize_attempts cap above, so a transient failure recovers while
+    // a permanent one eventually surfaces as a failed history item.
+    return;
   }
-  await DB.prepare("UPDATE generation_jobs SET status = 'completed', output_key = ?, usage_json = ?, qa_json = ?, updated_at = ? WHERE id = ?")
-    .bind(outputKey, JSON.stringify(result.response?.body?.usage ?? {}), JSON.stringify(qa), Date.now(), row.id).run();
 }
 
 async function reviewEconomyResult(apiKey: string, payload: CollageRequestInput, imageBase64: string, referenceIds: string[]) {
