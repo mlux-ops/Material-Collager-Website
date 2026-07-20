@@ -138,6 +138,8 @@ export async function persistGenerationOutput(input: {
   const outputKey = existing?.output_key || `generation-outputs/${id}.png`;
   const now = Date.now();
   const title = outputTitle(input.filename, input.collageType);
+  // Never persist the caller's OpenAI API key with the job record.
+  const payloadJson = JSON.stringify({ ...input.payload, apiKey: undefined });
   await bucket.put(outputKey, base64Bytes(input.imageBase64), { httpMetadata: { contentType: "image/png" } });
 
   if (existing) {
@@ -151,7 +153,7 @@ export async function persistGenerationOutput(input: {
         input.filename,
         input.format,
         input.prompt,
-        JSON.stringify(input.payload),
+        payloadJson,
         JSON.stringify(input.usage ?? {}),
         input.qa ? JSON.stringify(input.qa) : null,
         now,
@@ -173,7 +175,7 @@ export async function persistGenerationOutput(input: {
         input.filename,
         input.format,
         input.prompt,
-        JSON.stringify(input.payload),
+        payloadJson,
         input.renderKind,
         input.collageType,
         input.renderKind === "final" ? 1 : 0,
