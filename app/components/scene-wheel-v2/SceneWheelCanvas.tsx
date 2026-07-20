@@ -35,6 +35,18 @@ function useMobileSceneFraming() {
 function WheelScene({ items, onHover, onOpen, targetProgress }: Props) {
   const urls = useMemo(() => items.map((item) => item.url), [items]);
   const textures = useLoader(TextureLoader, urls);
+  const previousUrlsRef = useRef<string[]>([]);
+
+  // Evict superseded textures from the shared loader cache so replaced url
+  // lists (e.g. live library refreshes) do not accumulate GPU uploads.
+  useEffect(() => {
+    const previous = previousUrlsRef.current;
+    previousUrlsRef.current = urls;
+    const active = new Set(urls);
+    const stale = previous.filter((url: string) => !active.has(url));
+    if (stale.length > 0) useLoader.clear(TextureLoader, stale);
+  }, [urls]);
+
   const renderedProgress = useRef(targetProgress.current);
   const velocity = useRef(0);
   const freezeQaProgress = useMemo(() => {

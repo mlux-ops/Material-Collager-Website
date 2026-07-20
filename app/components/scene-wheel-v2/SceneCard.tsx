@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
+import { memo, useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import {
   DoubleSide,
@@ -59,7 +59,7 @@ const PANE_PROFILES: readonly PaneProfile[] = [
   { glassOpacity: 0.075, imageOpacity: 0.84, smoke: "#e4e9ea" },
 ];
 
-export function SceneCard({ count, index, item, onHover, onOpen, progress, texture }: Props) {
+export const SceneCard = memo(function SceneCard({ count, index, item, onHover, onOpen, progress, texture }: Props) {
   const groupRef = useRef<Group>(null);
   const imageMaterialRef = useRef<MeshBasicMaterial>(null);
   const glassMaterialRef = useRef<MeshPhysicalMaterial>(null);
@@ -198,4 +198,4 @@ export function SceneCard({ count, index, item, onHover, onOpen, progress, textu
       </mesh>
     </group>
   );
-}
+});

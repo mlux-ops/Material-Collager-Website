@@ -92,6 +92,22 @@ declare global {
   }
 }
 
+const HIDDEN_TRACK_ITEM_CSS = "display:block;left:-100vw;top:-100vh;width:1px;height:1px;z-index:0";
+
+// The WebGL capability probe is process-wide: lazily create one throwaway
+// context on first client call, release it, and cache the boolean.
+let webGLProbeResult: boolean | null = null;
+function isWebGLAvailable() {
+  if (typeof document === "undefined") return false;
+  if (webGLProbeResult === null) {
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("webgl2") || canvas.getContext("webgl");
+    webGLProbeResult = Boolean(context);
+    context?.getExtension("WEBGL_lose_context")?.loseContext();
+  }
+  return webGLProbeResult;
+}
+
 function hashString(value: string) {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {
@@ -119,6 +135,7 @@ export default function SceneLabExperience({ surface = "lab" }: { surface?: "lab
   const reducedMotion = useReducedMotion();
   const shellRef = useRef<HTMLElement>(null);
   const buttonsRef = useRef(new Map<string, HTMLButtonElement>());
+  const buttonCssRef = useRef(new Map<string, string>());
   const viewRef = useRef<SceneLabView>("scene");
   const dragRef = useRef(IDLE_DRAG_STATE);
   const focusLockRef = useRef<string | null>(null);
@@ -126,6 +143,7 @@ export default function SceneLabExperience({ surface = "lab" }: { surface?: "lab
   const suppressClickRef = useRef(false);
   const visiblePlanesRef = useRef<ScenePlaneState[]>([]);
   const libraryRequestRef = useRef(0);
+  const recordsSignatureRef = useRef<string | null>(null);
   const pendingPresentationSelectionRef = useRef<string | null>(null);
   const presentationOffsetRef = useRef(0);
   const [records, setRecords] = useState<LibraryCollageRecord[]>([]);
@@ -155,10 +173,7 @@ export default function SceneLabExperience({ surface = "lab" }: { surface?: "lab
   const [textureState, setTextureState] = useState<TextureLoadState>(EMPTY_TEXTURE_STATE);
   const [textureRetryNonce, setTextureRetryNonce] = useState(0);
   const [contextLost, setContextLost] = useState(false);
-  const [webGLAvailable] = useState(() => {
-    const canvas = document.createElement("canvas");
-    return Boolean(canvas.getContext("webgl2") || canvas.getContext("webgl"));
-  });
+  const [webGLAvailable] = useState(isWebGLAvailable);
   const fallback = !webGLAvailable || contextLost;
   const effectiveView: SceneLabView = fallback ? "index" : view;
   const progress = useVirtualProgress({ frozen: qa.frozen, initialProgress: qa.progress, reducedMotion });
@@ -167,6 +182,7 @@ export default function SceneLabExperience({ surface = "lab" }: { surface?: "lab
       const requestId = ++libraryRequestRef.current;
       const setFailure = (state: Extract<SceneLabLibraryState, "failed" | "malformed">, message: string) => {
         if (signal?.aborted || requestId !== libraryRequestRef.current) return;
+        recordsSignatureRef.current = null;
         setRecords([]);
         setLibraryState(state);
         setLibraryMessage(message);
@@ -198,7 +214,13 @@ export default function SceneLabExperience({ surface = "lab" }: { surface?: "lab
       if (signal?.aborted || requestId !== libraryRequestRef.current) return;
       const nextRecords = normalizeLibraryCollageRecords(parsed.records);
       const nextCatalog = adaptCompletedCollages(nextRecords, { allowLabFixtures: !productionLibrary, presentationOffset: presentationOffsetRef.current });
-      setRecords(nextRecords);
+      // Unchanged poll results keep the previous records identity so the
+      // scene is not rebuilt every refresh interval.
+      const signature = nextRecords.map((record) => `${record.id}|${record.imageUrl}|${record.createdAt}`).join();
+      if (signature !== recordsSignatureRef.current) {
+        recordsSignatureRef.current = signature;
+        setRecords(nextRecords);
+      }
       setLibraryState(nextCatalog.actualCollageCount > 0 ? "populated" : "empty");
       setLibraryMessage(nextCatalog.actualCollageCount > 0
         ? `Loaded ${nextCatalog.actualCollageCount} completed Library collage${nextCatalog.actualCollageCount === 1 ? "" : "s"}.`
@@ -252,6 +274,7 @@ export default function SceneLabExperience({ surface = "lab" }: { surface?: "lab
   useEffect(() => {
     viewRef.current = effectiveView;
     if (effectiveView === "index") {
+      buttonCssRef.current.clear();
       for (const button of buttonsRef.current.values()) {
         button.removeAttribute("style");
         button.parentElement?.removeAttribute("style");
@@ -275,8 +298,13 @@ export default function SceneLabExperience({ surface = "lab" }: { surface?: "lab
   }, [progress, qa.frozen, selectedId, viewport.height]);
 
   const setButtonRef = useCallback((id: string) => (node: HTMLButtonElement | null) => {
-    if (node) buttonsRef.current.set(id, node);
-    else buttonsRef.current.delete(id);
+    if (node) {
+      buttonsRef.current.set(id, node);
+      buttonCssRef.current.delete(id);
+    } else {
+      buttonsRef.current.delete(id);
+      buttonCssRef.current.delete(id);
+    }
   }, []);
 
   const focusTrack = useCallback((id: string, focusDom = true) => {
@@ -395,14 +423,19 @@ export default function SceneLabExperience({ surface = "lab" }: { surface?: "lab
       if (focal && focal.trackId !== activeId) setActiveId(focal.trackId);
     }
     if (viewRef.current === "scene") {
-      const visibleIds = new Set(visible.map((plane) => plane.trackId));
+      const visibleById = new Map(visible.map((plane) => [plane.trackId, plane]));
+      const applyItemCss = (id: string, item: HTMLElement, cssText: string) => {
+        if (buttonCssRef.current.get(id) === cssText) return;
+        buttonCssRef.current.set(id, cssText);
+        item.style.cssText = cssText;
+      };
       for (const asset of assets) {
         const button = buttonsRef.current.get(asset.id);
         const item = button?.parentElement;
-        const plane = visible.find((candidate) => candidate.trackId === asset.id);
+        const plane = visibleById.get(asset.id);
         if (!button || !item) continue;
         if (!plane) {
-          item.style.cssText = "display:block;left:-100vw;top:-100vh;width:1px;height:1px;z-index:0";
+          applyItemCss(asset.id, item, HIDDEN_TRACK_ITEM_CSS);
           continue;
         }
         const xs = plane.corners.map((corner) => corner[0]);
@@ -411,14 +444,15 @@ export default function SceneLabExperience({ surface = "lab" }: { surface?: "lab
         const top = Math.min(...ys);
         const width = Math.max(...xs) - left;
         const height = Math.max(...ys) - top;
-        item.style.cssText = `display:block;left:${left * 100}%;top:${top * 100}%;width:${width * 100}%;height:${height * 100}%;z-index:${1100 + Math.round(plane.zRank * 10)}`;
-        button.dataset.active = asset.id === activeId ? "true" : "false";
-        button.dataset.trackControl = "true";
+        applyItemCss(asset.id, item, `display:block;left:${left * 100}%;top:${top * 100}%;width:${width * 100}%;height:${height * 100}%;z-index:${1100 + Math.round(plane.zRank * 10)}`);
+        const active = asset.id === activeId ? "true" : "false";
+        if (button.dataset.active !== active) button.dataset.active = active;
+        if (button.dataset.trackControl !== "true") button.dataset.trackControl = "true";
       }
       for (const [id, button] of buttonsRef.current) {
         // High-frequency scene hit targets intentionally mirror projected canvas bounds.
         // eslint-disable-next-line react-hooks/immutability
-        if (!visibleIds.has(id) && button.parentElement) button.parentElement.style.cssText = "display:block;left:-100vw;top:-100vh;width:1px;height:1px;z-index:0";
+        if (!visibleById.has(id) && button.parentElement) applyItemCss(id, button.parentElement, HIDDEN_TRACK_ITEM_CSS);
       }
     }
     if (qa.enabled) {
@@ -614,6 +648,7 @@ export default function SceneLabExperience({ surface = "lab" }: { surface?: "lab
       }
       const nextRecords = removeLibraryCollageRecord(records, selectedRecord.id);
       const nextCatalog = adaptCompletedCollages(nextRecords, { allowLabFixtures: false, presentationOffset });
+      recordsSignatureRef.current = null;
       setRecords(nextRecords);
       setLibraryState(nextCatalog.actualCollageCount > 0 ? "populated" : "empty");
       setLibraryMessage(nextCatalog.actualCollageCount > 0

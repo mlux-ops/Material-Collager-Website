@@ -46,6 +46,7 @@ export async function POST(request: Request) {
         bytes,
         mime_type: mimeType,
       }),
+      signal: AbortSignal.timeout(30_000),
     });
     const upload = await readOpenAIResponse<UploadResponse>(response);
 

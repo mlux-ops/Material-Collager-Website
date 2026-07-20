@@ -33,6 +33,7 @@ export async function POST(request: Request) {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}` },
       body: outgoing,
+      signal: AbortSignal.timeout(120_000),
     });
     const part = await readOpenAIResponse<PartResponse>(response);
 

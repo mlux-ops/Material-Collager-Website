@@ -42,6 +42,7 @@ export type JobRow = {
   usage_json: string | null;
   qa_json: string | null;
   error: string | null;
+  finalize_attempts: number;
   created_at: number;
   updated_at: number;
   expires_at: number;
@@ -58,7 +59,20 @@ export function runtimeStorage() {
   return env as unknown as RuntimeEnv;
 }
 
-export async function ensureJobStorage() {
+// The schema is idempotent but costs several D1 round trips; run it once per
+// isolate instead of on every request (reset on failure so a transient D1
+// error does not poison the isolate).
+let schemaReady: Promise<D1Database> | null = null;
+
+export function ensureJobStorage() {
+  schemaReady ??= initJobStorage().catch((error) => {
+    schemaReady = null;
+    throw error;
+  });
+  return schemaReady;
+}
+
+async function initJobStorage() {
   const { DB } = runtimeStorage();
   if (!DB) throw new Error("Generation history is not configured on this deployment.");
   await DB.prepare(`CREATE TABLE IF NOT EXISTS generation_jobs (
@@ -80,6 +94,7 @@ export async function ensureJobStorage() {
     usage_json TEXT,
     qa_json TEXT,
     error TEXT,
+    finalize_attempts INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     expires_at INTEGER NOT NULL
@@ -91,6 +106,7 @@ export async function ensureJobStorage() {
     ["collage_type", "ALTER TABLE generation_jobs ADD COLUMN collage_type TEXT NOT NULL DEFAULT 'bathroom_fixture_collage'"],
     ["library_visible", "ALTER TABLE generation_jobs ADD COLUMN library_visible INTEGER NOT NULL DEFAULT 1"],
     ["title", "ALTER TABLE generation_jobs ADD COLUMN title TEXT NOT NULL DEFAULT ''"],
+    ["finalize_attempts", "ALTER TABLE generation_jobs ADD COLUMN finalize_attempts INTEGER NOT NULL DEFAULT 0"],
   ] as const;
   for (const [name, statement] of upgrades) {
     if (!names.has(name)) {
@@ -106,7 +122,13 @@ export async function ensureJobStorage() {
   return DB;
 }
 
+let lastCleanupAt = 0;
+
 export async function cleanupExpiredJobs() {
+  // Rows expire on a 30-day horizon; sweeping once per isolate per 10 minutes
+  // is plenty and keeps polled endpoints from paying the cleanup on every hit.
+  if (Date.now() - lastCleanupAt < 10 * 60 * 1000) return;
+  lastCleanupAt = Date.now();
   const DB = await ensureJobStorage();
   const { OUTPUTS } = runtimeStorage();
   const now = Date.now();
@@ -138,6 +160,8 @@ export async function persistGenerationOutput(input: {
   const outputKey = existing?.output_key || `generation-outputs/${id}.png`;
   const now = Date.now();
   const title = outputTitle(input.filename, input.collageType);
+  // Never persist the caller's OpenAI API key with the job record.
+  const payloadJson = JSON.stringify({ ...input.payload, apiKey: undefined });
   await bucket.put(outputKey, base64Bytes(input.imageBase64), { httpMetadata: { contentType: "image/png" } });
 
   if (existing) {
@@ -151,7 +175,7 @@ export async function persistGenerationOutput(input: {
         input.filename,
         input.format,
         input.prompt,
-        JSON.stringify(input.payload),
+        payloadJson,
         JSON.stringify(input.usage ?? {}),
         input.qa ? JSON.stringify(input.qa) : null,
         now,
@@ -173,7 +197,7 @@ export async function persistGenerationOutput(input: {
         input.filename,
         input.format,
         input.prompt,
-        JSON.stringify(input.payload),
+        payloadJson,
         input.renderKind,
         input.collageType,
         input.renderKind === "final" ? 1 : 0,

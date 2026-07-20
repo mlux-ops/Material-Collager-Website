@@ -164,10 +164,14 @@ function useTextureWindow(
             message: error instanceof Error ? error.message : "Collage preview texture failed to load.",
             url: asset.url,
           };
+          let matched = false;
           for (const [trackId, url] of activeUrlRef.current) {
-            if (url === asset.url) failuresRef.current.set(trackId, failure);
+            if (url === asset.url) {
+              failuresRef.current.set(trackId, failure);
+              matched = true;
+            }
           }
-          setFailures(new Map(failuresRef.current));
+          if (matched) setFailures(new Map(failuresRef.current));
         },
       );
     }
@@ -194,6 +198,10 @@ function useTextureWindow(
     texturesRef.current.clear();
     failuresRef.current.clear();
     pendingRef.current.clear();
+    // No active urls remain, so loads resolving after unmount dispose
+    // themselves instead of setting state.
+    activeRef.current.clear();
+    activeUrlRef.current.clear();
     fallbackTexture.dispose();
   }, [fallbackTexture]);
 
@@ -263,8 +271,8 @@ function SceneField({
     const selectionTarget = selectedId ? 1 : 0;
     selectionRef.current += (selectionTarget - selectionRef.current) * (1 - Math.exp(-7.5 * Math.min(0.05, delta)));
     if (!selectedId && selectionRef.current < 0.002) selectedTrackRef.current = null;
-    let planes = getInterpolatedPlanes(viewportKey, rendered);
-    planes = applySelection(planes, selectedTrackRef.current, selectionRef.current, viewportWidth, viewportHeight);
+    const basePlanes = getInterpolatedPlanes(viewportKey, rendered);
+    const planes = applySelection(basePlanes, selectedTrackRef.current, selectionRef.current, viewportWidth, viewportHeight);
     const byId = new Map(planes.map((plane) => [plane.trackId, plane]));
     let registeredHandles = 0;
     let drawablePlanes = 0;
@@ -283,7 +291,12 @@ function SceneField({
       canvasRef.current?.setAttribute("data-texture-count", String(gl.info.memory.textures));
       canvasRef.current?.setAttribute("data-geometry-count", String(gl.info.memory.geometries));
     }
-    const windowIds = staticWindowIds ?? getTextureWindow(viewportKey, rendered);
+    // Same rule as getTextureWindow, derived from the pre-selection planes
+    // already computed this frame instead of re-running the geometry field.
+    const windowIds = staticWindowIds ?? basePlanes
+      .filter((plane) => plane.opacity > 0.015)
+      .map((plane) => plane.trackId)
+      .sort();
     const windowKey = windowIds.join("|");
     if (windowKey !== windowKeyRef.current) {
       windowKeyRef.current = windowKey;

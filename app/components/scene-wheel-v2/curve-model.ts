@@ -43,9 +43,13 @@ function wrapToRail(value: number, count: number) {
   return ((((value + FRONT_BUFFER) % span) + span) % span) - FRONT_BUFFER;
 }
 
+// Shared per-call scratch. Callers copy the pose before the next call, so the
+// hot per-frame path never allocates.
+const SCRATCH_POSITION = new Vector3();
+
 export function getSceneWheelPose(index: number, count: number, progress: number): SceneWheelPose {
   const relative = wrapToRail(index - progress, count);
-  const position = RAIL_ORIGIN.clone().addScaledVector(RAIL_STEP, relative);
+  const position = SCRATCH_POSITION.copy(RAIL_ORIGIN).addScaledVector(RAIL_STEP, relative);
   const nearFade = MathUtils.smoothstep(relative, -1.32, -0.58);
   const farFade = 1 - MathUtils.smoothstep(relative, 8.1, 10.6);
   const opacity = MathUtils.clamp(nearFade * farFade, 0, 1);
@@ -55,7 +59,7 @@ export function getSceneWheelPose(index: number, count: number, progress: number
   return {
     opacity,
     position,
-    quaternion: BASE_ORIENTATION.clone(),
+    quaternion: BASE_ORIENTATION,
     relative,
     scale,
   };
