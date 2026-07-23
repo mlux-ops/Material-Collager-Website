@@ -31,6 +31,16 @@ import {
   type QaSelectionInput,
   type StylingOption,
 } from "@/app/lib/collage";
+import { ApiResponseError, readApiResponse } from "@/app/lib/api-client";
+import {
+  DIRECT_REQUEST_REFERENCE_BUDGET,
+  base64ImageToObjectUrl,
+  dataUrlFile,
+  fileFingerprint,
+  formatBytes,
+  optimizeReferenceForTransport,
+  optimizeReferencesForTransport,
+} from "@/app/lib/image-transport";
 
 type ReferenceUploadCache = {
   fileId: string;
@@ -210,18 +220,7 @@ type GenerationDiagnostics = {
   }>;
 };
 
-class ApiResponseError extends Error {
-  payload: Record<string, unknown>;
-
-  constructor(message: string, payload: Record<string, unknown>) {
-    super(message);
-    this.name = "ApiResponseError";
-    this.payload = payload;
-  }
-}
-
 const REFERENCE_CHUNK_BYTES = 4 * 1024 * 1024;
-const DIRECT_REQUEST_REFERENCE_BUDGET = 700 * 1024;
 const SELECTIVE_EDIT_BASE_BUDGET = 420 * 1024;
 const SELECTIVE_EDIT_REFERENCE_BUDGET = 250 * 1024;
 const DRAFT_DB_NAME = "material-collager-drafts";
@@ -233,10 +232,6 @@ const TERMINAL_JOB_STATUSES = new Set(["completed", "failed", "expired", "cancel
 
 function createUiKey() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
-}
-
-function fileFingerprint(file: File) {
-  return `${file.name}:${file.size}:${file.lastModified}:${file.type}`;
 }
 
 function createReference(file: File, remote?: ReferenceUploadCache, metadata?: Partial<UiReference>): UiReference {
@@ -251,11 +246,6 @@ function createReference(file: File, remote?: ReferenceUploadCache, metadata?: P
   };
 }
 
-async function dataUrlFile(dataUrl: string, filename: string) {
-  const response = await fetch(dataUrl);
-  return new File([await response.blob()], filename, { type: "image/png", lastModified: Date.now() });
-}
-
 function FieldLabel({ text, help }: { text: string; help: string }) {
   return (
     <span className="field-label">
@@ -266,11 +256,6 @@ function FieldLabel({ text, help }: { text: string; help: string }) {
       </span>
     </span>
   );
-}
-
-function formatBytes(bytes: number) {
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
 }
 
 function resolvedItemId(item: UiItem, index: number) {
@@ -440,87 +425,6 @@ async function compositeSelectiveEdit(
   return URL.createObjectURL(await canvasBlob(canvas, "image/png"));
 }
 
-async function optimizeReferencesForTransport(files: File[], budget = DIRECT_REQUEST_REFERENCE_BUDGET) {
-  const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
-  if (totalBytes <= budget) return files;
-
-  // Redistribute the budget left over by small files to the oversized ones,
-  // so one large photo isn't crushed while tiny swatches waste their share.
-  const fairShare = Math.floor(budget / Math.max(files.length, 1));
-  const surplus = files.reduce((sum, file) => sum + Math.max(0, fairShare - file.size), 0);
-  const oversizedCount = files.filter((file) => file.size > fairShare).length;
-  const targetBytes = fairShare + Math.floor(surplus / Math.max(oversizedCount, 1));
-  return Promise.all(files.map((file) => optimizeReferenceForTransport(file, targetBytes)));
-}
-
-// Compressing a reference is expensive (decode + multiple canvas encodes on
-// the main thread) and the same files are re-sent on every iterative
-// generation, so cache results per source file and target size.
-const transportCache = new Map<string, File>();
-const TRANSPORT_CACHE_LIMIT = 64;
-
-async function optimizeReferenceForTransport(file: File, targetBytes: number) {
-  if (file.size <= targetBytes) return file;
-  const cacheKey = `${fileFingerprint(file)}|${targetBytes}`;
-  const cached = transportCache.get(cacheKey);
-  if (cached) return cached;
-  const optimized = await compressReferenceForTransport(file, targetBytes);
-  if (transportCache.size >= TRANSPORT_CACHE_LIMIT) {
-    const oldest = transportCache.keys().next().value;
-    if (oldest !== undefined) transportCache.delete(oldest);
-  }
-  transportCache.set(cacheKey, optimized);
-  return optimized;
-}
-
-async function compressReferenceForTransport(file: File, targetBytes: number) {
-  const bitmap = await createImageBitmap(file);
-  let scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));
-  let best: Blob | null = null;
-
-  try {
-    for (let pass = 0; pass < 4; pass += 1) {
-      const width = Math.max(1, Math.round(bitmap.width * scale));
-      const height = Math.max(1, Math.round(bitmap.height * scale));
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const context = canvas.getContext("2d", { alpha: false });
-      if (!context) throw new Error(`Could not prepare ${file.name} for generation.`);
-      context.fillStyle = "#ffffff";
-      context.fillRect(0, 0, width, height);
-      context.drawImage(bitmap, 0, 0, width, height);
-
-      for (const quality of [0.92, 0.86, 0.8, 0.74, 0.68]) {
-        const blob = await new Promise<Blob>((resolve, reject) =>
-          canvas.toBlob(
-            (value) => value ? resolve(value) : reject(new Error(`Could not optimize ${file.name}.`)),
-            "image/jpeg",
-            quality,
-          ),
-        );
-        best = !best || blob.size < best.size ? blob : best;
-        if (blob.size <= targetBytes) return transportFile(blob, file.name);
-      }
-      scale *= 0.78;
-    }
-  } finally {
-    bitmap.close();
-  }
-
-  if (!best) throw new Error(`Could not optimize ${file.name}.`);
-  return transportFile(best, file.name);
-}
-
-function base64ImageToObjectUrl(base64: string, mimeType: string) {
-  const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
-  return URL.createObjectURL(new Blob([bytes], { type: mimeType || "image/png" }));
-}
-
-function transportFile(blob: Blob, originalName: string) {
-  const base = originalName.replace(/\.[^.]+$/, "") || "reference";
-  return new File([blob], `${base}-optimized.jpg`, { type: "image/jpeg", lastModified: Date.now() });
-}
 
 function openDraftDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -667,26 +571,6 @@ async function credentialFingerprint(apiKey: string) {
   if (!trimmed) return "server-key";
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(trimmed));
   return Array.from(new Uint8Array(digest).slice(0, 12), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-async function readApiResponse<T extends { ok: boolean; error?: string }>(response: Response): Promise<T> {
-  const contentType = response.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) {
-    const payload = (await response.json()) as T;
-    if (!response.ok || !payload.ok) {
-      throw new ApiResponseError(
-        payload.error || `Request failed with status ${response.status}.`,
-        { ...(payload as Record<string, unknown>), status: response.status },
-      );
-    }
-    return payload;
-  }
-
-  const text = (await response.text()).trim();
-  if (response.status === 413 || /payload too large/i.test(text)) {
-    throw new Error("A reference chunk was rejected by the host. The original files are still saved in your draft.");
-  }
-  throw new Error(text || `Request failed with status ${response.status}.`);
 }
 
 async function uploadReferenceFile(
@@ -1691,6 +1575,7 @@ export default function Home() {
         <nav aria-label="Primary navigation">
           <Link href="/">Library</Link>
           <Link className="active" href="/generator">Generator</Link>
+          <Link href="/workbench">Workbench</Link>
         </nav>
         <div className="generator-status" aria-label="Board reference summary">
           <span>{totalReferences}/{MAX_REFERENCE_IMAGES} references</span>
