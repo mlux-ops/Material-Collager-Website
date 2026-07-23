@@ -4,7 +4,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "material-collager",
   "main": "./worker/index.ts",
-  "compatibility_date": "2026-06-01",
+  "compatibility_date": "2026-05-22",
   "compatibility_flags": ["nodejs_compat"],
 
   // The placeholder database_id keeps local dev working (Miniflare ignores
