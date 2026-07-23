@@ -34,10 +34,10 @@ Notably, Spaces has no dedicated archviz nodes — its Variations "Angles" mode 
 - `npm install @xyflow/react zustand` — clean with React 19.2.6.
 - `vinext build` succeeds; a test `<ReactFlow>` page compiled, typechecked (zero new errors), and served with correct SSR fallback.
 - `import "@xyflow/react/dist/style.css"` from a client component passes through the Tailwind v4 PostCSS pipeline untouched and lands in a route-scoped chunk.
-- Bundle impact is route-isolated: ~56 kB gz JS + ~2.6 kB gz CSS, loaded lazily only on the new route (for scale: the scene-lab three.js chunk is 866 kB).
+- Bundle impact is route-isolated: ~176 kB raw / 56 kB gz JS + ~2.6 kB gz CSS, loaded lazily only on the new route (for scale: the scene-lab three.js chunk is 866 kB raw).
 - The dependencies are committed on this branch as groundwork.
 
-**State: Zustand** (React Flow uses it internally, so ~0 added bundle). Store owns `nodes`, `edges`, per-node `status`; custom node components use narrow `useShallow` selectors so drags don't re-render every node.
+**State: Zustand** (React Flow bundles its own zustand 4 internally; the app-level zustand 5 store adds only a few kB gz). Store owns `nodes`, `edges`, per-node `status`; custom node components use narrow `useShallow` selectors so drags don't re-render every node.
 
 **Route pattern** (copied from `app/page.tsx` / `app/scene-lab-v2/page.tsx`): `app/workbench/page.tsx` is a thin `"use client"` wrapper with `next/dynamic` + `ssr: false` over `app/components/workbench/WorkbenchCanvas.tsx`. Nav links added in the generator header (`app/generator/page.tsx:1691`) and the library chrome (`SceneWheelV2.tsx:151`). Styling: a `.workbench-shell` section in `app/globals.css` for the chrome (matching the "Monochrome Glass" theme — `--mono-*` tokens, 8.4–10.5px uppercase micro-type), CSS module for canvas internals.
 
@@ -130,8 +130,8 @@ The philosophy: the existing `/api/generate` machinery is ~90% generic; the coll
 
 ### New routes (all `runtime = "edge"`, same `{ok,...}` envelope)
 
-1. **`POST /api/workbench/edit`** — generalized image edit. Multipart: `payload` JSON `{prompt, size, quality, n, stream?, domain}` + `image[]` (≤16, <50 MB each, order = prompt reference order) + optional `mask` (<4 MB PNG). Internals extracted from `generate/route.ts` into `app/lib/image-edit.ts`: `createImageEdit` (retry + `isRetryableImageError`), size-fallback to `standardSizeFor`, per-attempt diagnostics, `n` passthrough, `usage` in response. Size validation: divisible by 16, aspect 1:3–3:1, ≤3840 px edge, ≤8,294,400 px.
-   **Streaming:** verified supported on edits for gpt-image-2 (`stream: true`, `partial_images: 0–3`, +100 tokens each; the model card's "streaming: not supported" grid refers to chat capabilities). At 2K/4K a render runs 200–250s and idle gateways kill silent connections — so **`partial_images ≥ 1` is mandatory at 2K+**, surfaced as a progressive preview on the node. Implemented as an SSE pass-through variant of the route.
+1. **`POST /api/workbench/edit`** — generalized image edit. Multipart: `payload` JSON `{prompt, size, quality, n, stream?, domain}` + `image[]` (≤16, <50 MB each, order = prompt reference order) + optional `mask` (<4 MB PNG). Internals extracted from `generate/route.ts` into `app/lib/image-edit.ts`: `createImageEdit` (retry + `isRetryableImageError`), size-fallback to `standardSizeFor`, per-attempt diagnostics, `n` passthrough, `usage` in response. Size validation: divisible by 16, aspect 1:3–3:1, ≤3840 px edge, total pixels 655,360–8,294,400 (note: the current `validEditDimension` only enforces ≥256 per edge — the extraction must add the minimum-pixel bound).
+   **Streaming:** verified supported on edits for gpt-image-2 (`stream: true`, `partial_images: 0–3`, +100 tokens each; the model card's "streaming: not supported" grid refers to chat capabilities). A 2K-high render runs 200–250s (4K unmeasured, likely longer) and idle gateways kill silent connections — so **`partial_images ≥ 1` is mandatory at 2K+**, surfaced as a progressive preview on the node. Implemented as an SSE pass-through variant of the route.
 2. **`POST /api/workbench/review`** — the Accuracy Reviewer. `reviewGeneratedImage` (`generate/route.ts:505`) already never inspects collage fields — only `{id, role}` items + ordered images. Extract to `app/lib/accuracy-review.ts` with the prompt's domain line parameterized ("material collage" → "interior render" / "exterior render"). Same strict JSON schema (score, findings, per-item boxes), same `normalizeQaBox`.
 3. **`POST /api/workbench/assist`** — thin Responses-API proxy for the AI Assistant node: `{instructions, system?, model?, images?[]}` → text. Models allowlisted (`gpt-5.4-mini` default, `gpt-5.6` opt-in); reuses `resolveOpenAIKey`/`readOpenAIResponse`; 120s timeout like `references/matches`.
 
@@ -166,10 +166,11 @@ graph LR
   U --> AR
   AR --> QC[QA Correction]
   U --> QC
+  R --> QC
   QC --> S[Save to Library]
 ```
 
-**Exterior render edit:** Photo → Edit (facade material swap w/ references) → Relight (sky/time-of-day presets) → Variations (staging/angle, n=4) → Compare A/B → Upscaler → Save.
+**Exterior render edit:** Photo → Edit (facade material swap w/ references) → Relight (sky/time-of-day presets) → Variations (staging/angle, n=4) → Upscaler → Save, with Compare A/B as a side branch over the Variations outputs.
 
 **Collage create & edit:** References (analyzed + web-matched) → Collage Board → Accuracy Reviewer → QA Correction → Upscaler → Save. This reproduces today's `/generator` pipeline as an editable graph — the migration story for existing users.
 
@@ -180,14 +181,14 @@ graph LR
 **Phase 1 — canvas MVP (the walking skeleton):**
 - Extract shared client libs from `generator/page.tsx` (pure module-level code, verified extractable): `app/lib/image-transport.ts`, `app/lib/api-client.ts`, `app/lib/draft-store.ts` (parameterized DB name).
 - `/workbench` route + canvas + Zustand store + typed ports + Spotlight add-menu.
-- Nodes: Photo, Text, Prompt Builder, Image Generation, Compare, Note.
+- Nodes: Photo, Text, Prompt Builder, Image Generation, Edit / Material Swap, Compare, Save to Library, Note.
 - `/api/workbench/edit` (non-streaming first) extracted from generate route.
 - Executor with topo sort, statuses, cancel, cost badges, ancestry-hash memoization.
 - IndexedDB autosave (single graph).
-- *Definition of done: interior-edit happy path runs end-to-end on canvas.*
+- *Definition of done: Photo → Edit / Material Swap (prompt-directed) → Compare → Save to Library runs end-to-end on canvas.*
 
 **Phase 2 — the full catalog & the three templates:**
-- References node + Analyzer + Finder (reusing existing routes), Library Pick.
+- References node + Analyzer + Finder (reusing existing routes), Library Pick, Collage Board.
 - Relight, Variations (n>1 UI), Masked Edit (mask painting modal), Upscaler with SSE partial-image streaming.
 - `/api/workbench/review` + Accuracy Reviewer + QA Correction nodes.
 - AI Assistant node + `/api/workbench/assist`.
@@ -199,7 +200,7 @@ graph LR
 ## 9. Risks & honest caveats
 
 1. **Masking is guidance, not geometry.** gpt-image models treat masks as strong hints; edges can drift. The generator already mitigates by client-side compositing protected pixels back (`compositeSelectiveEdit`) — the Masked Edit node inherits this, and the UI must not promise pixel-exact inpainting.
-2. **The Upscaler is a re-render.** Identity/detail can drift at 4K, which OpenAI marks experimental; long runs (200–250s) make streaming partials load-bearing, not cosmetic. Cost is real: ~$0.40/run at 4K high.
+2. **The Upscaler is a re-render.** Identity/detail can drift at 4K, which OpenAI marks experimental; long runs (200–250s measured at 2K-high, 4K likely longer) make streaming partials load-bearing, not cosmetic. Cost is real: ~$0.40/run at 4K high.
 3. **No transparent backgrounds** on gpt-image-2 — no cut-out/PNG-alpha node.
 4. **Input-token pricing is estimated** until calibrated from usage actuals (no published formula).
 5. **vinext is young** (0.0.50). The empirical test covered install/typecheck/build/dev-serve; `vinext start` fails on `cloudflare:workers` ESM resolution *pre-existing and unrelated* — production runs through the Workers build. Still: pin the dependency versions.
