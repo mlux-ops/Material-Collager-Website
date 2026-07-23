@@ -19,10 +19,12 @@
   },
   "dependencies": {
     "@react-three/fiber": "9.6.1",
+    "@xyflow/react": "^12.11.2",
     "next": "16.2.6",
     "react": "19.2.6",
     "react-dom": "19.2.6",
-    "three": "0.182.0"
+    "three": "0.182.0",
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",
