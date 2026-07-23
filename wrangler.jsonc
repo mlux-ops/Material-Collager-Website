@@ -1,0 +1,38 @@
+// Cloudflare Workers deployment config (self-hosted; replaces the OpenAI
+// Sites hosting). See docs/DEPLOYING.md for the one-time setup steps.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "material-collager",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // REPLACE database_name and database_id with your D1 database's values
+  // (Cloudflare dashboard -> Storage & Databases -> D1, or `wrangler d1 list`).
+  // The placeholder id keeps local dev working; deploys need the real id.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "material-collager",
+      "database_id": "00000000-0000-4000-8000-000000000000"
+    }
+  ],
+
+  // REPLACE bucket_name with your R2 bucket's name
+  // (dashboard -> R2, or `wrangler r2 bucket list`).
+  "r2_buckets": [
+    {
+      "binding": "OUTPUTS",
+      "bucket_name": "material-collager-outputs"
+    }
+  ],
+
+  // Cloudflare Images binding used by the /_vinext/image optimizer route.
+  "images": {
+    "binding": "IMAGES"
+  },
+
+  "observability": {
+    "enabled": true
+  }
+}
