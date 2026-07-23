@@ -54,9 +54,12 @@ function CanvasInner() {
     const slot = placedCount.current % 9;
     placedCount.current += 1;
     const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2.4 });
+    // Offsets are multiples of the 22px grid, and the final position is snapped
+    // to it, so a freshly placed node doesn't jump on its first drag.
+    const snap = (value: number) => Math.round(value / 22) * 22;
     const position = {
-      x: center.x + ((slot % 3) - 1) * 300,
-      y: center.y + (Math.floor(slot / 3) - 1) * 260,
+      x: snap(center.x + ((slot % 3) - 1) * 308),
+      y: snap(center.y + (Math.floor(slot / 3) - 1) * 264),
     };
     addNode(kind, position);
   }, [addNode, screenToFlowPosition]);
@@ -70,6 +73,8 @@ function CanvasInner() {
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
       isValidConnection={isValidConnection}
+      snapToGrid
+      snapGrid={[22, 22]}
       deleteKeyCode={["Backspace", "Delete"]}
       onInit={(instance) => {
         // Fit only when restoring a saved graph; a reactive fitView would
