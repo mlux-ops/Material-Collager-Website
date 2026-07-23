@@ -1,0 +1,332 @@
+.shell {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--mono-off-white, #fafafa);
+  overflow: hidden;
+}
+
+.canvasWrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.palette {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 10px;
+  padding: 10px;
+  max-width: 180px;
+}
+
+.paletteTitle {
+  font-size: 9px;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+  color: rgba(0, 0, 0, 0.55);
+  margin: 0 0 4px;
+}
+
+.paletteButton {
+  font-size: 11px;
+  text-align: left;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 7px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.paletteButton:hover {
+  background: #000;
+  color: #fff;
+}
+
+.toolbarButton {
+  font-size: 10px;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+  background: #000;
+  color: #fff;
+  border: 1px solid #000;
+  border-radius: 999px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+.toolbarButton:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.toolbarGhost {
+  composes: toolbarButton;
+  background: #fff;
+  color: #000;
+}
+
+.savedAt {
+  font-size: 9px;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+  color: rgba(0, 0, 0, 0.5);
+}
+
+/* --- Node cards ------------------------------------------------------- */
+
+.node {
+  width: 232px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  border-radius: 12px;
+  padding: 10px 12px 12px;
+  font-family: var(--font-inter, inherit);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.07);
+}
+
+.nodeError {
+  border-color: #b3261e;
+}
+
+.nodeHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.nodeTitle {
+  font-size: 10.5px;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.status {
+  font-size: 8.4px;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.status_running {
+  border-color: #1a56db;
+  color: #1a56db;
+}
+
+.status_done {
+  border-color: #0d7a3f;
+  color: #0d7a3f;
+}
+
+.status_error {
+  border-color: #b3261e;
+  color: #b3261e;
+}
+
+.status_stale {
+  border-color: #9a6b00;
+  color: #9a6b00;
+}
+
+.nodeBody {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 9px;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.field input,
+.field select {
+  font-size: 12px;
+  padding: 5px 7px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 7px;
+  background: #fff;
+  text-transform: none;
+  letter-spacing: normal;
+  color: #000;
+}
+
+.textarea {
+  width: 100%;
+  font-size: 12px;
+  padding: 6px 8px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 7px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.hint {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.55);
+  margin: 0;
+}
+
+.errorText {
+  font-size: 11px;
+  color: #b3261e;
+  margin: 6px 0 0;
+}
+
+.smallButton {
+  font-size: 10px;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  border-radius: 999px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.smallButton:hover:not(:disabled) {
+  background: #000;
+  color: #fff;
+}
+
+.runRow {
+  display: flex;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.runButton {
+  flex: 1;
+  font-size: 10px;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+  background: #000;
+  color: #fff;
+  border: 1px solid #000;
+  border-radius: 999px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.runButton:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.cancelButton {
+  composes: smallButton;
+}
+
+.preview {
+  margin: 0;
+  position: relative;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.preview img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.history {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 999px;
+  padding: 2px 6px;
+  font-size: 10px;
+}
+
+.history button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+}
+
+.history button:disabled {
+  opacity: 0.3;
+}
+
+.compare {
+  margin: 0;
+  position: relative;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.compare img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.compare img + img {
+  position: absolute;
+  inset: 0;
+}
+
+.compareLine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1.5px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+.slider {
+  width: 100%;
+}
+
+.portLabels {
+  display: none;
+}
+
+.note {
+  width: 200px;
+  background: #fff8c5;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.noteText {
+  width: 100%;
+  border: none;
+  background: transparent;
+  resize: vertical;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
