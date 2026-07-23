@@ -7,19 +7,17 @@
   "compatibility_date": "2026-06-01",
   "compatibility_flags": ["nodejs_compat"],
 
-  // REPLACE database_name and database_id with your D1 database's values
-  // (Cloudflare dashboard -> Storage & Databases -> D1, or `wrangler d1 list`).
-  // The placeholder id keeps local dev working; deploys need the real id.
+  // The placeholder database_id keeps local dev working (Miniflare ignores
+  // it); the deploy workflow resolves the real id from database_name at
+  // deploy time via `wrangler d1 list`.
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "material-collager",
+      "database_name": "material-collager-db",
       "database_id": "00000000-0000-4000-8000-000000000000"
     }
   ],
 
-  // REPLACE bucket_name with your R2 bucket's name
-  // (dashboard -> R2, or `wrangler r2 bucket list`).
   "r2_buckets": [
     {
       "binding": "OUTPUTS",

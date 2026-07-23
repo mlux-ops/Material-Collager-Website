@@ -26,6 +26,30 @@ jobs:
       - name: Build
         run: npm run build
 
+      # wrangler.jsonc carries a placeholder D1 database_id so local dev works
+      # without account access; swap in the real id (looked up by name) in the
+      # built deploy config (dist/server/wrangler.json) before deploying.
+      - name: Resolve D1 database id
+        run: |
+          DB_ID=$(npx wrangler d1 list --json | node -e "
+            let raw = '';
+            process.stdin.on('data', (chunk) => raw += chunk);
+            process.stdin.on('end', () => {
+              const rows = JSON.parse(raw);
+              const row = rows.find((entry) => entry.name === 'material-collager-db');
+              if (!row) { console.error('D1 database material-collager-db not found'); process.exit(1); }
+              console.log(row.uuid);
+            });
+          ")
+          echo "Resolved material-collager-db -> $DB_ID"
+          grep -rl "00000000-0000-4000-8000-000000000000" wrangler.jsonc dist | while read -r file; do
+            sed -i "s/00000000-0000-4000-8000-000000000000/$DB_ID/" "$file"
+            echo "Patched $file"
+          done
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Deploy Worker
         run: npx wrangler deploy
         env:
