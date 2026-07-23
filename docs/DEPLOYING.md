@@ -8,12 +8,16 @@ target; its files are kept only so that path could be revived.
 
 ## One-time setup
 
-### 1. Fill in your resource IDs — `wrangler.jsonc`
+### 1. Resource names — `wrangler.jsonc` (already configured)
 
-- **D1** (dashboard → Storage & Databases → D1, or `wrangler d1 list`):
-  set `database_name` and `database_id`. Tables are created lazily by the app
-  on first use — no migrations to run.
-- **R2** (dashboard → R2, or `wrangler r2 bucket list`): set `bucket_name`.
+- **D1**: `material-collager-db` — the workflow resolves the database id by
+  name at deploy time, so no UUID needs to be committed. Tables are created
+  lazily by the app on first use — no migrations to run.
+- **R2**: `material-collager-outputs`.
+
+If you ever rename the database or bucket, update `wrangler.jsonc`
+(`database_name`, `bucket_name`) and the name in
+`.github/workflows/deploy.yml`'s resolve step.
 
 ### 2. GitHub repository secrets (Settings → Secrets and variables → Actions)
 
