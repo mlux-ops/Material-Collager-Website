@@ -155,6 +155,9 @@ export default function SceneWheelV2() {
               <Link href="/generator" className={styles.chromeCell}>
                 GENERATOR
               </Link>
+              <Link href="/workbench" className={styles.chromeCell}>
+                WORKBENCH
+              </Link>
             </nav>
           </header>
 
