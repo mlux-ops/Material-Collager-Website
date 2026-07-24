@@ -12,6 +12,23 @@ export class OpenAIRequestError extends Error {
   }
 }
 
+// Combines an optional caller cancellation signal (e.g. request.signal, which
+// aborts when the client fetch is cancelled) with an optional hard timeout, so
+// a client cancel aborts the paid upstream call while the timeout is
+// preserved. Filters out missing inputs: with only a caller signal it returns
+// that signal, with only a timeout it returns the timeout signal, and an
+// already-aborted caller yields an already-aborted result via AbortSignal.any.
+export function combineAbortSignals(callerSignal?: AbortSignal | null, timeoutMs?: number): AbortSignal {
+  const signals: AbortSignal[] = [];
+  if (callerSignal) signals.push(callerSignal);
+  if (typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    signals.push(AbortSignal.timeout(timeoutMs));
+  }
+  if (signals.length === 1) return signals[0];
+  if (signals.length === 0) return new AbortController().signal;
+  return AbortSignal.any(signals);
+}
+
 export function resolveOpenAIKey(provided?: string) {
   const apiKey = provided?.trim() || process.env.OPENAI_API_KEY;
   if (!apiKey) {
