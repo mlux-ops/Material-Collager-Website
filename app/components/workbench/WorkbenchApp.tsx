@@ -3,7 +3,7 @@
 import "@xyflow/react/dist/style.css";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
   Controls,
@@ -20,7 +20,7 @@ import { cancelExecution, runAll } from "./executor";
 import { loadGraph, saveGraph } from "./persistence";
 import { connectionIsValid, useWorkbenchStore } from "./store";
 import styles from "./workbench.module.css";
-import { NODE_SPECS, type NodeKind, type WorkbenchNode } from "./types";
+import { NODE_SPECS, PORT_COLORS, specFor, type NodeKind, type WorkbenchNode } from "./types";
 
 const PALETTE: NodeKind[] = ["photo", "text", "promptBuilder", "imageGenerate", "imageEdit", "compare", "saveToLibrary", "note"];
 
@@ -38,6 +38,24 @@ function CanvasInner() {
   );
   const { screenToFlowPosition } = useReactFlow();
   const placedCount = useRef(0);
+
+  // Edge color is derived on every render from the SOURCE handle's port kind
+  // in the node registry — nothing is persisted on the edge itself, so graphs
+  // reloaded from storage (whose edges carry no style metadata) recolor
+  // themselves the same way. Selected edges keep React Flow's highlight.
+  const coloredEdges = useMemo(
+    () =>
+      edges.map((edge) => {
+        if (edge.selected) return edge;
+        const source = nodes.find((node) => node.id === edge.source);
+        if (!source) return edge;
+        const outputs = specFor(source.data.kind).outputs;
+        const port = outputs.find((candidate) => candidate.id === edge.sourceHandle) ?? outputs[0];
+        if (!port) return edge;
+        return { ...edge, style: { ...edge.style, stroke: PORT_COLORS[port.kind] } };
+      }),
+    [nodes, edges],
+  );
 
   const isValidConnection: IsValidConnection = useCallback(
     (connection) => {
@@ -67,7 +85,7 @@ function CanvasInner() {
   return (
     <ReactFlow
       nodes={nodes}
-      edges={edges}
+      edges={coloredEdges}
       nodeTypes={NODE_TYPES}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}

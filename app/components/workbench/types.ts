@@ -1,7 +1,7 @@
 import type { Node } from "@xyflow/react";
 
 // Data kinds carried by connections, color-coded on ports and edges.
-export type PortKind = "image" | "text";
+export type PortKind = "image" | "text" | "references" | "report" | "mask";
 
 export type NodeKind =
   | "photo"
@@ -23,7 +23,15 @@ export type PortSpec = {
   // replace the existing connection.
   multi?: boolean;
   required?: boolean;
+  // Input ports that take more than their declared kind list every accepted
+  // kind here (e.g. reference inputs take both "image" and "references").
+  // When omitted the port accepts only its own `kind`.
+  acceptedKinds?: PortKind[];
 };
+
+export function acceptedKindsFor(port: PortSpec): PortKind[] {
+  return port.acceptedKinds ?? [port.kind];
+}
 
 export type NodeSpec = {
   kind: NodeKind;
@@ -35,9 +43,35 @@ export type NodeSpec = {
   paid?: boolean;
 };
 
+// One entry inside a references value: an ordered group of cached images
+// playing a role (e.g. material, style, context) in downstream generation.
+export type ReferenceItem = {
+  id: string;
+  role: string;
+  imageKeys: string[]; // ordered blob-cache keys for this item's images
+};
+
+export type ReportItemResult = {
+  id: string;
+  passed: boolean;
+  score: number;
+  findings: string[];
+};
+
+export type ReportResult = {
+  passed: boolean;
+  score: number;
+  findings: string[];
+  recommendation: string;
+  items: ReportItemResult[];
+};
+
 export type NodeOutputValue =
   | { kind: "image"; url: string; cacheKey: string }
-  | { kind: "text"; text: string };
+  | { kind: "text"; text: string }
+  | { kind: "references"; items: ReferenceItem[]; order: string[] } // order: item ids
+  | { kind: "report"; result: ReportResult }
+  | { kind: "mask"; cacheKey: string };
 
 export type NodeRun = {
   runId: string;
@@ -110,7 +144,7 @@ export const NODE_SPECS: Record<NodeKind, NodeSpec> = {
     description: "Generate an image from a prompt, optionally guided by reference images.",
     inputs: [
       { id: "prompt", kind: "text", label: "Prompt", required: true },
-      { id: "references", kind: "image", label: "References", multi: true },
+      { id: "references", kind: "image", label: "References", multi: true, acceptedKinds: ["image", "references"] },
     ],
     outputs: [{ id: "image", kind: "image", label: "Image" }],
     paid: true,
@@ -122,7 +156,7 @@ export const NODE_SPECS: Record<NodeKind, NodeSpec> = {
     inputs: [
       { id: "image", kind: "image", label: "Image", required: true },
       { id: "prompt", kind: "text", label: "Prompt", required: true },
-      { id: "references", kind: "image", label: "References", multi: true },
+      { id: "references", kind: "image", label: "References", multi: true, acceptedKinds: ["image", "references"] },
     ],
     outputs: [{ id: "image", kind: "image", label: "Image" }],
     paid: true,
@@ -156,6 +190,9 @@ export const NODE_SPECS: Record<NodeKind, NodeSpec> = {
 export const PORT_COLORS: Record<PortKind, string> = {
   image: "#8b5cf6",
   text: "#2563eb",
+  references: "#f59e0b", // amber
+  report: "#16a34a", // green
+  mask: "#7c3aed", // violet, darker than image so the two stay tellable apart
 };
 
 export function specFor(kind: NodeKind): NodeSpec {

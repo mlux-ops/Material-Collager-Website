@@ -10,6 +10,7 @@ import {
 } from "@xyflow/react";
 import { releaseByPrefix } from "./blob-cache";
 import {
+  acceptedKindsFor,
   defaultParams,
   specFor,
   type NodeKind,
@@ -30,15 +31,18 @@ export function portSpecFor(node: WorkbenchNode | undefined, handleId: string | 
   return ports.find((port) => port.id === handleId);
 }
 
-// Type-checked, acyclic connections: an output can only reach an input of the
-// same data kind, and a connection that would create a cycle is refused.
+// Type-checked, acyclic connections: an output can only reach an input that
+// accepts its data kind, and a connection that would create a cycle is
+// refused. A port accepts its own kind unless it lists acceptedKinds (e.g.
+// reference inputs take both "image" and "references").
 export function connectionIsValid(nodes: WorkbenchNode[], edges: Edge[], connection: Connection | Edge): boolean {
   if (!connection.source || !connection.target || connection.source === connection.target) return false;
   const source = nodes.find((node) => node.id === connection.source);
   const target = nodes.find((node) => node.id === connection.target);
   const sourcePort = portSpecFor(source, connection.sourceHandle, "out");
   const targetPort = portSpecFor(target, connection.targetHandle, "in");
-  if (!sourcePort || !targetPort || sourcePort.kind !== targetPort.kind) return false;
+  if (!sourcePort || !targetPort) return false;
+  if (!acceptedKindsFor(targetPort).includes(sourcePort.kind)) return false;
 
   // Reject cycles: walk downstream from the target; if we reach the source,
   // this edge would close a loop.

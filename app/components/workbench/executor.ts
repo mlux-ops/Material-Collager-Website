@@ -100,11 +100,37 @@ function ancestorsOf(context: GraphContext, nodeId: string): string[] {
   return result; // already in dependency order (post-order)
 }
 
-async function blobFromImageValue(value: NodeOutputValue): Promise<File> {
-  if (value.kind !== "image") throw new Error("Expected an image input.");
-  const blob = getBlob(value.cacheKey);
+// Ordered blob-cache keys behind one upstream value: an image passes its own
+// cacheKey through; a references value expands to its items' imageKeys,
+// following the value's `order` (item ids). Other kinds carry no image data.
+function imageCacheKeysFromValue(value: NodeOutputValue): string[] {
+  if (value.kind === "image") return [value.cacheKey];
+  if (value.kind === "references") {
+    const byId = new Map(value.items.map((item) => [item.id, item]));
+    const orderedIds = value.order.length ? value.order : value.items.map((item) => item.id);
+    const keys: string[] = [];
+    const seen = new Set<string>();
+    for (const id of orderedIds) {
+      const item = byId.get(id);
+      if (!item || seen.has(id)) continue;
+      seen.add(id);
+      keys.push(...item.imageKeys);
+    }
+    return keys;
+  }
+  return [];
+}
+
+function fileFromCacheKey(cacheKey: string): File {
+  const blob = getBlob(cacheKey);
   if (!blob) throw new Error("An input image is no longer cached. Re-run its node.");
   return new File([blob], "input.png", { type: blob.type || "image/png" });
+}
+
+async function blobFromImageValue(value: NodeOutputValue): Promise<File> {
+  const [cacheKey] = imageCacheKeysFromValue(value);
+  if (!cacheKey) throw new Error("Expected an image input.");
+  return fileFromCacheKey(cacheKey);
 }
 
 async function executeNode(context: GraphContext, nodeId: string, signature: string): Promise<void> {
@@ -163,7 +189,9 @@ async function executeNode(context: GraphContext, nodeId: string, signature: str
     }
     const references = inputValues(context, nodeId, "references");
     if (references.length) {
-      const rawReferences = await Promise.all(references.map(blobFromImageValue));
+      // Each plain image contributes one file; a references value expands to
+      // its ordered image cacheKeys.
+      const rawReferences = references.flatMap(imageCacheKeysFromValue).map(fileFromCacheKey);
       // The base image travels at full quality; supporting references share
       // the same transport budget the generator uses.
       const optimized = await optimizeReferencesForTransport(rawReferences);

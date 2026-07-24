@@ -10,7 +10,7 @@ import { cancelExecution, runNodes } from "./executor";
 import { PHOTO_SOURCE_KEY } from "./persistence";
 import { useWorkbenchStore } from "./store";
 import styles from "./workbench.module.css";
-import { PORT_COLORS, specFor, type NodeSpec, type WorkbenchNode, type WorkbenchNodeData } from "./types";
+import { acceptedKindsFor, PORT_COLORS, specFor, type NodeSpec, type WorkbenchNode, type WorkbenchNodeData } from "./types";
 
 const SIZE_OPTIONS = ["1024x1024", "1536x1024", "1024x1536", "2048x2048", "2560x1440"];
 const QUALITY_OPTIONS = ["low", "medium", "high"] as const;
@@ -35,7 +35,7 @@ function PortHandles({ spec }: { spec: NodeSpec }) {
           type="target"
           position={Position.Left}
           style={{ top: 44 + index * 22, background: PORT_COLORS[port.kind] }}
-          title={`${port.label} (${port.kind}${port.multi ? ", multiple" : ""})`}
+          title={`${port.label} (${acceptedKindsFor(port).join(" | ")}${port.multi ? ", multiple" : ""})`}
         />
       ))}
       {spec.outputs.map((port, index) => (
