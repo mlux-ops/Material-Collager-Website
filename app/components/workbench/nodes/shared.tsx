@@ -2,7 +2,7 @@
 "use client";
 
 import type { Edge } from "@xyflow/react";
-import { Handle, Position, useEdges, type NodeProps } from "@xyflow/react";
+import { Handle, Position, useEdges, useNodeId, useReactFlow, type NodeProps } from "@xyflow/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { readApiResponse } from "@/app/lib/api-client";
@@ -71,11 +71,39 @@ function PortHandles({ spec }: { spec: NodeSpec }) {
   );
 }
 
+// Corner delete affordance, revealed by CSS only while the node is selected.
+// Routed through deleteElements so it takes exactly the same path as the
+// Backspace/Delete key: connected edges are removed alongside the node, and
+// the store's "remove" handler releases its cached blobs and marks the graph
+// dirty. Reads its own id from context so it needs no props and works both
+// inside NodeShell and in the note kind's hand-rolled root.
+export function NodeDeleteButton() {
+  const id = useNodeId();
+  const { deleteElements } = useReactFlow();
+  if (!id) return null;
+  return (
+    <button
+      type="button"
+      // nodrag/nopan: pressing the button must not start a node drag or a pan.
+      className={`nodrag nopan ${styles.nodeDelete}`}
+      aria-label="Delete node"
+      title="Delete node"
+      onClick={(event) => {
+        event.stopPropagation();
+        void deleteElements({ nodes: [{ id }] });
+      }}
+    >
+      ×
+    </button>
+  );
+}
+
 export function NodeShell({ data, children, footer }: { data: WorkbenchNodeData; children: ReactNode; footer?: ReactNode }) {
   const spec = specFor(data.kind);
   return (
     <div className={`${styles.node} ${data.status === "error" ? styles.nodeError : ""}`}>
       <PortHandles spec={spec} />
+      <NodeDeleteButton />
       <header className={styles.nodeHeader}>
         <span className={styles.nodeTitle}>{spec.title}</span>
         <span className={styles.headerBadges}>
