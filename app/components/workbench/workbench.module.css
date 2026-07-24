@@ -9,6 +9,12 @@
 .canvasWrap {
   flex: 1;
   min-height: 0;
+  display: flex;
+}
+
+.canvasFlow {
+  flex: 1;
+  min-width: 0;
   position: relative;
 }
 
@@ -114,6 +120,12 @@
   font-weight: 600;
 }
 
+.headerBadges {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .status {
   font-size: 8.4px;
   letter-spacing: 0.1575px;
@@ -122,6 +134,23 @@
   border-radius: 999px;
   border: 1px solid rgba(0, 0, 0, 0.2);
   color: rgba(0, 0, 0, 0.6);
+}
+
+/* Output pinning (AC15): always-visible badge -- pinning is never silent. */
+.pinBadge {
+  font-size: 8.4px;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid #8b5cf6;
+  color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.08);
+}
+
+.pinToggle {
+  width: 100%;
+  margin-top: 4px;
 }
 
 .status_running {
@@ -142,6 +171,117 @@
 .status_stale {
   border-color: #9a6b00;
   color: #9a6b00;
+}
+
+.status_needs-selection {
+  border-color: #a16207;
+  color: #a16207;
+}
+
+.candidateList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.candidateCard {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  padding: 6px;
+  background: #fff;
+}
+
+.candidateThumb {
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  flex-shrink: 0;
+  background: #f2f2f2;
+}
+
+.candidateMeta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10px;
+}
+
+.candidateTitle {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.officialBadge {
+  display: inline-block;
+  font-size: 8.5px;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+  color: #0d7a3f;
+  border: 1px solid #0d7a3f;
+  border-radius: 999px;
+  padding: 1px 5px;
+  margin-left: 4px;
+}
+
+.referenceItem {
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  padding: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.referenceItemHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+
+.referenceThumbRow {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.referenceThumb {
+  position: relative;
+  width: 36px;
+  height: 36px;
+}
+
+.referenceThumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 5px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+.referenceThumbRemove {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 15px;
+  height: 15px;
+  line-height: 13px;
+  text-align: center;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  background: #fff;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 0;
 }
 
 .nodeBody {
@@ -252,6 +392,58 @@
   height: auto;
 }
 
+.thumbButton {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: zoom-in;
+}
+
+.thumbImg {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.lightboxOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.82);
+  cursor: zoom-out;
+}
+
+.lightboxImage {
+  max-width: 92vw;
+  max-height: 88vh;
+  object-fit: contain;
+  cursor: default;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.lightboxClose {
+  position: fixed;
+  top: 20px;
+  right: 24px;
+  font-size: 10px;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+  background: #fff;
+  color: #000;
+  border: none;
+  border-radius: 999px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
 .history {
   position: absolute;
   right: 6px;
@@ -329,4 +521,419 @@
   font-size: 12px;
   font-family: inherit;
   outline: none;
+}
+
+/* Variations node: candidate grid + active-candidate selector (AC8). */
+.candidateGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.candidateThumb {
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  background: none;
+  line-height: 0;
+}
+
+.candidateThumb img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+}
+
+.candidateThumbActive {
+  border-color: #8b5cf6;
+}
+
+/* Masked Edit node: region-selection modal (AC9). */
+.maskModalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.82);
+}
+
+.maskModal {
+  background: #fff;
+  border-radius: 10px;
+  padding: 16px;
+  max-width: 92vw;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.maskCanvasArea {
+  position: relative;
+  touch-action: none;
+  max-width: 80vw;
+  max-height: 70vh;
+  overflow: hidden;
+  cursor: crosshair;
+  line-height: 0;
+}
+
+.maskCanvasArea img {
+  display: block;
+  max-width: 80vw;
+  max-height: 70vh;
+  width: auto;
+  height: auto;
+  user-select: none;
+}
+
+.maskRegionBox {
+  position: absolute;
+  border: 2px dashed #7c3aed;
+  background: rgba(124, 58, 237, 0.2);
+  pointer-events: none;
+}
+
+.maskModalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Empty-canvas templates gallery (AC19) + export dialog (AC18): same fixed,
+   dark-scrim overlay idiom as the lightbox/mask modal above. */
+.templateOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.82);
+  padding: 24px;
+}
+
+.templateGallery {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  max-width: 720px;
+  width: 100%;
+  max-height: 88vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.templateHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.templateHeader h2 {
+  font-size: 16px;
+  margin: 0;
+}
+
+.templateGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.templateCard {
+  position: relative;
+  text-align: left;
+  background: #fafafa;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.templateCard:hover {
+  background: #000;
+  color: #fff;
+  border-color: #000;
+}
+
+.templateFlagship {
+  align-self: flex-start;
+  font-size: 9px;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+  background: #f59e0b;
+  color: #000;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.templateCardTitle {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.templateCardDescription {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.exportDialog {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  max-width: 420px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.exportDialog h2 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.exportWarning {
+  font-size: 11px;
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.12);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0;
+}
+
+/* --- S27: cost/token UI ------------------------------------------------ */
+
+.cacheBadge {
+  font-size: 9px;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid #0d7a3f;
+  color: #0d7a3f;
+  background: rgba(13, 122, 63, 0.08);
+  white-space: nowrap;
+}
+
+.disabledReason {
+  font-size: 9.5px;
+  color: #b3261e;
+  flex-basis: 100%;
+}
+
+.draftToggle[aria-pressed="true"] {
+  background: #f59e0b;
+  color: #000;
+  border-color: #f59e0b;
+}
+
+/* Visually hidden but announced by assistive tech (aria-live run-status). */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --- S29: spotlight / inspector / graph manager ------------------------ */
+
+.spotlight {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 260px;
+}
+
+.spotlightInput {
+  font-size: 11px;
+  padding: 6px 8px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 7px;
+}
+
+.spotlightList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.spotlightItem {
+  text-align: left;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 7px;
+  padding: 6px 8px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.spotlightItem:hover {
+  background: #000;
+  color: #fff;
+}
+
+.spotlightItemTitle {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.spotlightItemDesc {
+  font-size: 9.5px;
+  opacity: 0.7;
+}
+
+.spotlightModal {
+  background: #fff;
+  border-radius: 12px;
+  padding: 18px;
+  max-width: 380px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.inspector {
+  width: 280px;
+  flex-shrink: 0;
+  background: #fff;
+  border-left: 1px solid rgba(0, 0, 0, 0.15);
+  padding: 14px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.inspectorHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.inspectorTitle {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.inspectorSubtitle {
+  font-size: 10.5px;
+  opacity: 0.65;
+  margin: 2px 0 0;
+}
+
+.inspectorBody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.inspectorSectionLabel {
+  font-size: 9px;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+  color: rgba(0, 0, 0, 0.5);
+  margin: 8px 0 0;
+}
+
+.inspectorParamGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.inspectorItemList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.inspectorItem {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.inspectorThumb {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 5px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+.graphManager {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  max-width: 480px;
+  width: 100%;
+  max-height: 80vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.graphList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.graphRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.graphRowActive {
+  border-color: #000;
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.graphSwitchButton {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0;
 }

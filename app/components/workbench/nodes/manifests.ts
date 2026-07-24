@@ -5,14 +5,29 @@
 // .ts extensions because Node's ESM loader does no extension searching.
 
 import type { CostEstimateInput, ImportSchema, NodeKind, NodeManifest, NodeSpec, WorkbenchParams } from "../types";
+import { accuracyReviewerManifest } from "./accuracyReviewer.manifest.ts";
+import { aiAssistantManifest } from "./aiAssistant.manifest.ts";
+import { collageBoardManifest } from "./collageBoard.manifest.ts";
 import { compareManifest } from "./compare.manifest.ts";
+import { cropManifest } from "./crop.manifest.ts";
+import { exportDownloadManifest } from "./exportDownload.manifest.ts";
 import { imageEditManifest } from "./imageEdit.manifest.ts";
 import { imageGenerateManifest } from "./imageGenerate.manifest.ts";
+import { libraryPickManifest } from "./libraryPick.manifest.ts";
+import { maskedEditManifest } from "./maskedEdit.manifest.ts";
 import { noteManifest } from "./note.manifest.ts";
 import { photoManifest } from "./photo.manifest.ts";
 import { promptBuilderManifest } from "./promptBuilder.manifest.ts";
+import { qaCorrectionManifest } from "./qaCorrection.manifest.ts";
+import { referenceAnalyzerManifest } from "./referenceAnalyzer.manifest.ts";
+import { referenceFinderManifest } from "./referenceFinder.manifest.ts";
+import { referencesManifest } from "./references.manifest.ts";
+import { relightManifest } from "./relight.manifest.ts";
+import { resizeManifest } from "./resize.manifest.ts";
 import { saveToLibraryManifest } from "./saveToLibrary.manifest.ts";
 import { textManifest } from "./text.manifest.ts";
+import { upscalerManifest } from "./upscaler.manifest.ts";
+import { variationsManifest } from "./variations.manifest.ts";
 
 // Registration order drives the add-node palette.
 export const MANIFESTS: Record<NodeKind, NodeManifest> = {
@@ -24,6 +39,22 @@ export const MANIFESTS: Record<NodeKind, NodeManifest> = {
   compare: compareManifest,
   saveToLibrary: saveToLibraryManifest,
   note: noteManifest,
+  // Phase 2 node kinds.
+  references: referencesManifest,
+  referenceAnalyzer: referenceAnalyzerManifest,
+  referenceFinder: referenceFinderManifest,
+  libraryPick: libraryPickManifest,
+  collageBoard: collageBoardManifest,
+  relight: relightManifest,
+  variations: variationsManifest,
+  maskedEdit: maskedEditManifest,
+  upscaler: upscalerManifest,
+  accuracyReviewer: accuracyReviewerManifest,
+  qaCorrection: qaCorrectionManifest,
+  aiAssistant: aiAssistantManifest,
+  resize: resizeManifest,
+  crop: cropManifest,
+  exportDownload: exportDownloadManifest,
 };
 
 export const NODE_KINDS = Object.keys(MANIFESTS) as NodeKind[];
@@ -57,4 +88,22 @@ for (const kind of NODE_KINDS) {
   if (manifest.estimateCost) estimateCostMap[kind] = manifest.estimateCost;
   if (manifest.stableParams) stableParamsMap[kind] = manifest.stableParams;
   if (manifest.draftOverride) draftOverrideMap[kind] = manifest.draftOverride;
+}
+
+// ---------------------------------------------------------------------------
+// Paid-node completeness audit (S27/AC21). Framework-free so the S31
+// registry-integrity unit test can import it directly: every manifest marked
+// paid (either its own `paid` flag or its spec's) must also declare an
+// `estimateCost` -- a paid node silently falling back to "no estimate" would
+// make the Run Workflow aggregate and the high-cost confirm guardrail both
+// under-count it. Returns an empty array when every paid node is fully wired;
+// otherwise one message per offending kind.
+// ---------------------------------------------------------------------------
+export function auditPaidNodeCoverage(): string[] {
+  const issues: string[] = [];
+  for (const kind of NODE_KINDS) {
+    if (!paidMap[kind]) continue;
+    if (!estimateCostMap[kind]) issues.push(`${kind}: paid:true but no estimateCost declared`);
+  }
+  return issues;
 }

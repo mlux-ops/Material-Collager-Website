@@ -11,9 +11,25 @@ export type NodeKind =
   | "imageEdit"
   | "compare"
   | "saveToLibrary"
-  | "note";
+  | "note"
+  // Phase 2 node kinds (scaffolded; see nodes/<kind>.manifest.ts for specs).
+  | "references"
+  | "referenceAnalyzer"
+  | "referenceFinder"
+  | "libraryPick"
+  | "collageBoard"
+  | "relight"
+  | "variations"
+  | "maskedEdit"
+  | "upscaler"
+  | "accuracyReviewer"
+  | "qaCorrection"
+  | "aiAssistant"
+  | "resize"
+  | "crop"
+  | "exportDownload";
 
-export type NodeStatus = "idle" | "running" | "done" | "error" | "stale";
+export type NodeStatus = "idle" | "running" | "done" | "error" | "stale" | "needs-selection";
 
 export type PortSpec = {
   id: string;
@@ -45,10 +61,38 @@ export type NodeSpec = {
 
 // One entry inside a references value: an ordered group of cached images
 // playing a role (e.g. material, style, context) in downstream generation.
+// Mirrors CollageItemInput (app/lib/collage.ts) so a References node's output
+// items can drive buildGenerationPrompt/ITEM_PRESETS downstream unchanged.
 export type ReferenceItem = {
   id: string;
   role: string;
+  brand?: string;
+  name?: string;
+  finish?: string;
+  notes?: string;
+  required?: boolean;
   imageKeys: string[]; // ordered blob-cache keys for this item's images
+};
+
+// A single candidate returned by POST /api/references/matches.
+export type ReferenceMatchCandidate = {
+  title: string;
+  pageUrl: string;
+  imageUrl: string;
+  sourceLabel: string;
+  official: boolean;
+  confidence: number;
+  reason: string;
+};
+
+// Reference Finder's paused "needs selection" state (AC5): captured when the
+// executor halts after a successful matches call, and consumed when the user
+// picks a candidate to resume the run at resumeTargets.
+export type PendingReferenceSelection = {
+  query: string;
+  candidates: ReferenceMatchCandidate[];
+  resumeTargets: string[]; // the original run() target ids to resume after import
+  signature: string; // the signature captured for this node at pause time
 };
 
 export type ReportItemResult = {
@@ -56,6 +100,10 @@ export type ReportItemResult = {
   passed: boolean;
   score: number;
   findings: string[];
+  // Normalized [x, y, width, height] (0-1000) bounding box for this item, when
+  // the reviewer could locate it. Drives the QA Correction node's mask via
+  // app/lib/selective-edit.ts; absent means the item could not be located.
+  box?: [number, number, number, number];
 };
 
 export type ReportResult = {
@@ -101,6 +149,44 @@ export type WorkbenchParams = {
   savedJobId?: string;
   // compare
   split?: number;
+  // collageBoard
+  collageType?: string;
+  orientation?: string;
+  outputResolution?: string;
+  // referenceAnalyzer
+  itemType?: string;
+  // references
+  referenceItems?: ReferenceItem[];
+  // referenceFinder
+  matchQuery?: string;
+  // libraryPick
+  selectedLibraryId?: string;
+  // variations
+  n?: number;
+  activeCandidate?: number;
+  // maskedEdit — the editable rectangle, normalized 0-1000 (matches
+  // app/lib/selective-edit.ts's NormalizedBox convention); maskCacheKey
+  // caches the rendered PNG mask blob (persisted via persistBlobKeys).
+  maskCacheKey?: string;
+  maskRegionX?: number;
+  maskRegionY?: number;
+  maskRegionWidth?: number;
+  maskRegionHeight?: number;
+  // accuracyReviewer / qaCorrection
+  selectedItemIds?: string[];
+  // aiAssistant
+  instruction?: string;
+  model?: string;
+  // resize
+  targetWidth?: number;
+  targetHeight?: number;
+  // crop
+  cropX?: number;
+  cropY?: number;
+  cropWidth?: number;
+  cropHeight?: number;
+  // exportDownload
+  exportFormat?: "png" | "jpeg";
 };
 
 export type WorkbenchNodeData = {
@@ -111,6 +197,16 @@ export type WorkbenchNodeData = {
   runs: NodeRun[];       // newest first, capped
   activeRun: number;     // index into runs shown on the node
   progress?: string;     // short status line while running
+  // Present only while status is "needs-selection" (Reference Finder, AC5).
+  pendingSelection?: PendingReferenceSelection;
+  // Output pinning (AC15): index into `runs` the user has locked in as this
+  // node's permanent output. Undefined/null means unpinned. A pinned node's
+  // executor entry is honored BEFORE the signature check (signature.ts's
+  // isPinned/activeRunOf) -- it never re-runs or re-bills even when its own
+  // params or an ancestor changed, and it is exempt from the persistence
+  // byte-budget's oldest-unpinned eviction (persistence.ts). Always rendered
+  // as a visible badge (NodeShell) -- pinning is never silent.
+  pinnedOutput?: number | null;
   [key: string]: unknown;
 };
 
@@ -130,11 +226,18 @@ export const PORT_COLORS: Record<PortKind, string> = {
 
 // Import-validation rule for one param key: listed keys are checked against
 // their declared type/enum/caps; keys not listed at all are rejected.
+// "referenceItemList" is the one generic, kind-agnostic structural rule
+// (rather than a hand-maintained per-kind exception): it describes a
+// ReferenceItem[]-shaped param field, letting the strict import validator
+// (export-import.ts) sanitize + cap it and remap its nested imageKeys through
+// the same blob-key-ownership check every other blob-bearing field gets,
+// without export-import.ts ever special-casing a specific node kind.
 export type ImportParamRule =
   | { type: "string"; optional?: boolean; maxLength?: number }
   | { type: "number"; optional?: boolean; min?: number; max?: number; integer?: boolean }
   | { type: "boolean"; optional?: boolean }
-  | { type: "enum"; optional?: boolean; values: readonly string[] };
+  | { type: "enum"; optional?: boolean; values: readonly string[] }
+  | { type: "referenceItemList"; optional?: boolean; maxItems?: number; maxImagesPerItem?: number };
 
 // Registry-owned, authoritative import-validation metadata for one node kind.
 export type ImportSchema = {
@@ -156,6 +259,10 @@ export type ExecuteContext = {
   createRunId: () => string;
   applyRun: (run: NodeRun) => void;
   setProgress: (message: string) => void; // short status line while running
+  // Human-in-the-loop pause (AC5, Reference Finder only): halts the current
+  // run in a "needs selection" status instead of applying a run. Downstream
+  // nodes stay idle until the user picks a candidate and resumes.
+  setAwaitingSelection: (payload: { query: string; candidates: ReferenceMatchCandidate[] }) => void;
 };
 
 export type NodeExecute = (ctx: ExecuteContext) => Promise<void>;
@@ -184,8 +291,21 @@ export type NodeManifest = {
   // changes the effective request (quality/size). Nodes without a cheaper
   // variant omit it so the draft toggle never perturbs their signature.
   draftOverride?: (params: WorkbenchParams) => WorkbenchParams;
+  // OPTIONAL split-blob persistence declaration (see persistence.ts): pure
+  // function returning the fully-qualified blob-cache keys (e.g.
+  // `${nodeId}:src`) this node instance currently owns uploaded-image bytes
+  // under, given its id and effective params. Any node that owns uploaded
+  // images (Photo source, References items, ...) declares this so its blobs
+  // survive reload via the generic split-blob pattern -- persistence.ts
+  // itself stays free of any per-kind gating.
+  persistBlobKeys?: (nodeId: string, params: WorkbenchParams) => string[];
 };
 
 // NODE_SPECS/specFor/defaultParams are reconstructed from the per-node
-// manifest registry; re-exported here so existing imports keep working.
-export { NODE_SPECS, defaultParams, specFor } from "./nodes/manifests";
+// manifest registry; re-exported here so existing imports keep working. The
+// explicit .ts extension is required (not merely stylistic): this is a real
+// (value) re-export, so it needs to resolve under Node's
+// --experimental-strip-types loader for any framework-free module that
+// imports a VALUE (not just a type) from this file -- e.g. acceptedKindsFor
+// below, which export-import.ts's validator imports at runtime.
+export { NODE_SPECS, defaultParams, specFor } from "./nodes/manifests.ts";

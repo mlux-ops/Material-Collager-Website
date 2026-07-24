@@ -3,7 +3,7 @@
 // per-item verdict with normalized bounding boxes. Extracted verbatim from the
 // generator's /api/generate route; the domain string only swaps the prompt's
 // subject noun so interior/exterior render callers can reuse the same review.
-import { readOpenAIResponse } from "@/app/lib/openai-server";
+import { readOpenAIResponse } from "./openai-server.ts";
 
 type OpenAIResponseOutput = {
   output_text?: string;

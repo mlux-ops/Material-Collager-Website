@@ -3,7 +3,7 @@
 // per-attempt diagnostics. Used by /api/generate (collage pipeline) and
 // /api/workbench/* (node editor).
 
-import { OpenAIRequestError, readOpenAIResponse } from "@/app/lib/openai-server";
+import { OpenAIRequestError, combineAbortSignals, readOpenAIResponse } from "./openai-server.ts";
 
 export type ImageQuality = "low" | "medium" | "high" | "auto";
 
@@ -72,7 +72,13 @@ export class DiagnosedGenerationError extends Error {
 
 const IMAGE_RETRY_DELAYS_MS = [1500];
 
-export async function createImageEdit(apiKey: string, body: ImageEditRequest, diagnostics: AttemptDiagnostic[], retry = true) {
+export async function createImageEdit(
+  apiKey: string,
+  body: ImageEditRequest,
+  diagnostics: AttemptDiagnostic[],
+  retry = true,
+  callerSignal?: AbortSignal,
+) {
   let lastError: unknown;
   const retryDelays = retry ? IMAGE_RETRY_DELAYS_MS : [];
 
@@ -97,7 +103,11 @@ export async function createImageEdit(apiKey: string, body: ImageEditRequest, di
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}` },
         body: form,
-        signal: AbortSignal.timeout(300_000),
+        // E1 cancellation threading: combine the caller's AbortSignal (aborted
+        // when the client fetch to /api/workbench/edit is cancelled) with the
+        // 300s hard timeout, so BOTH a client cancel and the timeout abort
+        // this upstream OpenAI call.
+        signal: combineAbortSignals(callerSignal, 300_000),
       });
       const data = await readOpenAIResponse<OpenAIImageResponse>(response);
       diagnostics.push({ stage: "image_edit", outcome: "succeeded", attempt: attempt + 1, durationMs: Date.now() - startedAt, size: body.size });
@@ -130,6 +140,7 @@ export async function createImageGeneration(
   apiKey: string,
   body: { prompt: string; size: string; quality: ImageQuality; n?: number },
   diagnostics: AttemptDiagnostic[],
+  callerSignal?: AbortSignal,
 ) {
   const startedAt = Date.now();
   try {
@@ -144,7 +155,8 @@ export async function createImageGeneration(
         output_format: "png",
         ...(body.n && body.n > 1 ? { n: body.n } : {}),
       }),
-      signal: AbortSignal.timeout(300_000),
+      // E1 cancellation threading — see createImageEdit above.
+      signal: combineAbortSignals(callerSignal, 300_000),
     });
     const data = await readOpenAIResponse<OpenAIImageResponse>(response);
     diagnostics.push({ stage: "image_edit", outcome: "succeeded", attempt: 1, durationMs: Date.now() - startedAt, size: body.size });
@@ -206,4 +218,47 @@ export function validateEditSize(size: string): string | null {
   if (pixels < 655_360) return "Total pixels must be at least 655,360 (e.g. 1024x640).";
   if (pixels > 8_294_400) return "Total pixels cannot exceed 8,294,400 (3840x2160).";
   return null;
+}
+
+// Conforms arbitrary dimensions to the same gpt-image-2 constraints
+// validateEditSize checks (divisible by 16, aspect 1:3-3:1, longest edge
+// <=3840, total pixels 655,360-8,294,400). Used by zero-token client nodes
+// (Resize/Crop) so a downstream edit node's input always passes
+// validateEditSize without a wasted paid round trip. Pure math — no DOM/
+// canvas access — so it runs equally well in the browser (Resize/Crop) or on
+// the server.
+export function clampToValidEditSize(rawWidth: number, rawHeight: number): { width: number; height: number } {
+  const roundTo16 = (value: number) => Math.max(16, Math.round(value / 16) * 16);
+
+  let width = roundTo16(rawWidth || 16);
+  let height = roundTo16(rawHeight || 16);
+
+  // A few passes converge aspect/longest-edge/pixel-count clamps back onto a
+  // multiple of 16 (each clamp can nudge the other constraints slightly).
+  for (let pass = 0; pass < 6; pass += 1) {
+    if (validateEditSize(`${width}x${height}`) === null) break;
+
+    if (width / height > 3) width = roundTo16(height * 3);
+    else if (height / width > 3) height = roundTo16(width * 3);
+
+    const longest = Math.max(width, height);
+    if (longest > 3840) {
+      const scale = 3840 / longest;
+      width = roundTo16(width * scale);
+      height = roundTo16(height * scale);
+    }
+
+    const pixels = width * height;
+    if (pixels > 8_294_400) {
+      const scale = Math.sqrt(8_294_400 / pixels);
+      width = roundTo16(width * scale);
+      height = roundTo16(height * scale);
+    } else if (pixels < 655_360) {
+      const scale = Math.sqrt(655_360 / pixels);
+      width = roundTo16(width * scale);
+      height = roundTo16(height * scale);
+    }
+  }
+
+  return { width, height };
 }

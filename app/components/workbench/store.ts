@@ -9,6 +9,7 @@ import {
   type NodeChange,
 } from "@xyflow/react";
 import { releaseByPrefix } from "./blob-cache";
+import { NODE_KINDS } from "./nodes/manifests";
 import {
   acceptedKindsFor,
   defaultParams,
@@ -16,6 +17,8 @@ import {
   type NodeKind,
   type NodeRun,
   type NodeStatus,
+  type PendingReferenceSelection,
+  type PortKind,
   type WorkbenchNode,
   type WorkbenchParams,
 } from "./types";
@@ -64,6 +67,23 @@ export function connectionIsValid(nodes: WorkbenchNode[], edges: Edge[], connect
   return true;
 }
 
+// Node kinds with a compatible port for a wire dropped on empty canvas
+// (S29/AC24, drag-wire-to-empty-canvas): derived from the registry, never a
+// hand-maintained list. Dragging from a SOURCE (output) handle of kind
+// `portKind` looks for candidates with an INPUT port that accepts it (reusing
+// acceptedKindsFor -- the same rule connectionIsValid enforces, so a wire
+// completed this way is always one connectionIsValid would already accept);
+// dragging from a TARGET (input) handle looks for candidates with an OUTPUT
+// port of exactly that kind.
+export function nodeKindsForWire(handleType: "source" | "target", portKind: PortKind): NodeKind[] {
+  return NODE_KINDS.filter((candidate) => {
+    const spec = specFor(candidate);
+    return handleType === "source"
+      ? spec.inputs.some((port) => acceptedKindsFor(port).includes(portKind))
+      : spec.outputs.some((port) => port.kind === portKind);
+  });
+}
+
 export function downstreamOf(edges: Edge[], nodeId: string): Set<string> {
   const outgoing = new Map<string, string[]>();
   for (const edge of edges) {
@@ -95,18 +115,43 @@ type WorkbenchStore = {
   // sign) their cheaper draft variant. No UI toggles it yet; the executor and
   // signature already honor it.
   draft: boolean;
-  dirtyStamp: number; // bumped on any persistable change; drives autosave
+  dirtyStamp: number; // bumped on any persistable change (incl. drags); drives the lightweight structure-only autosave
+  // Bumped ONLY on new-run, pin-toggle, and upload/source-change events --
+  // never on position drags or plain param edits. Drives the separate,
+  // heavier autosave pass that reads/writes the split-blob store and runs
+  // byte-budget eviction (persistence.ts's saveGraph), so dragging a node
+  // around the canvas never touches a single blob (AC16).
+  blobStamp: number;
   onNodesChange: (changes: NodeChange<WorkbenchNode>[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   onConnect: (connection: Connection) => void;
-  addNode: (kind: NodeKind, position: { x: number; y: number }) => void;
+  // Returns the new node's id so callers (e.g. Spotlight's drag-wire-to-empty-
+  // canvas flow) can immediately wire an edge to/from it.
+  addNode: (kind: NodeKind, position: { x: number; y: number }) => string;
   updateParams: (id: string, patch: Partial<WorkbenchParams>) => void;
   setStatus: (id: string, status: NodeStatus, error?: string, progress?: string) => void;
   applyRun: (id: string, run: NodeRun) => void;
+  // Reference Finder's human-in-the-loop pause (AC5): parks the node in
+  // "needs-selection" with its candidates instead of a completed run.
+  setPendingSelection: (id: string, pending: PendingReferenceSelection) => void;
   setActiveRun: (id: string, index: number) => void;
+  // Output pinning (AC15): pins `runs[index]` as this node's permanent
+  // output (also browses to it), or clears the pin with index null. A
+  // history entry is "promoted to pinned" by calling this with its index.
+  setPinned: (id: string, index: number | null) => void;
   setRunning: (running: boolean) => void;
   setDraft: (draft: boolean) => void;
+  // Explicit blob-ownership-changed event for the rare mutation path that
+  // doesn't already go through applyRun/setPinned (maskedEdit's mask upload
+  // rewrites maskCacheKey via updateParams alone -- see maskedEdit.tsx).
+  touchBlobs: () => void;
   loadGraph: (nodes: WorkbenchNode[], edges: Edge[]) => void;
+  // Appends a pre-built subgraph onto whatever's already on the canvas
+  // (rather than replacing it, unlike loadGraph) -- shared by the templates
+  // gallery (AC19, always onto an empty canvas) and JSON import (AC18, which
+  // may add to an existing graph). New nodes may carry freshly cached blobs,
+  // so this bumps blobStamp too (the heavier autosave pass persists them).
+  importGraph: (nodes: WorkbenchNode[], edges: Edge[]) => void;
 };
 
 export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
@@ -115,15 +160,21 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
   running: false,
   draft: false,
   dirtyStamp: 0,
+  blobStamp: 0,
 
   onNodesChange: (changes) => {
     for (const change of changes) {
       if (change.type === "remove") releaseByPrefix(`${change.id}:`);
     }
-    const structural = changes.some((change) => change.type === "remove" || change.type === "position");
+    const removed = changes.some((change) => change.type === "remove");
+    const structural = removed || changes.some((change) => change.type === "position");
     set((state) => ({
       nodes: applyNodeChanges(changes, state.nodes),
       dirtyStamp: structural ? Date.now() : state.dirtyStamp,
+      // A removed node's blobs need GC'ing out of the persisted store too
+      // (not just the in-memory cache above) -- that's a blob-ownership
+      // change, unlike a plain position drag.
+      blobStamp: removed ? Date.now() : state.blobStamp,
     }));
   },
 
@@ -188,6 +239,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
       data: { kind, params: defaultParams(kind), status: "idle", runs: [], activeRun: 0 },
     };
     set((state) => ({ nodes: [...state.nodes, node], dirtyStamp: Date.now() }));
+    return node.id;
   },
 
   updateParams: (id, patch) => {
@@ -222,8 +274,44 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
       nodes: state.nodes.map((node) => {
         if (node.id !== id) return node;
         const runs = [run, ...node.data.runs].slice(0, MAX_RUNS_PER_NODE);
-        return { ...node, data: { ...node.data, runs, activeRun: 0, status: "done" as const, error: undefined, progress: undefined } };
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            runs,
+            activeRun: 0,
+            // A brand-new run invalidates any previously pinned index -- it
+            // no longer points at the same content. Clearing it here (rather
+            // than leaving a stale index silently pointing at the wrong run)
+            // keeps the pin badge truthful for the call sites that add a run
+            // directly, bypassing the executor's pin guard (Photo re-upload,
+            // References edits, Variations' candidate reselection). The
+            // executor itself never calls applyRun for a pinned node, so this
+            // is a no-op on the normal paid-node re-run path.
+            pinnedOutput: undefined,
+            status: "done" as const,
+            error: undefined,
+            progress: undefined,
+            pendingSelection: undefined,
+          },
+        };
       }),
+      // New-run event (AC16): drives both the structure autosave (the run's
+      // metadata is part of the graph JSON) and the heavier blob write/GC
+      // pass (persistence.ts's saveGraph persists this node's fresh active
+      // output).
+      dirtyStamp: Date.now(),
+      blobStamp: Date.now(),
+    }));
+  },
+
+  setPendingSelection: (id, pending) => {
+    set((state) => ({
+      nodes: state.nodes.map((node) =>
+        node.id === id
+          ? { ...node, data: { ...node.data, pendingSelection: pending, status: "needs-selection" as const, error: undefined, progress: undefined } }
+          : node,
+      ),
     }));
   },
 
@@ -237,9 +325,41 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
     }));
   },
 
+  // Output pinning (AC15). Pinning also browses to the pinned entry (so the
+  // card displays exactly what's now protected); unpinning (index null)
+  // leaves activeRun where it is. Pin-toggle is one of the three events that
+  // trigger the heavier blob write/GC autosave pass (AC16), so both stamps
+  // bump: the pin flag is part of the graph-structure JSON, and the pinned
+  // run's blobs must be durably written (and exempted from byte-budget
+  // eviction) right away rather than waiting for the next unrelated run.
+  setPinned: (id, index) => {
+    set((state) => ({
+      nodes: state.nodes.map((node) => {
+        if (node.id !== id) return node;
+        if (index === null) return { ...node, data: { ...node.data, pinnedOutput: undefined } };
+        if (index < 0 || index >= node.data.runs.length) return node;
+        return { ...node, data: { ...node.data, pinnedOutput: index, activeRun: index } };
+      }),
+      dirtyStamp: Date.now(),
+      blobStamp: Date.now(),
+    }));
+  },
+
   setRunning: (running) => set({ running }),
 
   setDraft: (draft) => set({ draft }),
 
-  loadGraph: (nodes, edges) => set({ nodes, edges, dirtyStamp: 0 }),
+  touchBlobs: () => set({ blobStamp: Date.now() }),
+
+  loadGraph: (nodes, edges) => set({ nodes, edges, dirtyStamp: 0, blobStamp: 0 }),
+
+  importGraph: (nodes, edges) => {
+    if (!nodes.length && !edges.length) return;
+    set((state) => ({
+      nodes: [...state.nodes, ...nodes],
+      edges: [...state.edges, ...edges],
+      dirtyStamp: Date.now(),
+      blobStamp: Date.now(),
+    }));
+  },
 }));

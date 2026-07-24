@@ -4,14 +4,29 @@
 
 import type { NodeExecute, NodeKind } from "../types";
 import { MANIFESTS, NODE_KINDS } from "./manifests";
+import { Component as AccuracyReviewerComponent, execute as accuracyReviewerExecute } from "./accuracyReviewer";
+import { Component as AiAssistantComponent, execute as aiAssistantExecute } from "./aiAssistant";
+import { Component as CollageBoardComponent, execute as collageBoardExecute } from "./collageBoard";
 import { Component as CompareComponent } from "./compare";
+import { Component as CropComponent, execute as cropExecute } from "./crop";
+import { Component as ExportDownloadComponent, execute as exportDownloadExecute } from "./exportDownload";
 import { Component as ImageEditComponent, execute as imageEditExecute } from "./imageEdit";
 import { Component as ImageGenerateComponent, execute as imageGenerateExecute } from "./imageGenerate";
+import { Component as LibraryPickComponent, execute as libraryPickExecute } from "./libraryPick";
+import { Component as MaskedEditComponent, execute as maskedEditExecute } from "./maskedEdit";
 import { Component as NoteComponent } from "./note";
 import { Component as PhotoComponent } from "./photo";
 import { Component as PromptBuilderComponent } from "./promptBuilder";
+import { Component as QaCorrectionComponent, execute as qaCorrectionExecute } from "./qaCorrection";
+import { Component as ReferenceAnalyzerComponent, execute as referenceAnalyzerExecute } from "./referenceAnalyzer";
+import { Component as ReferenceFinderComponent } from "./referenceFinder";
+import { Component as ReferencesComponent } from "./references";
+import { Component as RelightComponent, execute as relightExecute } from "./relight";
+import { Component as ResizeComponent, execute as resizeExecute } from "./resize";
 import { Component as SaveToLibraryComponent, execute as saveToLibraryExecute } from "./saveToLibrary";
 import { Component as TextComponent } from "./text";
+import { Component as UpscalerComponent, execute as upscalerExecute } from "./upscaler";
+import { Component as VariationsComponent, execute as variationsExecute } from "./variations";
 
 export const NODE_TYPES = {
   photo: PhotoComponent,
@@ -22,6 +37,22 @@ export const NODE_TYPES = {
   compare: CompareComponent,
   saveToLibrary: SaveToLibraryComponent,
   note: NoteComponent,
+  // Phase 2 node kinds.
+  references: ReferencesComponent,
+  referenceAnalyzer: ReferenceAnalyzerComponent,
+  referenceFinder: ReferenceFinderComponent,
+  libraryPick: LibraryPickComponent,
+  collageBoard: CollageBoardComponent,
+  relight: RelightComponent,
+  variations: VariationsComponent,
+  maskedEdit: MaskedEditComponent,
+  upscaler: UpscalerComponent,
+  accuracyReviewer: AccuracyReviewerComponent,
+  qaCorrection: QaCorrectionComponent,
+  aiAssistant: AiAssistantComponent,
+  resize: ResizeComponent,
+  crop: CropComponent,
+  exportDownload: ExportDownloadComponent,
 };
 
 // DOM-touching execute wrappers exported by the .tsx modules. Each wrapper
@@ -30,6 +61,19 @@ const DOM_EXECUTES: Partial<Record<NodeKind, NodeExecute>> = {
   imageGenerate: imageGenerateExecute,
   imageEdit: imageEditExecute,
   saveToLibrary: saveToLibraryExecute,
+  referenceAnalyzer: referenceAnalyzerExecute,
+  libraryPick: libraryPickExecute,
+  resize: resizeExecute,
+  crop: cropExecute,
+  exportDownload: exportDownloadExecute,
+  accuracyReviewer: accuracyReviewerExecute,
+  qaCorrection: qaCorrectionExecute,
+  aiAssistant: aiAssistantExecute,
+  collageBoard: collageBoardExecute,
+  relight: relightExecute,
+  variations: variationsExecute,
+  maskedEdit: maskedEditExecute,
+  upscaler: upscalerExecute,
 };
 
 // Full execute map: a node's DOM wrapper wins; otherwise the manifest's
@@ -48,6 +92,7 @@ export function isExecutable(kind: NodeKind): boolean {
 
 // Re-exports so the registry is a one-stop import site for browser modules.
 export {
+  auditPaidNodeCoverage,
   defaultParams,
   draftOverrideMap,
   estimateCostMap,

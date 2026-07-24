@@ -12,6 +12,8 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "test:scene-lab": "node --experimental-strip-types --test tests/scene-lab.test.mjs",
     "test:access": "node --experimental-strip-types --test tests/access-jwt.test.mjs",
+    "test:workbench-export-import": "node --experimental-strip-types --test tests/workbench-export-import.test.mjs",
+    "test:workbench": "node --experimental-strip-types --test tests/workbench-*.test.mjs",
     "db:generate": "drizzle-kit generate",
     "test:release-readiness": "node --test tests/release-readiness.test.mjs",
     "validate:rights": "node scripts/validate-release-collage-rights.mjs",

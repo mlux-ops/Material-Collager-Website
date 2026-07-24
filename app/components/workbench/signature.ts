@@ -16,7 +16,20 @@ function hash(value: string): string {
   return h.toString(36);
 }
 
+// A valid pin: an index that still resolves inside the current `runs` array
+// (a node's runs array only ever grows via applyRun while unpinned -- see
+// executor.ts -- so this stays valid for as long as the pin is held).
+export function isPinned(node: WorkbenchNode): boolean {
+  const pinned = node.data.pinnedOutput;
+  return pinned !== undefined && pinned !== null && pinned >= 0 && pinned < node.data.runs.length;
+}
+
+// The run a node currently shows/propagates downstream. A pin wins over
+// activeRun (setPinned keeps them in sync at pin time, but this stays correct
+// even if they ever drift): pinning is the authoritative "this is the output"
+// declaration the executor and downstream signatures must honor.
 export function activeRunOf(node: WorkbenchNode): NodeRun | undefined {
+  if (isPinned(node)) return node.data.runs[node.data.pinnedOutput as number];
   return node.data.runs[node.data.activeRun] ?? node.data.runs[0];
 }
 

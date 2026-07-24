@@ -79,6 +79,9 @@ export async function POST(request: Request) {
       attempts,
     };
 
+    // E1 cancellation threading: request.signal aborts when the client fetch
+    // to this route is cancelled (the executor's run AbortSignal). Thread it
+    // into the upstream OpenAI call so cancel aborts the paid request too.
     const result = references.length
       ? await createImageEdit(apiKey, {
           model: "gpt-image-2",
@@ -90,8 +93,8 @@ export async function POST(request: Request) {
           background: "opaque",
           output_format: "png",
           n,
-        }, attempts)
-      : await createImageGeneration(apiKey, { prompt, size, quality, n }, attempts);
+        }, attempts, true, request.signal)
+      : await createImageGeneration(apiKey, { prompt, size, quality, n }, attempts, request.signal);
 
     const images = (result.data.data ?? []).map((entry) => entry.b64_json).filter((value): value is string => Boolean(value));
     if (!images.length) throw new Error("OpenAI did not return image data.");

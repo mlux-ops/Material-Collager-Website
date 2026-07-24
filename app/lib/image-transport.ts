@@ -24,6 +24,58 @@ export function base64ImageToObjectUrl(base64: string, mimeType: string) {
   return URL.createObjectURL(new Blob([bytes], { type: mimeType || "image/png" }));
 }
 
+export async function fileToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
+}
+
+// Accuracy review is layout/box-oriented, not pixel-detail: downscale review
+// images aggressively before base64-encoding them into the JSON review
+// request, so a many-reference board still respects the 32MB request-body
+// cap. Separate from optimizeReferencesForTransport (which targets a shared
+// byte budget for direct multipart generation references).
+export const REVIEW_IMAGE_MAX_DIMENSION = 1024;
+export const REVIEW_IMAGE_BYTE_BUDGET = 350 * 1024;
+
+export async function downscaleForReview(file: File, maxDimension = REVIEW_IMAGE_MAX_DIMENSION, budget = REVIEW_IMAGE_BYTE_BUDGET): Promise<File> {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context) throw new Error(`Could not prepare ${file.name || "image"} for review.`);
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, height);
+    context.drawImage(bitmap, 0, 0, width, height);
+
+    let best: Blob | null = null;
+    for (const quality of [0.82, 0.72, 0.62, 0.52, 0.42]) {
+      const blob = await new Promise<Blob>((resolve, reject) =>
+        canvas.toBlob(
+          (value) => value ? resolve(value) : reject(new Error(`Could not encode ${file.name || "image"} for review.`)),
+          "image/jpeg",
+          quality,
+        ),
+      );
+      best = !best || blob.size < best.size ? blob : best;
+      if (blob.size <= budget) break;
+    }
+    if (!best) throw new Error(`Could not encode ${file.name || "image"} for review.`);
+    return new File([best], "review.jpg", { type: "image/jpeg", lastModified: Date.now() });
+  } finally {
+    bitmap.close();
+  }
+}
+
 export async function optimizeReferencesForTransport(files: File[], budget = DIRECT_REQUEST_REFERENCE_BUDGET) {
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
   if (totalBytes <= budget) return files;
