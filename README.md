@@ -8,12 +8,24 @@ Generation uses high input fidelity, item-by-item image mapping, explicit editor
 
 ## Local Development
 
+Requires Node.js 22.13+ (see `engines` in `package.json`).
+
 ```powershell
+git clone https://github.com/mlux-ops/Material-Collager-Website.git
+cd Material-Collager-Website
 npm install
+cp .dev.vars.example .dev.vars   # then fill in OPENAI_API_KEY
 npm run dev
 ```
 
-Open the local URL shown in the terminal.
+Open the local URL shown in the terminal. `npm run dev` runs on Miniflare, which
+simulates the Cloudflare D1/R2 bindings declared in `wrangler.jsonc` — no
+Cloudflare account is needed for local development.
+
+Using [Claude Code](https://claude.com/claude-code) locally against this repo
+(rather than a remote/cloud session) gives full CLI features, including
+`/plugin` and its marketplace. See `docs/DEPLOYING.md` for how pushes to
+`main` deploy to the hosted Cloudflare Worker.
 
 ## Production Build
 
@@ -23,9 +35,12 @@ npm run build
 
 ## Runtime Environment
 
-The hosted app uses `OPENAI_API_KEY` when configured as a Sites runtime secret.
+The deployed Worker uses `OPENAI_API_KEY` as a Cloudflare Workers secret (see
+`docs/DEPLOYING.md`). Locally, set it in `.dev.vars` (git-ignored).
 
-If the server key is not configured, the UI also accepts a per-request API key in the password field. That key is sent only with the generation request and is not stored by the app.
+If no server key is configured, the UI also accepts a per-request API key in
+the password field. That key is sent only with the generation request and is
+not stored by the app.
 
 Optional:
 

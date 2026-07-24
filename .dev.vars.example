@@ -1,0 +1,8 @@
+# Copy this file to .dev.vars (git-ignored) for local development.
+# `npm run dev` runs on Miniflare, which reads .dev.vars the same way
+# Cloudflare Workers reads production secrets.
+
+OPENAI_API_KEY=sk-...
+
+# Optional overrides — see README.md "Runtime Environment".
+# MATERIAL_COLLAGER_QA_MODEL=gpt-5.6
