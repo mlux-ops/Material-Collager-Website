@@ -91,6 +91,10 @@ type WorkbenchStore = {
   nodes: WorkbenchNode[];
   edges: Edge[];
   running: boolean;
+  // Global run-mode flag: when true, nodes declaring a draftOverride run (and
+  // sign) their cheaper draft variant. No UI toggles it yet; the executor and
+  // signature already honor it.
+  draft: boolean;
   dirtyStamp: number; // bumped on any persistable change; drives autosave
   onNodesChange: (changes: NodeChange<WorkbenchNode>[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
@@ -101,6 +105,7 @@ type WorkbenchStore = {
   applyRun: (id: string, run: NodeRun) => void;
   setActiveRun: (id: string, index: number) => void;
   setRunning: (running: boolean) => void;
+  setDraft: (draft: boolean) => void;
   loadGraph: (nodes: WorkbenchNode[], edges: Edge[]) => void;
 };
 
@@ -108,6 +113,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
   nodes: [],
   edges: [],
   running: false,
+  draft: false,
   dirtyStamp: 0,
 
   onNodesChange: (changes) => {
@@ -232,6 +238,8 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
   },
 
   setRunning: (running) => set({ running }),
+
+  setDraft: (draft) => set({ draft }),
 
   loadGraph: (nodes, edges) => set({ nodes, edges, dirtyStamp: 0 }),
 }));

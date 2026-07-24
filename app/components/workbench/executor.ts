@@ -1,21 +1,15 @@
 import type { Edge } from "@xyflow/react";
-import { readApiResponse } from "@/app/lib/api-client";
-import { optimizeReferencesForTransport } from "@/app/lib/image-transport";
-import { getBlob, putBlob } from "./blob-cache";
+import { executeMap, isExecutable } from "./nodes/index";
+import { draftOverrideMap } from "./nodes/manifests";
+import { activeRunOf, signatureFor, type SignatureContext } from "./signature";
 import { useWorkbenchStore } from "./store";
-import { specFor, type NodeOutputValue, type NodeRun, type WorkbenchNode } from "./types";
+import { specFor, type ExecuteContext, type NodeOutputValue, type WorkbenchNode } from "./types";
 
 // Client-orchestrated execution: the browser is the scheduler (the host has
 // no server-side queues), one API call per paid node, with ComfyUI-style
-// signature memoization so unchanged nodes never re-run or re-bill.
-
-function hash(value: string): string {
-  let h = 5381;
-  for (let index = 0; index < value.length; index += 1) {
-    h = ((h << 5) + h + value.charCodeAt(index)) >>> 0;
-  }
-  return h.toString(36);
-}
+// signature memoization so unchanged nodes never re-run or re-bill. Node
+// behavior lives in the registry (./nodes): dispatch goes through executeMap,
+// memoization keys through signature.ts.
 
 function createRunId() {
   return globalThis.crypto?.randomUUID?.().slice(0, 8) ?? `${Date.now()}`;
@@ -44,17 +38,13 @@ function currentNode(id: string): WorkbenchNode {
   return node;
 }
 
-function activeRun(node: WorkbenchNode): NodeRun | undefined {
-  return node.data.runs[node.data.activeRun] ?? node.data.runs[0];
-}
-
 // Ordered upstream values arriving at one input port.
 function inputValues(context: GraphContext, nodeId: string, portId: string): NodeOutputValue[] {
   const edges = (context.incoming.get(nodeId) ?? []).filter((edge) => edge.targetHandle === portId);
   const values: NodeOutputValue[] = [];
   for (const edge of edges) {
     const source = currentNode(edge.source);
-    const run = activeRun(source);
+    const run = activeRunOf(source);
     if (!run) continue;
     const spec = specFor(source.data.kind);
     const portIndex = spec.outputs.findIndex((port) => port.id === edge.sourceHandle);
@@ -64,24 +54,12 @@ function inputValues(context: GraphContext, nodeId: string, portId: string): Nod
   return values;
 }
 
-// A node's signature covers its own settings plus the identity (runId) of
-// every upstream output it consumes — matching runIds mean identical inputs,
-// so the cached run can be reused without re-billing.
-function signatureFor(context: GraphContext, node: WorkbenchNode): string {
-  const spec = specFor(node.data.kind);
-  const { savedJobId: _saved, split: _split, ...stableParams } = node.data.params;
-  const upstream = spec.inputs.map((port) => {
-    const edges = (context.incoming.get(node.id) ?? []).filter((edge) => edge.targetHandle === port.id);
-    return edges
-      .map((edge) => {
-        const source = context.nodes.get(edge.source);
-        const live = source ? useWorkbenchStore.getState().nodes.find((candidate) => candidate.id === source.id) : undefined;
-        const run = live ? activeRun(live) : undefined;
-        return `${port.id}<${edge.source}#${run?.runId ?? "unrun"}`;
-      })
-      .join(",");
-  });
-  return hash(JSON.stringify([node.data.kind, stableParams, upstream]));
+function signatureContextFor(context: GraphContext, draft: boolean): SignatureContext {
+  return {
+    incoming: context.incoming,
+    liveNode: (id) => useWorkbenchStore.getState().nodes.find((candidate) => candidate.id === id),
+    draft,
+  };
 }
 
 function ancestorsOf(context: GraphContext, nodeId: string): string[] {
@@ -100,146 +78,27 @@ function ancestorsOf(context: GraphContext, nodeId: string): string[] {
   return result; // already in dependency order (post-order)
 }
 
-// Ordered blob-cache keys behind one upstream value: an image passes its own
-// cacheKey through; a references value expands to its items' imageKeys,
-// following the value's `order` (item ids). Other kinds carry no image data.
-function imageCacheKeysFromValue(value: NodeOutputValue): string[] {
-  if (value.kind === "image") return [value.cacheKey];
-  if (value.kind === "references") {
-    const byId = new Map(value.items.map((item) => [item.id, item]));
-    const orderedIds = value.order.length ? value.order : value.items.map((item) => item.id);
-    const keys: string[] = [];
-    const seen = new Set<string>();
-    for (const id of orderedIds) {
-      const item = byId.get(id);
-      if (!item || seen.has(id)) continue;
-      seen.add(id);
-      keys.push(...item.imageKeys);
-    }
-    return keys;
-  }
-  return [];
-}
-
-function fileFromCacheKey(cacheKey: string): File {
-  const blob = getBlob(cacheKey);
-  if (!blob) throw new Error("An input image is no longer cached. Re-run its node.");
-  return new File([blob], "input.png", { type: blob.type || "image/png" });
-}
-
-async function blobFromImageValue(value: NodeOutputValue): Promise<File> {
-  const [cacheKey] = imageCacheKeysFromValue(value);
-  if (!cacheKey) throw new Error("Expected an image input.");
-  return fileFromCacheKey(cacheKey);
-}
-
-async function executeNode(context: GraphContext, nodeId: string, signature: string): Promise<void> {
-  const store = useWorkbenchStore.getState();
+// Registry dispatch: look the node's execute up in executeMap and hand it an
+// ExecuteContext. Draft mode swaps in the manifest's cheaper effective params
+// for nodes that declare a draftOverride — the same params signatureFor
+// hashes, so the request and its memoization key can never diverge.
+async function executeNode(context: GraphContext, nodeId: string, signature: string, draft: boolean): Promise<void> {
   const node = currentNode(nodeId);
-  const { kind, params } = node.data;
-
-  if (kind === "note" || kind === "compare") return;
-
-  if (kind === "photo") {
-    // Photo runs are created at upload time; nothing to execute.
-    if (!node.data.runs.length) throw new Error("Choose an image for this Photo node first.");
-    return;
-  }
-
-  if (kind === "text") {
-    const text = (params.text ?? "").trim();
-    if (!text) throw new Error("Enter some text first.");
-    store.applyRun(nodeId, { runId: createRunId(), signature, at: Date.now(), values: [[{ kind: "text", text }]] });
-    return;
-  }
-
-  if (kind === "promptBuilder") {
-    const extra = inputValues(context, nodeId, "extra")
-      .map((value) => (value.kind === "text" ? value.text : ""))
-      .filter(Boolean)
-      .join("\n");
-    const domainLine = {
-      interior: "Photorealistic interior architectural rendering. Preserve the room's geometry, camera position, and perspective exactly.",
-      exterior: "Photorealistic exterior architectural rendering. Preserve the building massing, site context, camera position, and perspective exactly.",
-      collage: "Clean editorial material collage on a pure white background, professionally lit, every item cleanly isolated.",
-    }[params.domain ?? "interior"];
-    const parts = [
-      domainLine,
-      params.lighting ? `Lighting: ${params.lighting}.` : "",
-      params.styleDirection ? `Style: ${params.styleDirection}.` : "",
-      params.extraDirection?.trim() ?? "",
-      extra,
-    ].filter(Boolean);
-    store.applyRun(nodeId, { runId: createRunId(), signature, at: Date.now(), values: [[{ kind: "text", text: parts.join("\n") }]] });
-    return;
-  }
-
-  if (kind === "imageGenerate" || kind === "imageEdit") {
-    const promptParts = inputValues(context, nodeId, "prompt")
-      .map((value) => (value.kind === "text" ? value.text : ""))
-      .filter(Boolean);
-    if (!promptParts.length) throw new Error("Connect a prompt (Text or Prompt Builder) first.");
-
-    const form = new FormData();
-    const files: File[] = [];
-    if (kind === "imageEdit") {
-      const base = inputValues(context, nodeId, "image");
-      if (!base.length) throw new Error("Connect an input image first.");
-      files.push(await blobFromImageValue(base[0]));
-    }
-    const references = inputValues(context, nodeId, "references");
-    if (references.length) {
-      // Each plain image contributes one file; a references value expands to
-      // its ordered image cacheKeys.
-      const rawReferences = references.flatMap(imageCacheKeysFromValue).map(fileFromCacheKey);
-      // The base image travels at full quality; supporting references share
-      // the same transport budget the generator uses.
-      const optimized = await optimizeReferencesForTransport(rawReferences);
-      files.push(...optimized);
-    }
-    if (files.length > 16) throw new Error("A node can send at most 16 images.");
-
-    form.append("payload", JSON.stringify({
-      prompt: promptParts.join("\n"),
-      size: params.size || "1536x1024",
-      quality: params.quality || "medium",
-      n: params.candidates || 1,
-    }));
-    for (const file of files) form.append("image[]", file, file.name);
-
-    useWorkbenchStore.getState().setStatus(nodeId, "running", undefined, "Rendering…");
-    const response = await fetch("/api/workbench/edit", { method: "POST", body: form, signal: context.signal })
-      .then((value) => readApiResponse<{ ok: boolean; error?: string; images: string[]; mimeType: string; usage?: Record<string, unknown> }>(value));
-
-    const runId = createRunId();
-    const images: NodeOutputValue[] = response.images.map((base64, index) => {
-      const cacheKey = `${nodeId}:${runId}:${index}`;
-      const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
-      const cachedUrl = putBlob(cacheKey, new Blob([bytes], { type: response.mimeType || "image/png" }));
-      return { kind: "image", url: cachedUrl, cacheKey };
-    });
-    useWorkbenchStore.getState().applyRun(nodeId, { runId, signature, at: Date.now(), values: [images], usage: response.usage });
-    return;
-  }
-
-  if (kind === "saveToLibrary") {
-    const image = inputValues(context, nodeId, "image");
-    if (!image.length) throw new Error("Connect an image to save.");
-    const file = await blobFromImageValue(image[0]);
-    const form = new FormData();
-    form.append("payload", JSON.stringify({ filename: params.filename || "workbench-output.png", prompt: "Workbench output", format: "workbench" }));
-    form.append("image", file, file.name);
-    const response = await fetch("/api/workbench/save", { method: "POST", body: form, signal: context.signal })
-      .then((value) => readApiResponse<{ ok: boolean; error?: string; jobId: string }>(value));
-    useWorkbenchStore.getState().applyRun(nodeId, {
-      runId: createRunId(),
-      signature,
-      at: Date.now(),
-      values: [],
-      usage: { jobId: response.jobId },
-    });
-    return;
-  }
+  const execute = executeMap[node.data.kind];
+  if (!execute) return;
+  const override = draft ? draftOverrideMap[node.data.kind] : undefined;
+  const ctx: ExecuteContext = {
+    nodeId,
+    node,
+    params: override ? override(node.data.params) : node.data.params,
+    signature,
+    signal: context.signal,
+    inputs: (portId) => inputValues(context, nodeId, portId),
+    createRunId,
+    applyRun: (run) => useWorkbenchStore.getState().applyRun(nodeId, run),
+    setProgress: (message) => useWorkbenchStore.getState().setStatus(nodeId, "running", undefined, message),
+  };
+  await execute(ctx);
 }
 
 let currentController: AbortController | null = null;
@@ -255,8 +114,9 @@ export async function runNodes(targetIds: string[]): Promise<void> {
   currentController = controller;
   store.setRunning(true);
   try {
-    const { nodes, edges } = useWorkbenchStore.getState();
+    const { nodes, edges, draft } = useWorkbenchStore.getState();
     const context = buildContext(nodes, edges, controller.signal);
+    const signatureContext = signatureContextFor(context, draft);
 
     // Pull model: each requested node runs after its ancestors, oldest first,
     // deduplicated across targets.
@@ -274,16 +134,16 @@ export async function runNodes(targetIds: string[]): Promise<void> {
     for (const id of order) {
       if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
       const node = currentNode(id);
-      if (node.data.kind === "note" || node.data.kind === "compare") continue;
-      const signature = signatureFor(context, node);
-      const cached = node.data.runs[node.data.activeRun] ?? node.data.runs[0];
+      if (!isExecutable(node.data.kind)) continue;
+      const signature = signatureFor(signatureContext, node);
+      const cached = activeRunOf(node);
       if (cached && cached.signature === signature && node.data.status !== "error") {
         if (node.data.status !== "done") useWorkbenchStore.getState().setStatus(id, "done");
         continue; // cache hit — no re-run, no re-bill
       }
       useWorkbenchStore.getState().setStatus(id, "running");
       try {
-        await executeNode(context, id, signature);
+        await executeNode(context, id, signature, draft);
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
           useWorkbenchStore.getState().setStatus(id, "idle");
@@ -305,7 +165,10 @@ export async function runNodes(targetIds: string[]): Promise<void> {
 
 export async function runAll(): Promise<void> {
   const { nodes, edges } = useWorkbenchStore.getState();
-  // Terminal runnable nodes: everything that nothing else depends on.
+  // Terminal runnable nodes: everything that nothing else depends on. Non-
+  // executable terminals (e.g. compare) stay in as targets so their
+  // ancestors still run; notes have no inputs, so excluding them just keeps
+  // the schedule clean.
   const withOutgoing = new Set(edges.map((edge) => edge.source));
   const terminals = nodes
     .filter((node) => !withOutgoing.has(node.id) && node.data.kind !== "note")

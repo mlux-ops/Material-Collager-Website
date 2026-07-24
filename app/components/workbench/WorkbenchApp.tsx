@@ -15,14 +15,12 @@ import {
   type IsValidConnection,
 } from "@xyflow/react";
 import { useShallow } from "zustand/react/shallow";
-import { NODE_TYPES } from "./nodes";
+import { NODE_KINDS, NODE_SPECS, NODE_TYPES } from "./nodes/index";
 import { cancelExecution, runAll } from "./executor";
 import { loadGraph, saveGraph } from "./persistence";
 import { connectionIsValid, useWorkbenchStore } from "./store";
 import styles from "./workbench.module.css";
-import { NODE_SPECS, PORT_COLORS, specFor, type NodeKind, type WorkbenchNode } from "./types";
-
-const PALETTE: NodeKind[] = ["photo", "text", "promptBuilder", "imageGenerate", "imageEdit", "compare", "saveToLibrary", "note"];
+import { PORT_COLORS, specFor, type NodeKind, type WorkbenchNode } from "./types";
 
 function CanvasInner() {
   const { nodes, edges, running, onNodesChange, onEdgesChange, onConnect, addNode } = useWorkbenchStore(
@@ -111,7 +109,7 @@ function CanvasInner() {
       <Panel position="top-left">
         <div className={styles.palette}>
           <p className={styles.paletteTitle}>Add node</p>
-          {PALETTE.map((kind) => (
+          {NODE_KINDS.map((kind) => (
             <button key={kind} type="button" className={styles.paletteButton} onClick={() => place(kind)} title={NODE_SPECS[kind].description}>
               {NODE_SPECS[kind].title}
             </button>
