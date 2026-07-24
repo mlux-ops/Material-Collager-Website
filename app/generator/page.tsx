@@ -1034,7 +1034,7 @@ export default function Home() {
       }).then((value) => readApiResponse<{ ok: boolean; error?: string }>(value));
       if (response.ok) {
         setResult((current) => current ? { ...current, libraryVisible: true } : current);
-        setPanelText("Saved to Library. This output will remain available for 30 days.");
+        setPanelText("Saved to Library. This output will remain available for 6 months.");
         await refreshJobs();
       }
     } catch (error) {
@@ -1117,7 +1117,7 @@ export default function Home() {
           signal: controller.signal,
           body: JSON.stringify({ payload: economyPayload }),
         }).then((value) => readApiResponse<{ ok: boolean; error?: string; jobId: string; status: string; estimatedUsd: number }>(value));
-        setPanelText(`Final render queued in Economy. Estimated generation cost: $${queued.estimatedUsd.toFixed(2)} plus reference input. It will remain in History for 30 days.`);
+        setPanelText(`Final render queued in Economy. Estimated generation cost: $${queued.estimatedUsd.toFixed(2)} plus reference input. It will remain in History for 6 months.`);
         await refreshJobs();
         return;
       }

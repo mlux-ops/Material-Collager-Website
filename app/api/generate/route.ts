@@ -248,7 +248,7 @@ export async function POST(request: Request) {
         replaceJobId: selectiveEdit ? payload.libraryJobId : undefined,
       });
     } catch (storageError) {
-      storageNotice = `The collage was generated, but could not be added to 30-day history: ${storageError instanceof Error ? storageError.message : "storage unavailable"}`;
+      storageNotice = `The collage was generated, but could not be added to the six-month history: ${storageError instanceof Error ? storageError.message : "storage unavailable"}`;
     }
 
     return Response.json({

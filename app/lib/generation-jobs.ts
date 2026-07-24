@@ -53,7 +53,10 @@ type RuntimeEnv = {
   OUTPUTS?: R2Bucket;
 };
 
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+// Retention horizon for generated outputs. Exported as the single source of
+// truth: the economy route stamps the same lifetime, and cleanupExpiredJobs
+// deletes both the D1 row and its R2 object once it passes, with no backup.
+export const RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
 
 export function runtimeStorage() {
   return env as unknown as RuntimeEnv;
@@ -125,7 +128,7 @@ async function initJobStorage() {
 let lastCleanupAt = 0;
 
 export async function cleanupExpiredJobs() {
-  // Rows expire on a 30-day horizon; sweeping once per isolate per 10 minutes
+  // Rows expire on a six-month horizon; sweeping once per isolate per 10 minutes
   // is plenty and keeps polled endpoints from paying the cleanup on every hit.
   if (Date.now() - lastCleanupAt < 10 * 60 * 1000) return;
   lastCleanupAt = Date.now();
@@ -179,7 +182,7 @@ export async function persistGenerationOutput(input: {
         JSON.stringify(input.usage ?? {}),
         input.qa ? JSON.stringify(input.qa) : null,
         now,
-        now + THIRTY_DAYS_MS,
+        now + RETENTION_MS,
         input.renderKind,
         input.collageType,
         input.renderKind === "final" ? 1 : 0,
@@ -206,7 +209,7 @@ export async function persistGenerationOutput(input: {
         input.qa ? JSON.stringify(input.qa) : null,
         now,
         now,
-        now + THIRTY_DAYS_MS,
+        now + RETENTION_MS,
       ).run();
   }
   const row = await DB.prepare("SELECT * FROM generation_jobs WHERE id = ?").bind(id).first<JobRow>();

@@ -10,7 +10,7 @@ export const libraryPickManifest: NodeManifest = {
   spec: {
     kind: "libraryPick",
     title: "Library Pick",
-    description: "Pick a saved image from the 30-day library.",
+    description: "Pick a saved image from the six-month library.",
     inputs: [],
     outputs: [{ id: "image", kind: "image", label: "Image" }],
   },

@@ -16,7 +16,7 @@ export const saveToLibraryManifest: NodeManifest = {
   spec: {
     kind: "saveToLibrary",
     title: "Save to Library",
-    description: "Persist an image to the 30-day library.",
+    description: "Persist an image to the six-month library.",
     inputs: [{ id: "image", kind: "image", label: "Image", required: true }],
     outputs: [],
   },

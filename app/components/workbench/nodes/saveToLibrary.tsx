@@ -22,7 +22,7 @@ export const Component = memo(function SaveToLibraryNode({ id, data }: Workbench
       <button type="button" className={styles.smallButton} disabled={running} onClick={() => void runNodes([id])}>
         Save to Library
       </button>
-      {data.status === "done" && savedJobId && <p className={styles.hint}>Saved. It will stay in the Library for 30 days.</p>}
+      {data.status === "done" && savedJobId && <p className={styles.hint}>Saved. It will stay in the Library for 6 months.</p>}
     </NodeShell>
   );
 });

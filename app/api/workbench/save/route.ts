@@ -3,7 +3,7 @@ import { errorResponse } from "@/app/lib/openai-server";
 
 export const runtime = "edge";
 
-// Persists a workbench node output into the shared 30-day history / library
+// Persists a workbench node output into the shared six-month history / library
 // (D1 + R2), the same storage the generator's renders use. renderKind "final"
 // makes it library-visible.
 type WorkbenchSavePayload = {

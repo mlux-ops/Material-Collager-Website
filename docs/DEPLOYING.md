@@ -76,8 +76,11 @@ Rollback: disable the toggle from step 1 and re-comment the `vars` block.
 
 - Local dev is unchanged: `npm run dev` (Miniflare simulates D1/R2 locally;
   the placeholder `database_id` is fine for local work).
-- Data does not migrate from the old hosting: the 30-day history/library
-  starts empty on Cloudflare. Outputs expire after 30 days by design.
+- Data does not migrate from the old hosting: the history/library starts empty
+  on Cloudflare. Outputs expire after six months by design (`RETENTION_MS` in
+  `app/lib/generation-jobs.ts`); expiry hard-deletes the D1 row *and* its R2
+  object, with no backup, so raise that constant before it matters rather than
+  after.
 - Rollback: Workers & Pages → `material-collager` → Deployments → roll back,
   or `git revert` the offending commit and push.
 - The OpenAI **Uploads API** (`POST /v1/uploads`) was blocked from the old

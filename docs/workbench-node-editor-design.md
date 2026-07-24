@@ -52,7 +52,7 @@ Port types (color-coded): **image** (purple), **text** (blue), **references** (a
 | **Photo** (upload) | image | client | PNG/JPEG/WebP < 50 MB; drag-drop onto canvas creates one; thumbnail on card |
 | **Text** | text | client | plain prompt text; supports `@node` mentions interpolated at run time |
 | **References** | references | client | ordered product references, each with id/role/brand/finish/notes — the existing generator's item model as a node; multi-input port accepts Photo outputs |
-| **Library Pick** | image | `GET /api/library` | pick a prior output from 30-day history |
+| **Library Pick** | image | `GET /api/library` | pick a prior output from six-month history |
 
 ### Intelligence
 
@@ -137,7 +137,7 @@ The philosophy: the existing `/api/generate` machinery is ~90% generic; the coll
 
 ### Reused unchanged
 
-`/api/references/analyze`, `/api/references/matches`, `/api/references/import`, `GET /api/library`, `GET /api/library/[id]/image`, `PATCH /api/library/[id]`, `persistGenerationOutput` (workflow outputs slot into the same 30-day D1/R2 history; the graph JSON goes in `payload_json`, workflow template name in `collage_type`).
+`/api/references/analyze`, `/api/references/matches`, `/api/references/import`, `GET /api/library`, `GET /api/library/[id]/image`, `PATCH /api/library/[id]`, `persistGenerationOutput` (workflow outputs slot into the same six-month D1/R2 history; the graph JSON goes in `payload_json`, workflow template name in `collage_type`).
 
 ### Persistence for shared workflows (Phase 3, optional)
 

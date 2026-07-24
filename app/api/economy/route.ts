@@ -1,5 +1,5 @@
 import { activeItems, buildGenerationPrompt, referenceCount, resolvedSize, validateCollageRequest, type CollageRequestInput } from "@/app/lib/collage";
-import { cleanupExpiredJobs, ensureJobStorage, publicJob, runtimeStorage, type JobRow } from "@/app/lib/generation-jobs";
+import { cleanupExpiredJobs, ensureJobStorage, publicJob, RETENTION_MS, runtimeStorage, type JobRow } from "@/app/lib/generation-jobs";
 import { errorResponse, readOpenAIResponse, resolveOpenAIKey } from "@/app/lib/openai-server";
 
 export const runtime = "edge";
@@ -13,7 +13,6 @@ type BatchResponse = {
 };
 
 const COMPLETE_STATUSES = new Set(["completed", "failed", "expired", "cancelled"]);
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
 export async function POST(request: Request) {
   try {
@@ -61,7 +60,7 @@ export async function POST(request: Request) {
         baseEstimate(payload) / 2,
         now,
         now,
-        now + THIRTY_DAYS_MS,
+        now + RETENTION_MS,
       ).run();
     return Response.json({ ok: true, jobId, status: batch.status, estimatedUsd: baseEstimate(payload) / 2 });
   } catch (error) {
@@ -76,7 +75,7 @@ export async function GET() {
     const pending = await DB.prepare("SELECT * FROM generation_jobs WHERE mode = 'economy' AND output_key IS NULL AND status NOT IN ('failed', 'expired', 'cancelled') ORDER BY updated_at ASC LIMIT 8")
       .all<JobRow>();
     // Refresh jobs independently: one job with an unreadable batch output must
-    // not take down the whole history listing for its 30-day lifetime.
+    // not take down the whole history listing for its six-month lifetime.
     await Promise.allSettled(pending.results.map((row: JobRow) => refreshJob(row)));
     const jobs = await DB.prepare("SELECT * FROM generation_jobs ORDER BY created_at DESC LIMIT 30").all<JobRow>();
     return Response.json({ ok: true, jobs: jobs.results.map(publicJob) });
