@@ -396,3 +396,52 @@
     display: none;
   }
 }
+
+/* First-load curtain: a plain white screen whose only content is the percent
+   counter, covering the rail (and its chrome) until the cards can fade in. */
+.loadingVeil {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  background: #fff;
+}
+
+.loadingCount {
+  color: #111;
+  font-size: 11px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.1em;
+}
+
+/* Everything the visitor sees starts transparent and is faded in together
+   once the counter reaches 100%, cards first and chrome just behind them. */
+.page .canvas,
+.page .chrome,
+.page .caption,
+.page .scrollCue {
+  opacity: 0;
+}
+
+.pageRevealed .canvas {
+  opacity: 1;
+  transition: opacity 850ms ease-out;
+}
+
+.pageRevealed .chrome,
+.pageRevealed .caption,
+.pageRevealed .scrollCue {
+  opacity: 1;
+  transition: opacity 650ms ease-out 260ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pageRevealed .canvas,
+  .pageRevealed .chrome,
+  .pageRevealed .caption,
+  .pageRevealed .scrollCue {
+    transition: none;
+  }
+}

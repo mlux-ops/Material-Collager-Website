@@ -16,12 +16,23 @@ import styles from "./scene-wheel-v2.module.css";
 
 const SceneWheelCanvas = dynamic(() => import("./SceneWheelCanvas"), { ssr: false });
 
+// Progress is split so the counter starts moving on the library response and
+// spends the rest of its travel on the card images, which dominate the wait.
+const FETCH_SHARE = 12;
+// A slow or hung image must never trap the visitor on the loading screen.
+const PRELOAD_TIMEOUT_MS = 12000;
+
 export default function SceneWheelV2() {
   const trackRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const targetProgress = useNativeScrollProgress(trackRef);
   const [records, setRecords] = useState<LibraryCollageRecord[]>([]);
   const [libraryState, setLibraryState] = useState<"loading" | "ready" | "fallback">("loading");
+  const [revealed, setRevealed] = useState(false);
+  const countRef = useRef<HTMLParagraphElement>(null);
+  // Written by the fetch + image-preload passes, read by the rAF counter so
+  // progress eases toward the real figure instead of snapping between images.
+  const loadTargetRef = useRef(0);
   const [hoveredItem, setHoveredItem] = useState<SceneLabCollageItem | null>(null);
   const [selectedItem, setSelectedItem] = useState<SceneLabCollageItem | null>(null);
   const cursorLabelRef = useRef<HTMLParagraphElement>(null);
@@ -65,11 +76,13 @@ export default function SceneWheelV2() {
         const parsed = parseLibraryPayload(await response.json());
         if (!parsed.valid) throw new Error(parsed.message);
         const normalized = normalizeLibraryCollageRecords(parsed.records);
+        loadTargetRef.current = Math.max(loadTargetRef.current, FETCH_SHARE);
         setRecords(normalized);
         setLibraryState(normalized.length > 0 ? "ready" : "fallback");
       } catch (error) {
         if (controller.signal.aborted) return;
         console.warn("Scene Wheel V2 is using the lab collage fixtures.", error);
+        loadTargetRef.current = Math.max(loadTargetRef.current, FETCH_SHARE);
         setRecords([]);
         setLibraryState("fallback");
       }
@@ -117,8 +130,96 @@ export default function SceneWheelV2() {
     [records],
   );
 
+  // Preload the card images the canvas is about to turn into textures. Both
+  // share the HTTP cache, so counting these to 100% means the reveal shows
+  // finished cards rather than empty planes still waiting on bytes.
+  useEffect(() => {
+    if (libraryState === "loading") return;
+
+    const urls = catalog.items.map((item) => item.url);
+    if (urls.length === 0) {
+      loadTargetRef.current = 100;
+      return;
+    }
+
+    let settled = 0;
+    let cancelled = false;
+    const images: HTMLImageElement[] = [];
+
+    // Failures still advance the counter: a broken card is the canvas's
+    // problem to render, not a reason to hold the whole page hostage.
+    const settle = () => {
+      if (cancelled) return;
+      settled += 1;
+      const share = FETCH_SHARE + (100 - FETCH_SHARE) * (settled / urls.length);
+      loadTargetRef.current = Math.max(loadTargetRef.current, share);
+    };
+
+    for (const url of urls) {
+      const image = new Image();
+      image.decoding = "async";
+      image.onload = settle;
+      image.onerror = settle;
+      image.src = url;
+      images.push(image);
+    }
+
+    const timeout = window.setTimeout(() => {
+      if (!cancelled) loadTargetRef.current = 100;
+    }, PRELOAD_TIMEOUT_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+      for (const image of images) {
+        image.onload = null;
+        image.onerror = null;
+      }
+    };
+  }, [catalog, libraryState]);
+
+  // Ease the shown number toward the measured target, then hand over to the
+  // fade once it actually reads 100%. The text is written imperatively so a
+  // 60fps counter never re-renders the canvas tree underneath the veil.
+  useEffect(() => {
+    if (revealed) return;
+
+    let frame = 0;
+    let shown = 0;
+    const step = () => {
+      const target = loadTargetRef.current;
+      shown += Math.max((target - shown) * 0.12, target > shown ? 0.25 : 0);
+      if (target >= 100 && shown > 99.4) {
+        if (countRef.current) countRef.current.textContent = "100%";
+        setRevealed(true);
+        return;
+      }
+      if (countRef.current) countRef.current.textContent = `${Math.round(shown)}%`;
+      frame = window.requestAnimationFrame(step);
+    };
+
+    frame = window.requestAnimationFrame(step);
+    return () => window.cancelAnimationFrame(frame);
+  }, [revealed]);
+
+  // The rail is 900vh tall; keep it unscrollable until the cards are visible.
+  useEffect(() => {
+    if (revealed) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [revealed]);
+
   return (
-    <main className={styles.page}>
+    <main className={`${styles.page} ${revealed ? styles.pageRevealed : ""}`} aria-busy={!revealed}>
+      {revealed ? null : (
+        <div className={styles.loadingVeil} role="status" aria-label="Loading library">
+          <p ref={countRef} className={styles.loadingCount}>0%</p>
+        </div>
+      )}
+
       <section
         ref={trackRef}
         className={styles.track}
