@@ -48,9 +48,29 @@ custom domain (must be a zone in this Cloudflare account). The default
 
 The old chatgpt.site hosting sat behind ChatGPT sign-in. **On Cloudflare the
 site is public by default**, and generation spends real OpenAI credit using
-the server key. Unless the site is meant to be public, protect it:
-Zero Trust → Access → Applications → add an application covering the domain
-(free for up to 50 users, e.g. email one-time-PIN for your addresses).
+the server key. Unless the site is meant to be public, protect it with
+Cloudflare Access (free for up to 50 users):
+
+1. Workers & Pages → `material-collager` → Settings → Domains & Routes →
+   on the `workers.dev` row click **Enable Cloudflare Access**. (First-time
+   Zero Trust use asks you to pick a team name, e.g. `shb-studio`.)
+2. Click **Manage Cloudflare Access** and set the Allow policy to
+   **Emails ending in `@shb.studio`** (or list individual addresses). The
+   default one-time-PIN login needs no identity-provider setup.
+3. **Turn on the Worker-side JWT check** (defense-in-depth — guarantees
+   requests can't skip Access even if the app config changes later):
+   uncomment the `vars` block in `wrangler.jsonc` and fill in:
+   - `CF_ACCESS_TEAM_DOMAIN`: `<team>.cloudflareaccess.com`
+   - `CF_ACCESS_AUD`: the application **Audience tag** from Zero Trust →
+     Access → Applications → the auto-created app → Overview.
+   Redeploy. The Worker (`worker/access.ts`) then rejects any request
+   without a valid Access JWT. Do this only *after* step 1, or every
+   request is denied. Local dev is unaffected (vars unset locally).
+4. Validate: open the site in a private window → expect the Access login;
+   a non-studio email should be denied. Zero Trust → Logs → Access shows
+   each decision.
+
+Rollback: disable the toggle from step 1 and re-comment the `vars` block.
 
 ## Notes
 

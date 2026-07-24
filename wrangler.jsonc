@@ -30,6 +30,16 @@
     "binding": "IMAGES"
   },
 
+  // Defense-in-depth for Cloudflare Access (see docs/DEPLOYING.md): the
+  // Worker rejects any request that bypassed the Access login in front of
+  // the workers.dev domain. Values come from Zero Trust -> Access ->
+  // Applications -> material-collager -> Overview. Local dev disables the
+  // check via blank overrides in .dev.vars (no Access proxy on localhost).
+  "vars": {
+    "CF_ACCESS_TEAM_DOMAIN": "dawn-resonance-d86a.cloudflareaccess.com",
+    "CF_ACCESS_AUD": "e5e3fd974be8176910f6fc29cbe180b7ebc73d08b2f3475138567f694b559e15"
+  },
+
   "observability": {
     "enabled": true
   }
