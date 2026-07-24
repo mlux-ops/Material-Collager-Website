@@ -1,5 +1,9 @@
 .shell {
   height: 100dvh;
+  /* .site-navigation is position:fixed at 58px tall, so it is out of flow and
+     would otherwise cover the top of the canvas (and the palette's heading)
+     and the Inspector. Same offset the library stage uses. */
+  padding-top: 58px;
   display: flex;
   flex-direction: column;
   background: var(--mono-off-white, #fafafa);
@@ -25,15 +29,25 @@
   flex-wrap: wrap;
 }
 
+/* Floating add-node window pinned to the left of the canvas. It owns a real
+   width (the old 180px clamp squeezed the 260px spotlight inside it) and caps
+   its height against the viewport so the list scrolls instead of running off
+   the bottom of the screen. */
 .palette {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 10px;
   background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.2);
-  border-radius: 10px;
-  padding: 10px;
-  max-width: 180px;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 12px;
+  padding: 14px;
+  width: 264px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.13);
+  /* Canvas height (100dvh - 58px header) less the panel's 15px margins, with
+     a little slack so the window never touches the canvas edge. */
+  max-height: calc(100dvh - 108px);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .paletteTitle {
@@ -41,22 +55,8 @@
   letter-spacing: 0.1575px;
   text-transform: uppercase;
   color: rgba(0, 0, 0, 0.55);
-  margin: 0 0 4px;
-}
-
-.paletteButton {
-  font-size: 11px;
-  text-align: left;
-  background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.15);
-  border-radius: 7px;
-  padding: 5px 8px;
-  cursor: pointer;
-}
-
-.paletteButton:hover {
-  background: #000;
-  color: #fff;
+  margin: 0;
+  flex-shrink: 0;
 }
 
 .toolbarButton {
@@ -636,6 +636,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-shrink: 0;
 }
 
 .templateHeader h2 {
@@ -755,38 +756,50 @@
 
 /* --- S29: spotlight / inspector / graph manager ------------------------ */
 
+/* Fills whatever container renders it (the floating palette or the wire-drop
+   modal) and shares that container's height budget with the list below. */
 .spotlight {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-width: 260px;
+  gap: 10px;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 .spotlightInput {
   font-size: 11px;
-  padding: 6px 8px;
+  padding: 7px 9px;
   border: 1px solid rgba(0, 0, 0, 0.2);
   border-radius: 7px;
+  width: 100%;
+  flex-shrink: 0;
 }
 
 .spotlightList {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  max-height: 320px;
+  gap: 6px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  /* Keeps the scrollbar off the card borders. */
+  padding-right: 4px;
 }
 
 .spotlightItem {
   text-align: left;
   background: #fff;
   border: 1px solid rgba(0, 0, 0, 0.12);
-  border-radius: 7px;
-  padding: 6px 8px;
+  border-radius: 8px;
+  padding: 8px 10px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 3px;
+  /* Without this the buttons shrink below their wrapped-text height and the
+     descriptions overlap the next row instead of the list scrolling. */
+  flex-shrink: 0;
 }
 
 .spotlightItem:hover {
@@ -797,10 +810,12 @@
 .spotlightItemTitle {
   font-size: 11px;
   font-weight: 600;
+  line-height: 1.3;
 }
 
 .spotlightItemDesc {
-  font-size: 9.5px;
+  font-size: 10px;
+  line-height: 1.4;
   opacity: 0.7;
 }
 
@@ -810,9 +825,11 @@
   padding: 18px;
   max-width: 380px;
   width: 100%;
+  max-height: 78dvh;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  overflow: hidden;
 }
 
 .inspector {
