@@ -1,0 +1,35 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Z-M-Huang/vcp/main/schemas/vcp.schema.json",
+  "version": "1.0",
+  "scopes": {
+    "web-frontend": true,
+    "web-backend": true,
+    "database": true,
+    "devops": true
+  },
+  "compliance": [],
+  "frameworks": [
+    "next",
+    "react",
+    "three.js",
+    "tailwindcss",
+    "cloudflare-workers",
+    "drizzle",
+    "vite",
+    "zustand"
+  ],
+  "exclude": [
+    "node_modules/**",
+    "dist/**",
+    "build/**",
+    ".next/**",
+    ".wrangler/**",
+    "drizzle/**",
+    "artifacts/**",
+    "grabbed-references/**",
+    "references/**"
+  ],
+  "severity": "medium",
+  "ignore": [],
+  "pluginRoot": "C:\\Users\\cowey\\.claude\\plugins\\cache\\vcp\\vcp\\0.6.1"
+}
