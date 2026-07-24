@@ -63,3 +63,7 @@ public/screenshot.png
 .vcp/plan/.state/
 .vcp/plan/.archive/
 .vcp/ralph/
+
+# Pipeline runtime state and quarantined stale git locks
+/.task/
+/_quarantine/
