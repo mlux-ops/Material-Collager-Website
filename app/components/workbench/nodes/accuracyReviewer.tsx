@@ -3,6 +3,7 @@
 import { useEdges, useNodes } from "@xyflow/react";
 import { memo, useMemo } from "react";
 import { readApiResponse } from "@/app/lib/api-client";
+import { MAX_REFERENCE_IMAGES } from "@/app/lib/collage";
 import { downscaleForReview, fileToBase64 } from "@/app/lib/image-transport";
 import { useWorkbenchStore } from "../store";
 import styles from "../workbench.module.css";
@@ -133,15 +134,34 @@ export const execute = async (ctx: ExecuteContext): Promise<void> => {
   const reviewedImageFile = fileFromCacheKey(imageValue.cacheKey);
   const imageBase64 = await fileToBase64(await downscaleForReview(reviewedImageFile));
 
+  // issue-1: the canonical contract (app/lib/accuracy-review.ts's
+  // reviewGeneratedImage + app/api/workbench/review/route.ts's validation)
+  // is that `references` carries images for ONLY the reviewed subset: both
+  // build `reviewedItems`/`referenceItems` as `selectedIds.size ? items
+  // .filter(item => selectedIds.has(item.id)) : items` (board order,
+  // filtered to selected -- never reordered by selectedItemIds' own order),
+  // and require `references.length` to equal exactly the SUM of THAT
+  // subset's referenceCounts. `items` (the full board list) still goes to
+  // the server unchanged -- the route needs the complete list for its
+  // schema's minItems/maxItems -- only the actual reference IMAGE BYTES are
+  // scoped to the reviewed subset.
+  const selectedIdSet = new Set(selectedItemIds);
+  const reviewedItems = selectedIdSet.size ? items.filter((item) => selectedIdSet.has(item.id)) : items;
+
   const references: Array<{ imageBase64: string; mimeType: string }> = [];
-  for (const item of items) {
+  for (const item of reviewedItems) {
     for (const key of item.imageKeys) {
       const file = fileFromCacheKey(key);
       const downscaled = await downscaleForReview(file);
       references.push({ imageBase64: await fileToBase64(downscaled), mimeType: "image/jpeg" });
     }
   }
-  if (references.length > 16) throw new Error("Use no more than 16 reference images in one review.");
+  // N-11: import the SAME constant the route enforces its (now
+  // subset-scoped) cap with, rather than a hardcoded literal that could
+  // silently drift from it.
+  if (references.length > MAX_REFERENCE_IMAGES) {
+    throw new Error(`Use no more than ${MAX_REFERENCE_IMAGES} reference images in one review.`);
+  }
 
   const domain = REVIEW_DOMAIN[String(ctx.params.domain ?? "interior")] ?? "interior render";
 

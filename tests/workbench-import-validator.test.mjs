@@ -103,6 +103,29 @@ test("node/edge count caps throw ImportValidationError rather than silently trun
   assert.throws(() => validateImport(baseGraph({ nodes })), ImportValidationError);
 });
 
+test("accuracyReviewer's selectedItemIds (a stringList param rule) round-trips through import, drops non-string/oversized entries, and caps oversized lists at maxItems (S-5)", () => {
+  const ok = validateImport(
+    baseGraph({
+      nodes: [{ id: "n1", kind: "accuracyReviewer", params: { domain: "interior", selectedItemIds: ["wood", "countertop"] }, position: { x: 0, y: 0 } }],
+    }),
+  );
+  assert.deepEqual(ok.nodes[0].params.selectedItemIds, ["wood", "countertop"]);
+
+  const withJunkEntries = validateImport(
+    baseGraph({
+      nodes: [{ id: "n1", kind: "accuracyReviewer", params: { selectedItemIds: ["ok", 42, null, {}, "x".repeat(200), "also-ok"] }, position: { x: 0, y: 0 } }],
+    }),
+  );
+  assert.deepEqual(withJunkEntries.nodes[0].params.selectedItemIds, ["ok", "also-ok"]);
+
+  const oversizedList = validateImport(
+    baseGraph({
+      nodes: [{ id: "n1", kind: "accuracyReviewer", params: { selectedItemIds: Array.from({ length: 100 }, (_, i) => `id-${i}`) }, position: { x: 0, y: 0 } }],
+    }),
+  );
+  assert.equal(oversizedList.nodes[0].params.selectedItemIds.length, 32);
+});
+
 test("a round trip (validate, then re-validate the already-validated output as fresh input) is stable / idempotent", () => {
   const graph = baseGraph({
     nodes: [

@@ -44,6 +44,43 @@ type CalibrationRecord = {
   buckets: Record<string, CalibrationBucket>;
 };
 
+// Storage is injected (get/set/remove) rather than hardcoded to
+// window.localStorage so this persistence path is REALLY exercised under
+// Node's --experimental-strip-types test runner (no window/localStorage
+// there): tests inject an in-memory adapter and verify actual EMA writes,
+// bucket bounds, a simulated reload, and the schemaVersion-mismatch reset --
+// not merely that the no-window no-op path doesn't throw.
+export type CalibrationStorageAdapter = {
+  get(key: string): string | null;
+  set(key: string, value: string): void;
+  remove(key: string): void;
+};
+
+const noopStorageAdapter: CalibrationStorageAdapter = {
+  get: () => null,
+  set: () => {},
+  remove: () => {},
+};
+
+const windowLocalStorageAdapter: CalibrationStorageAdapter = {
+  get: (key) => window.localStorage.getItem(key),
+  set: (key, value) => window.localStorage.setItem(key, value),
+  remove: (key) => window.localStorage.removeItem(key),
+};
+
+function defaultStorageAdapter(): CalibrationStorageAdapter {
+  return typeof window !== "undefined" && window.localStorage ? windowLocalStorageAdapter : noopStorageAdapter;
+}
+
+let calibrationStorage: CalibrationStorageAdapter = defaultStorageAdapter();
+
+// Injects a custom storage adapter (e.g. an in-memory Map-backed one in
+// tests). Passing null/undefined restores the default window.localStorage-
+// when-present/no-op-otherwise behavior.
+export function setCalibrationStorageAdapter(adapter?: CalibrationStorageAdapter | null): void {
+  calibrationStorage = adapter ?? defaultStorageAdapter();
+}
+
 function emptyCalibration(): CalibrationRecord {
   return { schemaVersion: CALIBRATION_SCHEMA_VERSION, buckets: {} };
 }
@@ -52,10 +89,43 @@ function bucketKey(size: string, quality: string): string {
   return `${size}|${quality}`;
 }
 
+// S-10: a hand-edited or corrupted localStorage record can carry a bucket
+// whose usdPerImage is non-numeric, negative, NaN, or absurdly large.
+// Without validating each bucket's VALUE (schemaVersion/buckets-shape alone
+// isn't enough), a corrupted entry flows straight into
+// calibratedInputUsdPerImage -> estimateRunUsd, producing a NaN total
+// rendered as "$NaN" on the money display and the high-cost guardrail.
+// Same-origin storage means an attacker would already need XSS, so this is
+// robustness rather than security -- but the calibration record directly
+// feeds the money display, so corrupted buckets are dropped rather than
+// trusted.
+const MAX_SANE_USD_PER_IMAGE = 2;
+
+function isValidBucket(value: unknown): value is CalibrationBucket {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<CalibrationBucket>;
+  return (
+    typeof candidate.usdPerImage === "number" &&
+    Number.isFinite(candidate.usdPerImage) &&
+    candidate.usdPerImage >= 0 &&
+    candidate.usdPerImage < MAX_SANE_USD_PER_IMAGE &&
+    typeof candidate.samples === "number" &&
+    Number.isFinite(candidate.samples) &&
+    candidate.samples >= 0
+  );
+}
+
+function sanitizeBuckets(raw: Record<string, unknown>): Record<string, CalibrationBucket> {
+  const clean: Record<string, CalibrationBucket> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (isValidBucket(value)) clean[key] = { usdPerImage: value.usdPerImage, samples: value.samples };
+  }
+  return clean;
+}
+
 function loadCalibration(): CalibrationRecord {
-  if (typeof window === "undefined") return emptyCalibration();
   try {
-    const raw = window.localStorage.getItem(CALIBRATION_STORAGE_KEY);
+    const raw = calibrationStorage.get(CALIBRATION_STORAGE_KEY);
     if (!raw) return emptyCalibration();
     const parsed = JSON.parse(raw) as Partial<CalibrationRecord>;
     // Schema mismatch (or a malformed/foreign record) -- reset rather than
@@ -63,16 +133,15 @@ function loadCalibration(): CalibrationRecord {
     if (parsed.schemaVersion !== CALIBRATION_SCHEMA_VERSION || typeof parsed.buckets !== "object" || parsed.buckets === null) {
       return emptyCalibration();
     }
-    return { schemaVersion: CALIBRATION_SCHEMA_VERSION, buckets: parsed.buckets };
+    return { schemaVersion: CALIBRATION_SCHEMA_VERSION, buckets: sanitizeBuckets(parsed.buckets as Record<string, unknown>) };
   } catch {
     return emptyCalibration();
   }
 }
 
 function saveCalibration(record: CalibrationRecord): void {
-  if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(CALIBRATION_STORAGE_KEY, JSON.stringify(record));
+    calibrationStorage.set(CALIBRATION_STORAGE_KEY, JSON.stringify(record));
   } catch {
     // Best-effort: a full/blocked localStorage just means calibration resets
     // to the flat seed next load instead of persisting.
@@ -96,6 +165,24 @@ export function recordImageTokenCalibration(size: string, quality: string, image
   saveCalibration(record);
 }
 
+// issue-6: extracts the actual per-run image-token usage from a
+// /api/workbench/edit response and feeds recordImageTokenCalibration --
+// shared by EVERY generation-shaped execute wrapper (imageGenerate/
+// imageEdit/relight via shared.tsx's executeGeneration, plus Variations/
+// Masked Edit/Upscaler/Collage Board/QA Correction, which each call the
+// endpoint directly rather than through executeGeneration) so every paid
+// image call contributes to calibration, not just the three that happened
+// to share one core.
+export function recordUsageCalibration(
+  size: string,
+  quality: string,
+  usage: Record<string, unknown> | undefined,
+  inputImages: number,
+): void {
+  const imageTokens = (usage as { input_tokens_details?: { image_tokens?: number } } | undefined)?.input_tokens_details?.image_tokens;
+  recordImageTokenCalibration(size, quality, imageTokens, inputImages);
+}
+
 function calibratedInputUsdPerImage(size: string, quality: string): number {
   const bucket = loadCalibration().buckets[bucketKey(size, quality)];
   return bucket ? bucket.usdPerImage : ESTIMATED_INPUT_USD_PER_IMAGE;
@@ -116,6 +203,10 @@ export function estimateRunUsd(options: { size: string; quality: string; candida
 }
 
 export function formatUsd(value: number): string {
+  // S-10 defense in depth: loadCalibration's sanitization is the root-cause
+  // fix that keeps a corrupted bucket from ever reaching here, but a
+  // non-finite input must still never render as the literal "$NaN".
+  if (!Number.isFinite(value)) return "$0.00";
   if (value < 0.01) return "<$0.01";
   return `$${value.toFixed(2)}`;
 }

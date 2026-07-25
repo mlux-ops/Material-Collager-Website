@@ -305,7 +305,8 @@
   height: 36px;
 }
 
-.referenceThumb img {
+.referenceThumb img,
+.referenceThumb .thumbPlaceholder {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -455,6 +456,31 @@
   background: rgba(0, 0, 0, 0.04);
 }
 
+/* AC20/issue-4: shown in place of a card preview while its thumbnail is
+   still generating -- never the full-resolution bitmap. */
+.thumbPlaceholder {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 4px;
+}
+
+/* N-9: a visually distinguishable state from "still loading" -- combined
+   with .thumbPlaceholder above when thumbnail generation has genuinely
+   failed (and no full-res fallback URL is available either), so a
+   permanent failure never looks identical to a thumbnail still generating. */
+.thumbFailed {
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(0, 0, 0, 0.05),
+    rgba(0, 0, 0, 0.05) 6px,
+    rgba(0, 0, 0, 0.1) 6px,
+    rgba(0, 0, 0, 0.1) 12px
+  );
+}
+
 .lightboxOverlay {
   position: fixed;
   inset: 0;
@@ -522,13 +548,19 @@
   overflow: hidden;
 }
 
-.compare img {
+.compare img,
+.compare .thumbPlaceholder {
   display: block;
   width: 100%;
   height: auto;
 }
 
-.compare img + img {
+/* N-8: applied explicitly to the "B" side's ThumbnailImage (its className
+   prop) rather than an `img + img` adjacent-sibling selector -- the prior
+   raw-<img> version relied on sibling order, but ThumbnailImage can render
+   either a <div> placeholder or an <img>, so a sibling selector could no
+   longer reliably target "whichever element is second". */
+.compareOverlay {
   position: absolute;
   inset: 0;
 }
@@ -589,7 +621,8 @@
   line-height: 0;
 }
 
-.candidateThumb img {
+.candidateThumb img,
+.candidateThumb .thumbPlaceholder {
   display: block;
   width: 100%;
   aspect-ratio: 1;
@@ -652,6 +685,82 @@
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* transitions-dev 06-modal: scrims fade in and dialog surfaces scale up
+   from --modal-scale. All of these unmount on close (conditional render),
+   so the recipe's open transition runs as a mount animation; close appends
+   .overlayClosing (via useModalDismiss.ts) for the exit animation, then
+   unmounts after --modal-close-dur. */
+.templateOverlay,
+.lightboxOverlay,
+.maskModalOverlay {
+  animation: tModalFade var(--modal-open-dur) var(--modal-ease);
+}
+
+.templateOverlay > *,
+.maskModalOverlay > .maskModal,
+.lightboxOverlay > .lightboxImage {
+  animation: tModalScaleUp var(--modal-open-dur) var(--modal-ease);
+  transform-origin: center;
+}
+
+@keyframes tModalFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes tModalScaleUp {
+  from {
+    opacity: 0;
+    transform: scale(var(--modal-scale));
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Close half: useModalDismiss.ts appends this class on dismissal, then
+   unmounts after --modal-close-dur. The .maskModal/.lightboxImage child
+   selectors are repeated so these rules tie with (and, coming later, beat)
+   the higher-specificity open rules above. */
+.overlayClosing {
+  animation: tModalFadeOut var(--modal-close-dur) var(--modal-ease) forwards;
+  pointer-events: none;
+}
+
+.overlayClosing > *,
+.overlayClosing > .maskModal,
+.overlayClosing > .lightboxImage {
+  animation: tModalScaleDown var(--modal-close-dur) var(--modal-ease) forwards;
+  transform-origin: center;
+}
+
+@keyframes tModalFadeOut {
+  to { opacity: 0; }
+}
+
+@keyframes tModalScaleDown {
+  to {
+    opacity: 0;
+    transform: scale(var(--modal-scale-close));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .templateOverlay,
+  .lightboxOverlay,
+  .maskModalOverlay,
+  .templateOverlay > *,
+  .maskModalOverlay > .maskModal,
+  .lightboxOverlay > .lightboxImage,
+  .overlayClosing,
+  .overlayClosing > *,
+  .overlayClosing > .maskModal,
+  .overlayClosing > .lightboxImage {
+    animation: none;
+  }
 }
 
 /* Empty-canvas templates gallery (AC19) + export dialog (AC18): same fixed,
@@ -998,7 +1107,34 @@
   border: none;
   cursor: pointer;
   display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+}
+
+.graphSwitchLabel {
+  display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 0;
+  min-width: 0;
+}
+
+/* issue-5/AC17: graph-list row thumbnail (a small bounded data URL, not a
+   blob-cache key -- no lazy ensureThumbnail generation needed here). */
+.graphThumb {
+  width: 48px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  flex-shrink: 0;
+}
+
+.graphThumbPlaceholder {
+  display: block;
+  width: 48px;
+  height: 36px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.06);
+  flex-shrink: 0;
 }

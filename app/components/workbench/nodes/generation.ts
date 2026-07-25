@@ -4,6 +4,7 @@
 // test runner, so runtime imports carry explicit .ts extensions and nothing
 // here touches the DOM at module scope.
 
+import { smallestValidEditSize } from "../../../lib/image-edit.ts";
 import { estimateRunUsd } from "../cost.ts";
 import type { CostEstimateInput, ImportParamRule, NodeOutputValue, WorkbenchParams } from "../types";
 
@@ -71,7 +72,16 @@ export function estimateGenerationCost({ params, inputImages }: CostEstimateInpu
   });
 }
 
-// Draft mode's cheaper variant: same request shape, lowest quality tier.
+// Draft mode's cheaper variant (AC22/issue-3): lowest quality tier AND the
+// smallest valid gpt-image-2 size at the CURRENT size's aspect ratio (not
+// just quality, which left large sizes -- including 2K+ Upscaler targets --
+// unchanged). The same effective params (this function's output) drive
+// execution, the memoization signature, and both cost displays, since
+// draftOverrideMap is applied uniformly by executor.ts/signature.ts/
+// estimateStaleCost -- so signing this size change is automatic, not a
+// separate wiring step.
 export function generationDraftOverride(params: WorkbenchParams): WorkbenchParams {
-  return { ...params, quality: "low" };
+  const [rawWidth, rawHeight] = (params.size || "1536x1024").split("x").map(Number);
+  const small = smallestValidEditSize(rawWidth || 1536, rawHeight || 1024);
+  return { ...params, quality: "low", size: `${small.width}x${small.height}` };
 }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  alwaysExecuteMap,
   auditPaidNodeCoverage,
   defaultParams,
   estimateCostMap,
@@ -87,6 +88,41 @@ test("the executor's executeMap/isExecutable predicate is fully determined by ma
     if (nonExecutable.includes(kind)) continue;
     assert.ok(expectedExecutable(kind), `${kind} should be executable`);
   }
+});
+
+test("Export/Download opts out of run memoization via alwaysExecute (W-4): the manifest flag is set and alwaysExecuteMap reflects it; every other kind defaults to unset so normal memoization still applies", () => {
+  // N-2: this only asserts the framework-free DECLARATION (the manifest
+  // flag + the map built from it). The consuming SCOPING logic -- forceExecute
+  // requires alwaysExecuteMap[kind] AND an explicit single-node run
+  // (runNodes'/estimateStaleCost's targetIds.length===1 && targetIds[0]===id
+  // check, gated by the caller-supplied explicitSingleNode option) -- lives
+  // in executor.ts, which imports nodes/index.ts (.tsx) and so cannot be
+  // imported under node --experimental-strip-types. That behavior is
+  // verified by code trace + manual/browser QA instead, consistent with the
+  // rest of executor.ts's scheduling logic (runNodes/estimateStaleCost/
+  // retryFrom), which has never been Node-unit-tested for the same reason.
+  assert.equal(MANIFESTS.exportDownload.alwaysExecute, true);
+  assert.equal(alwaysExecuteMap.exportDownload, true);
+  for (const kind of NODE_KINDS) {
+    if (kind === "exportDownload") continue;
+    assert.ok(!alwaysExecuteMap[kind], `${kind}: alwaysExecute must default to unset/false`);
+  }
+});
+
+test("Reference Finder's required 'query' port declares a satisfiedByParams predicate honored when its matchQuery override is non-empty, so an override with no upstream connection still satisfies the port (C1)", () => {
+  const port = MANIFESTS.referenceFinder.spec.inputs.find((candidate) => candidate.id === "query");
+  assert.ok(port.required, "query must stay required:true -- dropping it would lose the disabled-Run protection when neither an override nor a connection is present");
+  assert.equal(typeof port.satisfiedByParams, "function", "query needs a params-aware satisfaction predicate for its matchQuery override");
+  assert.equal(port.satisfiedByParams({}), false);
+  assert.equal(port.satisfiedByParams({ matchQuery: "   " }), false, "a blank/whitespace-only override does not satisfy the port");
+  assert.equal(port.satisfiedByParams({ matchQuery: "brushed brass pull" }), true, "a non-empty override satisfies the port with no connection needed");
+});
+
+test("Variations' 'prompt' port and Accuracy Reviewer's 'references' port are required:true, matching what their execute() unconditionally throws without one (C2/C3)", () => {
+  const variationsPrompt = MANIFESTS.variations.spec.inputs.find((port) => port.id === "prompt");
+  assert.ok(variationsPrompt.required, "Variations' prompt is required at execute() time and must be surfaced pre-run too");
+  const reviewerReferences = MANIFESTS.accuracyReviewer.spec.inputs.find((port) => port.id === "references");
+  assert.ok(reviewerReferences.required, "Accuracy Reviewer's references is required at execute() time and must be surfaced pre-run too");
 });
 
 test("importSchemaMap and stableParamsMap/draftOverrideMap are only populated where the manifest actually declares them", () => {

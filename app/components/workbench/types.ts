@@ -43,6 +43,15 @@ export type PortSpec = {
   // kind here (e.g. reference inputs take both "image" and "references").
   // When omitted the port accepts only its own `kind`.
   acceptedKinds?: PortKind[];
+  // For a required port that can ALSO be satisfied by a param value instead
+  // of an incoming edge (e.g. Reference Finder's "query" port: its own
+  // matchQuery override needs no upstream connection at all --
+  // referenceFinder.manifest.ts). unmetRequiredInputs/useMissingRequiredInputs
+  // treat the port as satisfied when this predicate returns true, even with
+  // nothing connected -- so a working alternate satisfaction path never
+  // forces dropping `required` (which would lose the disabled-Run
+  // protection when neither the override nor a connection is present).
+  satisfiedByParams?: (params: WorkbenchParams) => boolean;
 };
 
 export function acceptedKindsFor(port: PortSpec): PortKind[] {
@@ -163,7 +172,6 @@ export type WorkbenchParams = {
   selectedLibraryId?: string;
   // variations
   n?: number;
-  activeCandidate?: number;
   // maskedEdit — the editable rectangle, normalized 0-1000 (matches
   // app/lib/selective-edit.ts's NormalizedBox convention); maskCacheKey
   // caches the rendered PNG mask blob (persisted via persistBlobKeys).
@@ -237,6 +245,11 @@ export type ImportParamRule =
   | { type: "number"; optional?: boolean; min?: number; max?: number; integer?: boolean }
   | { type: "boolean"; optional?: boolean }
   | { type: "enum"; optional?: boolean; values: readonly string[] }
+  // A plain string[] field (e.g. accuracyReviewer's selectedItemIds, S-5):
+  // non-string/oversized entries are dropped, the list is capped at
+  // maxItems -- the generic, kind-agnostic sibling of referenceItemList for
+  // fields that carry no nested images/blob keys to remap.
+  | { type: "stringList"; optional?: boolean; maxItems?: number; maxLength?: number }
   | { type: "referenceItemList"; optional?: boolean; maxItems?: number; maxImagesPerItem?: number };
 
 // Registry-owned, authoritative import-validation metadata for one node kind.
@@ -299,6 +312,14 @@ export type NodeManifest = {
   // survive reload via the generic split-blob pattern -- persistence.ts
   // itself stays free of any per-kind gating.
   persistBlobKeys?: (nodeId: string, params: WorkbenchParams) => string[];
+  // OPTIONAL opt-out of run memoization entirely (W-4): a terminal
+  // side-effect node (e.g. Export/Download) whose execute performs an action
+  // that must repeat identically every time it's scheduled, rather than
+  // being treated as a cacheable computation. runNodes/estimateStaleCost
+  // check this BEFORE the signature cache-hit comparison (mirroring how
+  // isPinned is checked first) so an unchanged signature never silently
+  // short-circuits it into a no-op.
+  alwaysExecute?: boolean;
 };
 
 // NODE_SPECS/specFor/defaultParams are reconstructed from the per-node

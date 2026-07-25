@@ -33,10 +33,32 @@ export const referencesManifest: NodeManifest = {
     sourceBlobKeys: [],
   },
   persistBlobKeys: (_nodeId, params) => (params.referenceItems ?? []).flatMap((item) => item.imageKeys),
+  // Rebuilds the emitted {kind:'references'} value from the CURRENT params
+  // on every scheduled run (not just when references.tsx's own commit()
+  // applies a run) and signs it with ctx.signature, the executor's
+  // authoritative hash. This closes two gaps at the root:
+  //  (E-2) An Inspector edit only calls updateParams, never applyRun, so the
+  //  node's run.runId used to stay unchanged and every downstream signature
+  //  (which embeds upstream runId) never invalidated -- the edit silently
+  //  never reached downstream. Now: any params change makes ctx.signature
+  //  differ from the stale run's stored signature, so the next time this
+  //  node is scheduled, execute rebuilds a FRESH run (fresh runId) carrying
+  //  the edited metadata, which correctly invalidates every downstream node.
+  //  (W-2) This run's OWN signature now matches what runNodes just computed
+  //  (instead of the ad-hoc `references:<json>` signature the card mints),
+  //  so the FOLLOWING run of this node is a genuine cache hit: status
+  //  reaches "done" instead of staying stuck at "Running" forever, and it
+  //  stops permanently counting toward the stale-cost aggregate.
   execute: async (ctx) => {
     const items = ctx.params.referenceItems ?? [];
     if (!items.some((item) => item.imageKeys.length > 0)) {
       throw new Error("Add at least one reference item with an uploaded image first.");
     }
+    ctx.applyRun({
+      runId: ctx.createRunId(),
+      signature: ctx.signature,
+      at: Date.now(),
+      values: [[{ kind: "references", items, order: items.map((item) => item.id) }]],
+    });
   },
 };

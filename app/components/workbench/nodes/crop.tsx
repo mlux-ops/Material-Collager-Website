@@ -1,4 +1,3 @@
-/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import { useEdges, useNodes } from "@xyflow/react";
@@ -9,7 +8,7 @@ import { useWorkbenchStore } from "../store";
 import styles from "../workbench.module.css";
 import type { ExecuteContext, WorkbenchNode } from "../types";
 import { imageCacheKeysFromValue } from "./generation";
-import { fileFromCacheKey, NodeShell, OutputPreview, RunFooter, type WorkbenchNodeProps } from "./shared";
+import { fileFromCacheKey, NodeShell, OutputPreview, RunFooter, ThumbnailImage, type WorkbenchNodeProps } from "./shared";
 
 type FractionRect = { x: number; y: number; width: number; height: number };
 
@@ -34,13 +33,16 @@ export const Component = memo(function CropNode({ id, data }: WorkbenchNodeProps
   const containerRef = useRef<HTMLDivElement>(null);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
 
-  const sourceUrl = useMemo(() => {
+  // Sonnet NEW-1/AC20 exception: this resolves BOTH the cacheKey and the
+  // tracked full-resolution URL for the connected source -- see the render
+  // below for why the full-res URL is preferred here specifically.
+  const source = useMemo(() => {
     const edge = edges.find((candidate) => candidate.target === id && candidate.targetHandle === "image");
     if (!edge) return undefined;
-    const source = nodes.find((candidate) => candidate.id === edge.source);
-    const run = source?.data.runs[source.data.activeRun];
+    const sourceNode = nodes.find((candidate) => candidate.id === edge.source);
+    const run = sourceNode?.data.runs[sourceNode.data.activeRun];
     const value = run?.values[0]?.find((entry) => entry.kind === "image");
-    return value && value.kind === "image" ? value.url : undefined;
+    return value && value.kind === "image" ? { cacheKey: value.cacheKey, url: value.url } : undefined;
   }, [edges, nodes, id]);
 
   const rect: FractionRect = {
@@ -80,7 +82,7 @@ export const Component = memo(function CropNode({ id, data }: WorkbenchNodeProps
 
   return (
     <NodeShell data={data} footer={<RunFooter id={id} data={data} inputImages={1} />}>
-      {sourceUrl ? (
+      {source ? (
         <div
           ref={containerRef}
           className={`${styles.preview} nodrag`}
@@ -90,7 +92,35 @@ export const Component = memo(function CropNode({ id, data }: WorkbenchNodeProps
           onPointerUp={stopDrag}
           onPointerCancel={stopDrag}
         >
-          <img src={sourceUrl} alt="Crop source" draggable={false} />
+          {/* Sonnet NEW-1: unlike every other card preview (which
+              intentionally never holds a full-res bitmap -- see
+              ThumbnailImage), this IS the crop region's own interactive
+              drag-to-select surface, not a passive preview -- the same
+              category AC20 already carves out for maskedEdit's mask-drawing
+              canvas (an "editing surface", per AC20's lightbox/editing
+              exception). Precision matters for pixel-accurate region
+              selection, so it renders the tracked full-resolution URL
+              directly; the thumbnail is only a fallback if that URL is
+              unavailable. Round 3 converted this to ThumbnailImage
+              unconditionally as part of a blanket pass -- this reverts JUST
+              this one surface. execute() re-reads the full-res blob via
+              ctx.inputs("image") regardless of what's rendered here, so this
+              choice never affects crop correctness, only on-screen fidelity. */}
+          {source.url ? (
+            // This is the editing surface, not a card preview -- see the comment above.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={source.url}
+              alt="Crop source"
+              draggable={false}
+              decoding="async"
+              loading="lazy"
+              width={256}
+              height={192}
+            />
+          ) : (
+            <ThumbnailImage cacheKey={source.cacheKey} alt="Crop source" width={256} height={192} />
+          )}
           <div
             style={{
               position: "absolute",

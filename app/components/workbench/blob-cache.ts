@@ -72,8 +72,10 @@ export function totalCachedBytes(keys: Iterable<string>): number {
 // Card thumbnails (AC20): node cards must never hold a full-res bitmap. Each
 // cacheable full-res image can carry a derived <=256px thumbnail blob, cached
 // under its own key so it survives independently and is released alongside
-// the source blob. Generation is lazy and best-effort — callers fall back to
-// the full-res URL until (or if) a thumbnail becomes available.
+// the source blob. Generation is lazy and best-effort -- ThumbnailImage
+// (nodes/shared.tsx) shows a neutral placeholder while a thumbnail is still
+// generating, and only falls back to the full-res URL as a LAST RESORT if
+// generation genuinely fails (N-9), never as the routine loading path.
 // ---------------------------------------------------------------------------
 
 const THUMBNAIL_SUFFIX = "::thumb";
@@ -117,7 +119,12 @@ export function ensureThumbnail(key: string, maxDimension = MAX_THUMBNAIL_DIMENS
         bitmap.close();
       }
     } catch {
-      // Best-effort: node cards fall back to the full-res URL.
+      // Best-effort: thumbnail generation failed (corrupt/oversized source,
+      // no createImageBitmap, no 2d canvas context, or toBlob returned
+      // null). Resolving undefined here is ThumbnailImage's cue (N-9) to
+      // fall back to the full-res URL as a LAST RESORT, or otherwise render
+      // a distinct "preview unavailable" affordance -- never to silently
+      // retry or throw.
       return undefined;
     } finally {
       pendingThumbnails.delete(key);

@@ -83,11 +83,16 @@ export const paidMap: Record<NodeKind, boolean> = mapManifests((manifest) => Boo
 export const estimateCostMap: Partial<Record<NodeKind, (input: CostEstimateInput) => number | null>> = {};
 export const stableParamsMap: Partial<Record<NodeKind, (params: WorkbenchParams) => Partial<WorkbenchParams>>> = {};
 export const draftOverrideMap: Partial<Record<NodeKind, (params: WorkbenchParams) => WorkbenchParams>> = {};
+// W-4: kinds that opt out of run memoization entirely (Export/Download) --
+// runNodes/estimateStaleCost consult this BEFORE the signature cache-hit
+// comparison so an unchanged signature never turns a re-run into a no-op.
+export const alwaysExecuteMap: Partial<Record<NodeKind, boolean>> = {};
 for (const kind of NODE_KINDS) {
   const manifest = MANIFESTS[kind];
   if (manifest.estimateCost) estimateCostMap[kind] = manifest.estimateCost;
   if (manifest.stableParams) stableParamsMap[kind] = manifest.stableParams;
   if (manifest.draftOverride) draftOverrideMap[kind] = manifest.draftOverride;
+  if (manifest.alwaysExecute) alwaysExecuteMap[kind] = true;
 }
 
 // ---------------------------------------------------------------------------

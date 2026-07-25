@@ -220,45 +220,100 @@ export function validateEditSize(size: string): string | null {
   return null;
 }
 
+const EDIT_SIZE_FLOOR_PIXELS = 655_360;
+const EDIT_SIZE_CEILING_PIXELS = 8_294_400;
+const EDIT_SIZE_MAX_EDGE = 3840;
+const EDIT_SIZE_UNIT = 16;
+
+// Deterministic constraint solve shared by clampToValidEditSize and
+// smallestValidEditSize below (not an iterative rescale, which could return
+// an INVALID size for extreme raw ratios — e.g. the old clampToValidEditSize
+// clamped 20x1000 to 464x1408, which still fails the 1:3 aspect bound,
+// because scaling both dimensions by a common factor to fix the pixel-count
+// floor and then independently rounding each to the nearest 16 can nudge the
+// ratio back past 3:1, and the two constraints could oscillate against each
+// other indefinitely for such inputs). Given an ASPECT already clamped into
+// [1/3,3] and a PIXEL-COUNT target already clamped into [floor,ceiling]:
+//   1. Solve the real-valued size at that aspect + pixel count, then
+//      re-clamp the longest edge by scaling BOTH dimensions by the same
+//      factor (preserves the ratio exactly; provably cannot push the pixel
+//      count below the floor — the smallest possible post-cap pixel count,
+//      at the most extreme allowed aspect of 3:1, is 3840^2/3 ≈ 4.9 MP, well
+//      above the 655,360 floor).
+//   2. Move onto the 16-pixel grid, then run a small BOUNDED, strictly
+//      monotonic correction walk (never rescaling both dimensions together,
+//      only ever nudging ONE dimension by one grid step in the direction
+//      that fixes the SPECIFIC violation) to absorb any rounding drift —
+//      this cannot oscillate the way the old rescale-based loop could,
+//      because each step only ever moves a single constraint's violation
+//      strictly toward zero.
+function solveEditSize(aspect: number, targetPixels: number): { width: number; height: number } {
+  let h = Math.sqrt(targetPixels / aspect);
+  let w = aspect * h;
+
+  const longest = Math.max(w, h);
+  if (longest > EDIT_SIZE_MAX_EDGE) {
+    const scale = EDIT_SIZE_MAX_EDGE / longest;
+    w *= scale;
+    h *= scale;
+  }
+
+  let width = Math.max(EDIT_SIZE_UNIT, Math.round(w / EDIT_SIZE_UNIT) * EDIT_SIZE_UNIT);
+  let height = Math.max(EDIT_SIZE_UNIT, Math.round(h / EDIT_SIZE_UNIT) * EDIT_SIZE_UNIT);
+
+  // Defensive, bounded correction pass for rounding drift (empirically never
+  // needs more than 2-3 steps; the guard is generous headroom, not an
+  // expected iteration count).
+  for (let guard = 0; guard < 64 && validateEditSize(`${width}x${height}`) !== null; guard += 1) {
+    if (width / height > 3) {
+      width -= EDIT_SIZE_UNIT;
+    } else if (height / width > 3) {
+      height -= EDIT_SIZE_UNIT;
+    } else if (Math.max(width, height) > EDIT_SIZE_MAX_EDGE) {
+      if (width >= height) width -= EDIT_SIZE_UNIT;
+      else height -= EDIT_SIZE_UNIT;
+    } else if (width * height > EDIT_SIZE_CEILING_PIXELS) {
+      if (width >= height) width -= EDIT_SIZE_UNIT;
+      else height -= EDIT_SIZE_UNIT;
+    } else if (width * height < EDIT_SIZE_FLOOR_PIXELS) {
+      if (width <= height) width += EDIT_SIZE_UNIT;
+      else height += EDIT_SIZE_UNIT;
+    } else {
+      break; // validateEditSize disagreed for an unanticipated reason; stop rather than loop forever.
+    }
+    width = Math.max(EDIT_SIZE_UNIT, width);
+    height = Math.max(EDIT_SIZE_UNIT, height);
+  }
+
+  return { width, height };
+}
+
 // Conforms arbitrary dimensions to the same gpt-image-2 constraints
 // validateEditSize checks (divisible by 16, aspect 1:3-3:1, longest edge
 // <=3840, total pixels 655,360-8,294,400). Used by zero-token client nodes
 // (Resize/Crop) so a downstream edit node's input always passes
 // validateEditSize without a wasted paid round trip. Pure math — no DOM/
 // canvas access — so it runs equally well in the browser (Resize/Crop) or on
-// the server.
+// the server. Clamps the TARGET aspect ratio into [1/3,3] first (the
+// constraint most likely to be impossible to satisfy at the raw ratio), then
+// picks a target pixel count within [floor,ceiling] preferring the raw pixel
+// count when already in range, then hands both to solveEditSize.
 export function clampToValidEditSize(rawWidth: number, rawHeight: number): { width: number; height: number } {
-  const roundTo16 = (value: number) => Math.max(16, Math.round(value / 16) * 16);
+  const rawW = Math.max(1, rawWidth || 1);
+  const rawH = Math.max(1, rawHeight || 1);
+  const aspect = Math.min(3, Math.max(1 / 3, rawW / rawH));
+  const targetPixels = Math.min(EDIT_SIZE_CEILING_PIXELS, Math.max(EDIT_SIZE_FLOOR_PIXELS, rawW * rawH));
+  return solveEditSize(aspect, targetPixels);
+}
 
-  let width = roundTo16(rawWidth || 16);
-  let height = roundTo16(rawHeight || 16);
-
-  // A few passes converge aspect/longest-edge/pixel-count clamps back onto a
-  // multiple of 16 (each clamp can nudge the other constraints slightly).
-  for (let pass = 0; pass < 6; pass += 1) {
-    if (validateEditSize(`${width}x${height}`) === null) break;
-
-    if (width / height > 3) width = roundTo16(height * 3);
-    else if (height / width > 3) height = roundTo16(width * 3);
-
-    const longest = Math.max(width, height);
-    if (longest > 3840) {
-      const scale = 3840 / longest;
-      width = roundTo16(width * scale);
-      height = roundTo16(height * scale);
-    }
-
-    const pixels = width * height;
-    if (pixels > 8_294_400) {
-      const scale = Math.sqrt(8_294_400 / pixels);
-      width = roundTo16(width * scale);
-      height = roundTo16(height * scale);
-    } else if (pixels < 655_360) {
-      const scale = Math.sqrt(655_360 / pixels);
-      width = roundTo16(width * scale);
-      height = roundTo16(height * scale);
-    }
-  }
-
-  return { width, height };
+// The SMALLEST valid gpt-image-2 size at the given (width, height)'s aspect
+// ratio — i.e. solveEditSize pinned to the pixel-count FLOOR rather than a
+// clamp of the raw pixel count. Used by Draft mode's small-size half
+// (generation.ts's generationDraftOverride, AC22/issue-3): every draft-
+// capable node's effective size shrinks to genuinely small, including the
+// Upscaler, whose selected target can be as large as 3840x2160 — draft mode
+// must not leave that unchanged.
+export function smallestValidEditSize(width: number, height: number): { width: number; height: number } {
+  const aspect = Math.min(3, Math.max(1 / 3, Math.max(1, width || 1) / Math.max(1, height || 1)));
+  return solveEditSize(aspect, EDIT_SIZE_FLOOR_PIXELS);
 }

@@ -1,13 +1,13 @@
-/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import { memo, useEffect, useRef } from "react";
 import { COLLAGE_TYPES, ITEM_PRESETS, labelFor, type CollageType } from "@/app/lib/collage";
-import { getBlobUrl, putBlob, releaseBlob } from "../blob-cache";
+import { putBlob, releaseBlob } from "../blob-cache";
+import { DEFAULT_MAX_IMAGES_PER_ITEM } from "../export-import";
 import { useWorkbenchStore } from "../store";
 import styles from "../workbench.module.css";
 import type { ReferenceItem } from "../types";
-import { NodeShell, type WorkbenchNodeProps } from "./shared";
+import { NodeShell, ThumbnailImage, validateUploadFile, type WorkbenchNodeProps } from "./shared";
 
 function createItemId() {
   return `item-${globalThis.crypto?.randomUUID?.().slice(0, 8) ?? Date.now().toString(36)}`;
@@ -28,6 +28,7 @@ function buildReferencesRun(nodeId: string, items: ReferenceItem[]) {
 export const Component = memo(function ReferencesNode({ id, data }: WorkbenchNodeProps) {
   const applyRun = useWorkbenchStore((state) => state.applyRun);
   const updateParams = useWorkbenchStore((state) => state.updateParams);
+  const setStatus = useWorkbenchStore((state) => state.setStatus);
   const items = data.params.referenceItems ?? [];
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -74,11 +75,35 @@ export const Component = memo(function ReferencesNode({ id, data }: WorkbenchNod
     commit(next);
   };
 
+  // issue-9: enforce the advertised PNG/JPEG/WebP + 50MB limits (the
+  // accept="" attribute on the <input> below is only a picker hint, never a
+  // validation boundary) plus a per-item image-count cap matching the
+  // import validator's own DEFAULT_MAX_IMAGES_PER_ITEM, so a graph built
+  // live has the same limits as one that would survive export/import. The
+  // whole batch is validated up front and rejected together with an
+  // actionable error (surfaced via NodeShell's existing error display) if
+  // ANY file fails ANY check, rather than silently dropping just the
+  // offending files.
   const addImages = (itemId: string, fileList: FileList | null) => {
-    const files = Array.from(fileList ?? []).filter((file) => file.type.startsWith("image/"));
-    if (!files.length) return;
+    const requested = Array.from(fileList ?? []);
+    if (!requested.length) return;
+
+    for (const file of requested) {
+      const rejection = validateUploadFile(file);
+      if (rejection) {
+        setStatus(id, "error", rejection);
+        return;
+      }
+    }
+
+    const currentCount = items.find((item) => item.id === itemId)?.imageKeys.length ?? 0;
+    if (currentCount + requested.length > DEFAULT_MAX_IMAGES_PER_ITEM) {
+      setStatus(id, "error", `This item can hold at most ${DEFAULT_MAX_IMAGES_PER_ITEM} images.`);
+      return;
+    }
+
     const stamp = Date.now().toString(36);
-    const newKeys = files.map((file, index) => {
+    const newKeys = requested.map((file, index) => {
       const key = `${id}:ref:${itemId}:${stamp}-${index}`;
       putBlob(key, file);
       return key;
@@ -168,15 +193,12 @@ export const Component = memo(function ReferencesNode({ id, data }: WorkbenchNod
           </label>
 
           <div className={styles.referenceThumbRow}>
-            {item.imageKeys.map((key) => {
-              const url = getBlobUrl(key);
-              return (
-                <span key={key} className={styles.referenceThumb}>
-                  {url && <img src={url} alt="Reference" draggable={false} />}
-                  <button type="button" className={styles.referenceThumbRemove} onClick={() => removeImage(item.id, key)}>✕</button>
-                </span>
-              );
-            })}
+            {item.imageKeys.map((key) => (
+              <span key={key} className={styles.referenceThumb}>
+                <ThumbnailImage cacheKey={key} alt="Reference" width={36} height={36} />
+                <button type="button" className={styles.referenceThumbRemove} onClick={() => removeImage(item.id, key)}>✕</button>
+              </span>
+            ))}
           </div>
           <button type="button" className={styles.smallButton} onClick={() => inputRefs.current[item.id]?.click()}>
             Add images

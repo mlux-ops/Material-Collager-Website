@@ -33,7 +33,17 @@ export const Component = memo(function ExportDownloadNode({ id, data }: Workbenc
           <option value="jpeg">JPEG</option>
         </select>
       </label>
-      <button type="button" className={styles.smallButton} disabled={running} onClick={() => void runNodes([id])}>
+      <button
+        type="button"
+        className={styles.smallButton}
+        disabled={running}
+        // N-2: marks this as an explicit single-node press so the manifest's
+        // alwaysExecute flag (W-4) applies -- a second identical Download
+        // press still re-downloads. A Run Workflow press (runAll(), which
+        // never sets this) treats the node as ordinarily memoized instead,
+        // even when it is the graph's sole terminal.
+        onClick={() => void runNodes([id], { explicitSingleNode: true })}
+      >
         Download
       </button>
     </NodeShell>

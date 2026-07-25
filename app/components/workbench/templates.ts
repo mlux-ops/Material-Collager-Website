@@ -8,7 +8,12 @@
 
 import type { Edge } from "@xyflow/react";
 import { ITEM_PRESETS, type CollageType } from "@/app/lib/collage";
-import { defaultParams } from "./nodes/index";
+// S-4: this .ts module only needs the framework-free defaultParams, which
+// nodes/manifests.ts re-exports -- importing from nodes/index.ts (the
+// browser registry, which pulls in every node's .tsx component) is the
+// exact .tsx-rooted trap E3 was written to close, even though it's
+// browser-only today and nothing currently breaks from it.
+import { defaultParams } from "./nodes/manifests.ts";
 import type { NodeKind, ReferenceItem, WorkbenchNode, WorkbenchParams } from "./types";
 
 export type TemplateId = "interiorEdit" | "exteriorEdit" | "collage" | "blank";

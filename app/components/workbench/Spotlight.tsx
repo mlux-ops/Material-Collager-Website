@@ -9,6 +9,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NODE_SPECS } from "./nodes/index";
+import { useModalDismiss } from "./useModalDismiss";
 import styles from "./workbench.module.css";
 import type { NodeKind } from "./types";
 
@@ -23,6 +24,8 @@ export type SpotlightProps = {
 export function Spotlight({ kinds, onPick, onClose, title, emptyHint }: SpotlightProps) {
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  // Exit animation for the modal variant (no-op when embedded — onClose absent).
+  const { closing, requestClose } = useModalDismiss(() => onClose?.());
 
   const results = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -50,7 +53,7 @@ export function Spotlight({ kinds, onPick, onClose, title, emptyHint }: Spotligh
         onChange={(event) => setQuery(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter" && results[0]) onPick(results[0]);
-          if (event.key === "Escape") onClose?.();
+          if (event.key === "Escape" && onClose) requestClose();
         }}
       />
       <div className={styles.spotlightList} role="listbox" aria-label="Node types">
@@ -74,11 +77,11 @@ export function Spotlight({ kinds, onPick, onClose, title, emptyHint }: Spotligh
   if (!onClose) return body;
 
   return (
-    <div className={styles.templateOverlay} role="dialog" aria-modal="true" aria-label={title ?? "Add a node"} onClick={onClose}>
+    <div className={`${styles.templateOverlay} ${closing ? styles.overlayClosing : ""}`} role="dialog" aria-modal="true" aria-label={title ?? "Add a node"} onClick={requestClose}>
       <div className={styles.spotlightModal} onClick={(event) => event.stopPropagation()}>
         <header className={styles.templateHeader}>
           <h2>{title ?? "Add a node"}</h2>
-          <button type="button" className={styles.smallButton} onClick={onClose}>Close</button>
+          <button type="button" className={styles.smallButton} onClick={requestClose}>Close</button>
         </header>
         {body}
       </div>

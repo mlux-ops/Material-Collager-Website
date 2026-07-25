@@ -21,4 +21,8 @@ export const exportDownloadManifest: NodeManifest = {
     },
     sourceBlobKeys: [],
   },
+  // W-4: a terminal side-effect node -- pressing Download a second time with
+  // identical inputs must re-trigger the download, not be memoized into a
+  // silent no-op cache hit.
+  alwaysExecute: true,
 };

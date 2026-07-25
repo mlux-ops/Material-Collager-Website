@@ -27,12 +27,13 @@ import {
   triggerJsonDownload,
   validateImport,
 } from "./export-import";
-import { GraphManager } from "./GraphManager";
+import { GraphManager, type SwitchGraphOptions } from "./GraphManager";
 import { Inspector } from "./Inspector";
-import { DEFAULT_GRAPH_ID, loadGraph, saveGraph, saveGraphStructure } from "./persistence";
+import { BlockedUpgradeError, decidePendingSave, DEFAULT_GRAPH_ID, loadGraph, saveGraph, saveGraphStructure } from "./persistence";
 import { connectionIsValid, nodeKindsForWire, useWorkbenchStore } from "./store";
 import { Spotlight } from "./Spotlight";
 import { instantiateTemplate, TEMPLATES, type TemplateId } from "./templates";
+import { useModalDismiss } from "./useModalDismiss";
 import styles from "./workbench.module.css";
 import { acceptedKindsFor, PORT_COLORS, specFor, type NodeKind, type PortKind, type WorkbenchNode } from "./types";
 
@@ -46,12 +47,13 @@ function bytesLabel(bytes: number): string {
 // importGraph (additive, same primitive JSON import uses) and fits it into
 // view; picking blank (or closing) just dismisses the gallery.
 function TemplateGallery({ onPick, onClose }: { onPick: (id: TemplateId) => void; onClose: () => void }) {
+  const { closing, requestClose } = useModalDismiss(onClose);
   return (
-    <div className={styles.templateOverlay} role="dialog" aria-modal="true" aria-label="Choose a starting template">
+    <div className={`${styles.templateOverlay} ${closing ? styles.overlayClosing : ""}`} role="dialog" aria-modal="true" aria-label="Choose a starting template">
       <div className={styles.templateGallery}>
         <header className={styles.templateHeader}>
           <h2>Start a workbench</h2>
-          <button type="button" className={styles.smallButton} onClick={onClose}>Skip</button>
+          <button type="button" className={styles.smallButton} onClick={requestClose}>Skip</button>
         </header>
         <div className={styles.templateGrid}>
           {TEMPLATES.map((template) => (
@@ -76,6 +78,7 @@ function ExportDialog({ nodes, edges, onClose }: { nodes: WorkbenchNode[]; edges
   const [graphOnly, setGraphOnly] = useState(false);
   const [busy, setBusy] = useState(false);
   const estimate = useMemo(() => estimateExportSize(nodes), [nodes]);
+  const { closing, requestClose } = useModalDismiss(onClose);
 
   const runExport = useCallback(async () => {
     setBusy(true);
@@ -84,14 +87,14 @@ function ExportDialog({ nodes, edges, onClose }: { nodes: WorkbenchNode[]; edges
       const json = serializeExportGraph(graph);
       const stamp = new Date().toISOString().slice(0, 10);
       triggerJsonDownload(json, `workbench-${stamp}${graphOnly ? "-structure-only" : ""}.json`);
-      onClose();
+      requestClose();
     } finally {
       setBusy(false);
     }
-  }, [nodes, edges, graphOnly, onClose]);
+  }, [nodes, edges, graphOnly, requestClose]);
 
   return (
-    <div className={styles.templateOverlay} role="dialog" aria-modal="true" aria-label="Export workbench">
+    <div className={`${styles.templateOverlay} ${closing ? styles.overlayClosing : ""}`} role="dialog" aria-modal="true" aria-label="Export workbench">
       <div className={styles.exportDialog}>
         <h2>Export workbench</h2>
         <p className={styles.hint}>
@@ -109,7 +112,7 @@ function ExportDialog({ nodes, edges, onClose }: { nodes: WorkbenchNode[]; edges
           <span>Graph only (no embedded images — smaller file, re-upload images after import)</span>
         </label>
         <div className={styles.maskModalActions}>
-          <button type="button" className="nodrag" onClick={onClose}>Cancel</button>
+          <button type="button" className="nodrag" onClick={requestClose}>Cancel</button>
           <button type="button" className="nodrag" disabled={busy} onClick={() => void runExport()}>
             {busy ? "Preparing…" : "Download JSON"}
           </button>
@@ -138,12 +141,48 @@ type WirePrompt = {
 // canvas keeps loading automatically with no picker required.
 const ACTIVE_GRAPH_ID_STORAGE_KEY = "mc.workbench.activeGraphId";
 
-function CanvasInner({ restored }: { restored: boolean }) {
-  const { nodes, edges, running, draft, setDraft, onNodesChange, onEdgesChange, onConnect, addNode, importGraph } = useWorkbenchStore(
+// N-18: how long switchGraph waits for flushPendingSaves before giving up.
+// Generous -- a flush is normally near-instant, and switching graphs is a
+// rare, deliberate action -- but bounded, so a wedged IndexedDB promise (a
+// version-blocked open from another tab now rejects via persistence.ts's
+// onblocked handler, but this is also a defensive backstop against any
+// other never-settling case) cannot suspend the graph-switch UI forever.
+const FLUSH_TIMEOUT_MS = 15_000;
+
+// A promise that only ever REJECTS, after `ms` -- raced against the real
+// flush below so a timeout routes through the exact same failure path as
+// any other flush error (switchGraph's alert + no-switch), never resolving
+// and never clearing the dirty refs itself.
+function rejectAfter(ms: number, message: string): Promise<never> {
+  return new Promise((_resolve, reject) => {
+    window.setTimeout(() => reject(new Error(message)), ms);
+  });
+}
+
+function CanvasInner({
+  restored,
+  switchGraph,
+  cancelPendingSaves,
+}: {
+  restored: boolean;
+  // issue-1: owned by WorkbenchApp (the debounce timers/dirty bookkeeping
+  // live there) -- flushes any pending autosave for the CURRENT graph before
+  // actually switching, so changes still inside the debounce window are
+  // never silently lost to an immediate reload.
+  switchGraph: (graphId: string, options?: SwitchGraphOptions) => Promise<void>;
+  // N-17: lets GraphManager cancel the CURRENT graph's pending debounce
+  // timers BEFORE a destructive operation (deleting the active graph) that
+  // itself yields to the event loop, rather than only when a subsequent
+  // skipSave switch happens to run afterward -- see GraphManager.tsx's
+  // handleDelete for the exact race this closes.
+  cancelPendingSaves: () => void;
+}) {
+  const { nodes, edges, running, restoreBlocked, draft, setDraft, onNodesChange, onEdgesChange, onConnect, addNode, importGraph } = useWorkbenchStore(
     useShallow((state) => ({
       nodes: state.nodes,
       edges: state.edges,
       running: state.running,
+      restoreBlocked: state.restoreBlocked,
       draft: state.draft,
       setDraft: state.setDraft,
       onNodesChange: state.onNodesChange,
@@ -169,6 +208,9 @@ function CanvasInner({ restored }: { restored: boolean }) {
   const [exportOpen, setExportOpen] = useState(false);
   const [graphManagerOpen, setGraphManagerOpen] = useState(false);
   const [wirePrompt, setWirePrompt] = useState<WirePrompt | null>(null);
+  // Exit animation for the wire-drop prompt below; picking a target
+  // (pickWireTarget) still dismisses instantly so node creation stays snappy.
+  const { closing: wireClosing, requestClose: requestWireClose } = useModalDismiss(() => setWirePrompt(null));
   const importInputRef = useRef<HTMLInputElement>(null);
 
   const closeGallery = useCallback(() => {
@@ -313,10 +355,17 @@ function CanvasInner({ restored }: { restored: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [terminalIds, nodes, edges],
   );
-  const runDisabled = running || nodes.length === 0 || blockers.length > 0;
-  const runReason = blockers.length
-    ? `${blockers.length} node(s) are missing a required input — e.g. ${blockers[0].label}: ${blockers[0].missing.join(", ")}.`
-    : undefined;
+  // round 7 issue-1: executor.ts's runNodes already refuses to execute
+  // anything while restoreBlocked (the actual guarantee -- no paid call can
+  // fire regardless of UI state), but disabling the button too means a
+  // click doesn't silently no-op; the blocking overlay covers the canvas
+  // either way, so this is defense-in-depth, not the primary protection.
+  const runDisabled = running || restoreBlocked || nodes.length === 0 || blockers.length > 0;
+  const runReason = restoreBlocked
+    ? "Your workbench could not be loaded -- see the message above."
+    : blockers.length
+      ? `${blockers.length} node(s) are missing a required input — e.g. ${blockers[0].label}: ${blockers[0].missing.join(", ")}.`
+      : undefined;
 
   const handleRunAll = useCallback(() => {
     if (!confirmHighCost(totalUsd)) return;
@@ -425,11 +474,11 @@ function CanvasInner({ restored }: { restored: boolean }) {
       {galleryOpen && <TemplateGallery onPick={pickTemplate} onClose={closeGallery} />}
       {exportOpen && <ExportDialog nodes={nodes} edges={edges} onClose={() => setExportOpen(false)} />}
       {wirePrompt && (
-        <div className={styles.templateOverlay} role="dialog" aria-modal="true" aria-label="Connect to a node" onClick={() => setWirePrompt(null)}>
+        <div className={`${styles.templateOverlay} ${wireClosing ? styles.overlayClosing : ""}`} role="dialog" aria-modal="true" aria-label="Connect to a node" onClick={requestWireClose}>
           <div className={styles.spotlightModal} onClick={(event) => event.stopPropagation()}>
             <header className={styles.templateHeader}>
               <h2>Connect to…</h2>
-              <button type="button" className={styles.smallButton} onClick={() => setWirePrompt(null)}>Close</button>
+              <button type="button" className={styles.smallButton} onClick={requestWireClose}>Close</button>
             </header>
             <Spotlight kinds={wirePrompt.kinds} onPick={pickWireTarget} title="Connect to a node" emptyHint="No compatible node type." />
           </div>
@@ -438,16 +487,8 @@ function CanvasInner({ restored }: { restored: boolean }) {
       {graphManagerOpen && (
         <GraphManager
           activeGraphId={window.localStorage.getItem(ACTIVE_GRAPH_ID_STORAGE_KEY) || DEFAULT_GRAPH_ID}
-          onSwitch={(graphId) => {
-            // Simplest correct switch: persist the new active graph id and
-            // reload -- WorkbenchApp's restore effect below always reads this
-            // key fresh on mount, so this guarantees a clean load of the
-            // target graph's structure + blobs with no stale in-memory state
-            // (blob-cache object URLs, running executor state, etc.) leaking
-            // across graphs.
-            window.localStorage.setItem(ACTIVE_GRAPH_ID_STORAGE_KEY, graphId);
-            window.location.reload();
-          }}
+          onSwitch={switchGraph}
+          onCancelPendingSaves={cancelPendingSaves}
           onClose={() => setGraphManagerOpen(false)}
         />
       )}
@@ -457,13 +498,49 @@ function CanvasInner({ restored }: { restored: boolean }) {
 
 export default function WorkbenchApp() {
   const loadIntoStore = useWorkbenchStore((state) => state.loadGraph);
+  const setRestoreBlockedInStore = useWorkbenchStore((state) => state.setRestoreBlocked);
   const dirtyStamp = useWorkbenchStore((state) => state.dirtyStamp);
   const blobStamp = useWorkbenchStore((state) => state.blobStamp);
   const [restored, setRestored] = useState(false);
+  // round 7 issue-1: null = no failure (either still loading, or already
+  // restored); a string = the restore FAILED with this actionable message,
+  // and the canvas must stay locked until a retry succeeds.
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  const [retryToken, setRetryToken] = useState(0);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const hasRestored = useRef(false);
   const graphIdRef = useRef(DEFAULT_GRAPH_ID);
 
+  // issue-1: pending-autosave bookkeeping so a graph switch/create can flush
+  // instead of silently losing whatever's still inside a debounce window.
+  // Refs (not state) so switchGraph -- a useCallback with a stable identity
+  // -- always reads the LATEST values when it's actually invoked, however
+  // long after it was defined.
+  const structureTimeoutRef = useRef<number | null>(null);
+  const blobTimeoutRef = useRef<number | null>(null);
+  // True from the moment a save is SCHEDULED until it is actually ATTEMPTED
+  // (by its own debounce timer firing, or by an early flush) -- cleared only
+  // on a SUCCESSFUL attempt, so a failed attempt leaves it set and a later
+  // switch's flush tries again rather than silently skipping it.
+  const structureDirtyRef = useRef(false);
+  const blobDirtyRef = useRef(false);
+
+  // round 7 issue-1 (root fix): openDatabase can now REJECT a version-blocked
+  // v1->v2 open (round 6's onblocked handler) instead of hanging forever --
+  // but the OLD restore path caught every rejection the same as a legitimate
+  // loadGraph() null result (no graph saved yet) and just showed a fresh,
+  // editable, autosave-eligible canvas either way. That turned round 6's
+  // fixed hang into something worse: real migrated data sitting blocked
+  // behind another tab, silently overwritten by a blank canvas's own
+  // autosave the instant that tab closed. Now: hasRestored/restored/
+  // restoreBlocked are set ONLY after loadGraph either resolves (a graph was
+  // found, or one was confirmed NOT to exist yet -- both legitimate) --
+  // NEVER on a rejection. A rejection instead sets restoreError (rendered as
+  // a blocking, non-dismissable overlay below) and restoreBlocked (a store
+  // flag executor.ts's runNodes also checks), leaving hasRestored.current
+  // false so BOTH autosave effects stay inert -- no scheduling, no writes of
+  // any kind -- until a Retry attempt actually succeeds.
   useEffect(() => {
     let cancelled = false;
     const activeGraphId = window.localStorage.getItem(ACTIVE_GRAPH_ID_STORAGE_KEY) || DEFAULT_GRAPH_ID;
@@ -473,32 +550,54 @@ export default function WorkbenchApp() {
       .then((graph) => {
         if (cancelled) return;
         if (graph) loadIntoStore(graph.nodes, graph.edges);
+        hasRestored.current = true;
+        setRestoreBlockedInStore(false);
+        setRestoreError(null);
+        setRetrying(false);
+        setRestored(true);
       })
-      .catch(() => {
-        // Missing/blocked IndexedDB just means a fresh canvas.
-      })
-      .finally(() => {
-        if (!cancelled) {
-          hasRestored.current = true;
-          setRestored(true);
-        }
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setRestoreBlockedInStore(true);
+        setRetrying(false);
+        setRestoreError(
+          error instanceof BlockedUpgradeError
+            ? error.message
+            : `Could not load your saved workbench (${error instanceof Error ? error.message : "unknown error"}).`,
+        );
       });
     return () => {
       cancelled = true;
     };
-  }, [loadIntoStore]);
+    // retryToken has no meaning of its own -- bumping it is exactly how the
+    // Retry button below re-triggers this same effect.
+  }, [loadIntoStore, setRestoreBlockedInStore, retryToken]);
+
+  const retryRestore = useCallback(() => {
+    setRetrying(true);
+    setRetryToken((token) => token + 1);
+  }, []);
 
   // Structure-only autosave: fires on every dirtyStamp change, INCLUDING
   // position drags, but never touches the blob store (AC16) -- it writes
   // only the graph/meta JSON records.
   useEffect(() => {
     if (!hasRestored.current || !dirtyStamp) return;
+    structureDirtyRef.current = true;
     const timeout = window.setTimeout(() => {
+      structureTimeoutRef.current = null;
       const state = useWorkbenchStore.getState();
-      void saveGraphStructure(graphIdRef.current, state.nodes as WorkbenchNode[], state.edges).catch(() => {
-        // Autosave is best-effort; the canvas keeps working without it.
-      });
+      void saveGraphStructure(graphIdRef.current, state.nodes as WorkbenchNode[], state.edges)
+        .then(() => {
+          structureDirtyRef.current = false;
+        })
+        .catch(() => {
+          // Autosave is best-effort; the canvas keeps working without it.
+          // Leaves structureDirtyRef set so a later graph-switch flush still
+          // attempts this save rather than silently skipping it.
+        });
     }, 900);
+    structureTimeoutRef.current = timeout;
     return () => window.clearTimeout(timeout);
   }, [dirtyStamp]);
 
@@ -508,16 +607,110 @@ export default function WorkbenchApp() {
   // the structure record, so this alone keeps a fresh canvas fully durable.
   useEffect(() => {
     if (!hasRestored.current || !blobStamp) return;
+    blobDirtyRef.current = true;
     const timeout = window.setTimeout(() => {
+      blobTimeoutRef.current = null;
       const state = useWorkbenchStore.getState();
       void saveGraph(graphIdRef.current, state.nodes as WorkbenchNode[], state.edges)
-        .then(() => setSavedAt(Date.now()))
+        .then(() => {
+          blobDirtyRef.current = false;
+          // saveGraph also rewrites the structure record in the same
+          // transaction (see its own comment), so a structure-only save is
+          // no longer separately outstanding either.
+          structureDirtyRef.current = false;
+          setSavedAt(Date.now());
+        })
         .catch(() => {
           // Autosave is best-effort; the canvas keeps working without it.
         });
     }, 400);
+    blobTimeoutRef.current = timeout;
     return () => window.clearTimeout(timeout);
   }, [blobStamp]);
+
+  // issue-1: cancels whatever debounce timers are still pending -- their own
+  // deferred calls must never fire AFTER a deliberate flush/skip-save (which
+  // could otherwise re-save stale closed-over nodes/edges, or resurrect a
+  // just-deleted graph's record, well after this function returns).
+  const cancelPendingTimers = useCallback(() => {
+    if (structureTimeoutRef.current !== null) {
+      window.clearTimeout(structureTimeoutRef.current);
+      structureTimeoutRef.current = null;
+    }
+    if (blobTimeoutRef.current !== null) {
+      window.clearTimeout(blobTimeoutRef.current);
+      blobTimeoutRef.current = null;
+    }
+  }, []);
+
+  // issue-1: performs, RIGHT NOW, whatever save is still owed for the
+  // CURRENT graph instead of waiting out its debounce window --
+  // decidePendingSave (persistence.ts) picks structure-only/full/none from
+  // the two dirty flags so this can never fire a redundant double save (see
+  // its own doc comment). Throws on failure (propagated from saveGraph/
+  // saveGraphStructure) WITHOUT clearing the dirty flag, so switchGraph's
+  // caller can abort the switch and a later retry still attempts the save.
+  const flushPendingSaves = useCallback(async (): Promise<void> => {
+    cancelPendingTimers();
+    const decision = decidePendingSave(structureDirtyRef.current, blobDirtyRef.current);
+    if (decision === "none") return;
+    const state = useWorkbenchStore.getState();
+    const nodes = state.nodes as WorkbenchNode[];
+    const edges = state.edges;
+    const graphId = graphIdRef.current;
+    if (decision === "full") {
+      await saveGraph(graphId, nodes, edges);
+      blobDirtyRef.current = false;
+      structureDirtyRef.current = false;
+      setSavedAt(Date.now());
+      return;
+    }
+    await saveGraphStructure(graphId, nodes, edges);
+    structureDirtyRef.current = false;
+  }, [cancelPendingTimers]);
+
+  // issue-1 (root fix): graph creation/switching used to update the active
+  // graph id and reload IMMEDIATELY, so an edit still inside the 900ms
+  // structure or 400ms blob debounce window was silently discarded by the
+  // reload before its timer ever fired. Now: cancel the pending timers,
+  // flush/await whatever save is actually owed for the CURRENT graph (a
+  // no-op if nothing is dirty -- the common case incurs no extra latency),
+  // and only THEN update localStorage and reload. A failed flush surfaces an
+  // alert and does NOT switch, so the user's pending change is never lost
+  // silently -- they stay on the same graph with the same in-memory state
+  // and can retry. `skipSave` (used only when falling back after deleting
+  // the currently-open graph) cancels the timers but deliberately skips the
+  // save entirely, since the in-memory canvas belongs to the graph that was
+  // just deleted and flushing it would resurrect that record. N-18: the
+  // flush is bounded by rejectAfter(FLUSH_TIMEOUT_MS) via Promise.race, so a
+  // wedged IndexedDB promise (see persistence.ts's onblocked/onabort
+  // additions) surfaces through this SAME alert-and-stay path instead of
+  // hanging switchGraph -- and therefore every switch/create/delete control
+  // -- forever. Promise.race doesn't cancel the loser, so `flush.catch(() =>
+  // {})` swallows a rejection that arrives after the timeout has already
+  // decided the race (otherwise a slow-but-eventually-failing flush would
+  // surface as an unhandled rejection well after this function returned).
+  const switchGraph = useCallback(async (graphId: string, options?: SwitchGraphOptions): Promise<void> => {
+    if (options?.skipSave) {
+      cancelPendingTimers();
+    } else {
+      try {
+        const flush = flushPendingSaves();
+        flush.catch(() => {});
+        await Promise.race([
+          flush,
+          rejectAfter(FLUSH_TIMEOUT_MS, "saving is taking longer than expected -- close other Material Collager tabs and try again"),
+        ]);
+      } catch (error) {
+        window.alert(
+          `Could not save your current changes before switching workbenches (${error instanceof Error ? error.message : "unknown error"}). Staying on this workbench so nothing is lost -- try again in a moment.`,
+        );
+        return;
+      }
+    }
+    window.localStorage.setItem(ACTIVE_GRAPH_ID_STORAGE_KEY, graphId);
+    window.location.reload();
+  }, [cancelPendingTimers, flushPendingSaves]);
 
   return (
     <div className={styles.shell}>
@@ -529,14 +722,35 @@ export default function WorkbenchApp() {
           <Link className="active" href="/workbench">Workbench</Link>
         </nav>
         <span className={styles.savedAt}>
-          {savedAt ? `Saved ${new Date(savedAt).toLocaleTimeString()}` : restored ? "Autosaves locally" : "Loading…"}
+          {restoreError ? "Could not load" : savedAt ? `Saved ${new Date(savedAt).toLocaleTimeString()}` : restored ? "Autosaves locally" : "Loading…"}
         </span>
       </header>
       <div className={styles.canvasWrap}>
         <div className={styles.canvasFlow}>
           <ReactFlowProvider>
-            <CanvasInner restored={restored} />
+            <CanvasInner restored={restored} switchGraph={switchGraph} cancelPendingSaves={cancelPendingTimers} />
           </ReactFlowProvider>
+          {/* round 7 issue-1: a hard, non-dismissable lock -- unlike every
+              other overlay in this app (TemplateGallery, ExportDialog, ...),
+              there is deliberately no useModalDismiss/backdrop-click/Escape
+              path out of this one. The ONLY way past it is a Retry that
+              actually succeeds; showing (and functionally covering) the
+              canvas underneath while its true state is unknown is exactly
+              the risk this fix closes. */}
+          {restoreError && (
+            <div className={styles.templateOverlay} role="alertdialog" aria-modal="true" aria-label="Could not load your workbench">
+              <div className={styles.exportDialog}>
+                <h2>Could not load your workbench</h2>
+                <p className={styles.hint}>{restoreError}</p>
+                <p className={styles.hint}>Your workbench stays locked (no edits are saved and no node can run) until this succeeds, so nothing already saved can be silently overwritten.</p>
+                <div className={styles.maskModalActions}>
+                  <button type="button" className="nodrag" disabled={retrying} onClick={retryRestore}>
+                    {retrying ? "Retrying…" : "Retry"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
         <Inspector />
       </div>

@@ -1,4 +1,3 @@
-/* eslint-disable @next/next/no-img-element */
 "use client";
 
 // Selected-node inspector panel (S29/AC24): a docked side panel that shows
@@ -9,8 +8,8 @@
 
 import { useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { getBlobUrl } from "./blob-cache";
 import { useWorkbenchStore } from "./store";
+import { ThumbnailImage } from "./nodes/shared";
 import styles from "./workbench.module.css";
 import { specFor, type ReferenceItem, type WorkbenchNode } from "./types";
 
@@ -28,10 +27,9 @@ function ReferenceItemsInspector({ id, items }: { id: string; items: ReferenceIt
       {items.map((item) => (
         <div key={item.id} className={styles.inspectorItem}>
           <div className={styles.referenceThumbRow}>
-            {item.imageKeys.map((key) => {
-              const url = getBlobUrl(key);
-              return url ? <img key={key} src={url} alt="" width={40} height={40} className={styles.inspectorThumb} /> : null;
-            })}
+            {item.imageKeys.map((key) => (
+              <ThumbnailImage key={key} cacheKey={key} alt="" width={40} height={40} className={styles.inspectorThumb} />
+            ))}
           </div>
           <label className={styles.field}>
             <span>Role</span>

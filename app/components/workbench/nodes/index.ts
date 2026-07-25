@@ -92,6 +92,7 @@ export function isExecutable(kind: NodeKind): boolean {
 
 // Re-exports so the registry is a one-stop import site for browser modules.
 export {
+  alwaysExecuteMap,
   auditPaidNodeCoverage,
   defaultParams,
   draftOverrideMap,

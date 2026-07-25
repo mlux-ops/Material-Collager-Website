@@ -1,9 +1,10 @@
 import type { Edge } from "@xyflow/react";
+import { imageCacheKeysFromValue } from "./nodes/generation";
 import { executeMap, isExecutable } from "./nodes/index";
-import { draftOverrideMap, estimateCostMap } from "./nodes/manifests";
+import { alwaysExecuteMap, draftOverrideMap, estimateCostMap } from "./nodes/manifests";
 import { activeRunOf, isPinned, signatureFor, type SignatureContext } from "./signature";
 import { downstreamOf, useWorkbenchStore } from "./store";
-import { specFor, type ExecuteContext, type NodeOutputValue, type WorkbenchNode } from "./types";
+import { acceptedKindsFor, specFor, type ExecuteContext, type NodeOutputValue, type WorkbenchNode } from "./types";
 
 // Client-orchestrated execution: the browser is the scheduler (the host has
 // no server-side queues), one API call per paid node, with ComfyUI-style
@@ -52,6 +53,36 @@ function inputValues(context: GraphContext, nodeId: string, portId: string): Nod
     if (candidates.length) values.push(candidates[0]);
   }
   return values;
+}
+
+// issue-6: the ACTUAL number of images arriving at a node, not "how many
+// incoming edges" (a single References edge can expand to many images, and
+// an edge on a text/report port carries none). Shares this exact expansion
+// semantics with nodes/shared.tsx's useConnectedImageCount so the toolbar's
+// stale-run aggregate and the per-node connected-image display always agree
+// on what a run would actually bill.
+function countConnectedImages(context: GraphContext, nodeId: string): number {
+  const node = currentNode(nodeId);
+  const spec = specFor(node.data.kind);
+  const imagePortIds = new Set(
+    spec.inputs
+      .filter((port) => acceptedKindsFor(port).some((kind) => kind === "image" || kind === "references"))
+      .map((port) => port.id),
+  );
+  if (!imagePortIds.size) return 0;
+  let total = 0;
+  for (const edge of context.incoming.get(nodeId) ?? []) {
+    if (!imagePortIds.has(edge.targetHandle ?? "")) continue;
+    const source = currentNode(edge.source);
+    const run = activeRunOf(source);
+    if (!run) continue;
+    const sourceSpec = specFor(source.data.kind);
+    const portIndex = sourceSpec.outputs.findIndex((port) => port.id === edge.sourceHandle);
+    const value = run.values[portIndex >= 0 ? portIndex : 0]?.[0];
+    if (!value) continue;
+    total += imageCacheKeysFromValue(value).length;
+  }
+  return total;
 }
 
 function signatureContextFor(context: GraphContext, draft: boolean): SignatureContext {
@@ -112,12 +143,31 @@ export function cancelExecution() {
   currentController?.abort();
 }
 
-export async function runNodes(targetIds: string[]): Promise<void> {
+export type RunNodesOptions = {
+  // N-2: targetIds' own shape can't distinguish "the user pressed this ONE
+  // node's own button" from "runAll()'s terminal sweep happened to compute a
+  // single-element target list" -- a graph whose SOLE terminal is an
+  // Export/Download node produces the identical targetIds=[id] either way.
+  // A caller that IS a dedicated per-node button (not a workflow-level
+  // sweep) sets this so alwaysExecute-declaring kinds (Export/Download)
+  // force-execute; runAll()/retryFrom omit it, so a Run Workflow press
+  // always treats such a node as ordinarily memoized (a cache hit when
+  // nothing changed), even for a single-terminal graph.
+  explicitSingleNode?: boolean;
+};
+
+export async function runNodes(targetIds: string[], options: RunNodesOptions = {}): Promise<void> {
   const store = useWorkbenchStore.getState();
-  if (store.running) return;
+  // round 7 issue-1: every run path (runAll's workflow sweep AND every
+  // per-node RunFooter button) funnels through this one function, so
+  // gating it HERE is what makes "no writes of any kind while blocked"
+  // (no paid API call, no applyRun) an actual guarantee rather than a UI
+  // convention -- see WorkbenchApp.tsx's restore effect for what sets this.
+  if (store.running || store.restoreBlocked) return;
   const controller = new AbortController();
   currentController = controller;
   store.setRunning(true);
+  const explicitSingleNode = options.explicitSingleNode === true;
   try {
     const { nodes, edges, draft } = useWorkbenchStore.getState();
     const context = buildContext(nodes, edges, controller.signal);
@@ -152,7 +202,15 @@ export async function runNodes(targetIds: string[]): Promise<void> {
 
       const signature = signatureFor(signatureContext, node);
       const cached = activeRunOf(node);
-      if (cached && cached.signature === signature && node.data.status !== "error") {
+      // Terminal side-effect nodes (Export/Download, W-4) opt out of
+      // memoization -- but ONLY for an explicit press of their OWN button
+      // (N-2): otherwise runAll()'s terminal sweep would silently re-trigger
+      // the side effect on every unrelated Run Workflow press whenever the
+      // node happens to be a (or the sole) graph terminal. See
+      // RunNodesOptions.explicitSingleNode above.
+      const forceExecute =
+        alwaysExecuteMap[node.data.kind] === true && explicitSingleNode && targetIds.length === 1 && targetIds[0] === id;
+      if (!forceExecute && cached && cached.signature === signature && node.data.status !== "error") {
         if (node.data.status !== "done") useWorkbenchStore.getState().setStatus(id, "done");
         continue; // cache hit — no re-run, no re-bill
       }
@@ -229,13 +287,20 @@ export function estimateStaleCost(targetIds: string[]): { totalUsd: number | nul
     if (!isExecutable(node.data.kind) || isPinned(node)) continue;
     const signature = signatureFor(signatureContext, node);
     const cached = activeRunOf(node);
+    // N-2: estimateStaleCost only ever represents the WORKFLOW-level
+    // aggregate (WorkbenchApp.tsx's terminalIds sweep), never a single
+    // explicit node press -- it must mirror runNodes' now-scoped
+    // alwaysExecute behavior and so never treats an alwaysExecute node
+    // (Export/Download) as force-stale here; it is a genuine cache hit like
+    // any other memoized node when nothing changed, matching what a Run
+    // Workflow press will actually do.
     if (cached && cached.signature === signature && node.data.status !== "error") continue; // cache hit — no charge
     staleCount += 1;
     const estimateCost = estimateCostMap[node.data.kind];
     if (!estimateCost) continue;
     const override = draft ? draftOverrideMap[node.data.kind] : undefined;
     const effectiveParams = override ? override(node.data.params) : node.data.params;
-    const inputImages = (context.incoming.get(id) ?? []).length;
+    const inputImages = countConnectedImages(context, id);
     const value = estimateCost({ params: effectiveParams, inputImages });
     if (value !== null) {
       total += value;
@@ -256,7 +321,13 @@ export function unmetRequiredInputs(targetIds: string[]): Array<{ nodeId: string
     const node = currentNode(id);
     const spec = specFor(node.data.kind);
     const connected = new Set((context.incoming.get(id) ?? []).map((edge) => edge.targetHandle));
-    const missing = spec.inputs.filter((port) => port.required && !connected.has(port.id)).map((port) => port.label);
+    // C1: a required port can also be satisfied by a param value with no
+    // connection at all (e.g. Reference Finder's query override) --
+    // satisfiedByParams lets the port declare that without dropping
+    // required entirely.
+    const missing = spec.inputs
+      .filter((port) => port.required && !connected.has(port.id) && !port.satisfiedByParams?.(node.data.params))
+      .map((port) => port.label);
     if (missing.length) problems.push({ nodeId: id, label: spec.title, missing });
   }
   return problems;

@@ -24,7 +24,9 @@ export const accuracyReviewerManifest: NodeManifest = {
     description: "Check a generated image against its reference items and report findings.",
     inputs: [
       { id: "image", kind: "image", label: "Image", required: true },
-      { id: "references", kind: "references", label: "References" },
+      // C3: execute() unconditionally throws without a connected References
+      // node -- required:true surfaces that pre-run too.
+      { id: "references", kind: "references", label: "References", required: true },
     ],
     outputs: [{ id: "report", kind: "report", label: "Report" }],
     paid: true,
@@ -33,6 +35,10 @@ export const accuracyReviewerManifest: NodeManifest = {
   importSchema: {
     paramKeys: {
       domain: { type: "enum", optional: true, values: ["interior", "exterior", "collage"] },
+      // S-5: without this, export/import silently dropped the masked-repair
+      // item selection -- a reviewer configured to "score only these items"
+      // came back scoring everything on round-trip.
+      selectedItemIds: { type: "stringList", optional: true, maxItems: 32, maxLength: 128 },
     },
     sourceBlobKeys: [],
   },

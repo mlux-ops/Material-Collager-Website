@@ -15,12 +15,17 @@ export const runtime = "edge";
 // already-uploaded OpenAI file IDs) and delegates scoring to the shared
 // accuracy-review lib, so multi-image items and masked-repair subsets behave
 // exactly like the generator's built-in QA.
+// S-2: no `fileId` field -- the workbench client always sends base64 image
+// bytes, never an OpenAI file_id, so accepting one here would be undeclared
+// surface letting a client name an arbitrary org file_id. app/lib/
+// accuracy-review.ts still supports fileId for the generator's own path,
+// which constructs its references server-side from its own upload flow.
 type WorkbenchReviewPayload = {
   apiKey?: string;
   imageBase64?: string;
   items?: Array<{ id?: string; role?: string; referenceCount?: number }>;
   selectedItemIds?: string[];
-  references?: Array<{ imageBase64?: string; mimeType?: string; fileId?: string }>;
+  references?: Array<{ imageBase64?: string; mimeType?: string }>;
   domain?: string;
 };
 
@@ -45,6 +50,15 @@ export async function POST(request: Request) {
     const selectedIds = new Set(selectedItemIds);
     const reviewedItems = selectedIds.size ? items.filter((item) => selectedIds.has(item.id)) : items;
     const expectedReferences = reviewedItems.reduce((total, item) => total + item.referenceCount, 0);
+    // N-11: cap on what THIS request actually transmits (the reviewed
+    // subset), not the full board's summed referenceCount -- previously this
+    // check lived inside validateItems and ran over the FULL board's total,
+    // so a 2-image subset review of a 20-image board was rejected citing
+    // images it never sent. When selectedItemIds is empty, reviewedItems ===
+    // items, so a full-board review is capped exactly as before.
+    if (expectedReferences > MAX_REFERENCE_IMAGES) {
+      throw new Error(`Use no more than ${MAX_REFERENCE_IMAGES} reference images in one review.`);
+    }
     const rawReferences = payload.references ?? [];
     if (rawReferences.length !== expectedReferences) {
       throw new Error("One or more reference images were missing from the review request.");
@@ -52,12 +66,6 @@ export async function POST(request: Request) {
 
     let totalBase64Chars = imageBase64.length;
     const references: AccuracyReviewReference[] = rawReferences.map((reference, index) => {
-      const fileId = reference.fileId?.trim();
-      if (fileId) {
-        // The lib references already-uploaded OpenAI files by ID and never
-        // reads the blob in that case, so a placeholder keeps its interface.
-        return { blob: new Blob([], { type: "image/png" }), fileId };
-      }
       const base64 = validBase64(reference.imageBase64, `reference image ${index + 1}`);
       totalBase64Chars += base64.length;
       const mimeType = reference.mimeType || "image/png";
@@ -105,6 +113,17 @@ function validateItems(raw: WorkbenchReviewPayload["items"]): AccuracyReviewItem
     referenceCount: Number(item.referenceCount),
   }));
   if (!items.length) throw new Error("Add at least one item with a reference image.");
+  // N-11: a board-SHAPE sanity cap, distinct from the reference-BYTES cap
+  // (which now applies to the reviewed SUBSET only -- see expectedReferences
+  // in POST above, after reviewedItems is computed). `items` metadata (id/
+  // role/referenceCount) costs no image bytes, but an unbounded item count
+  // would still inflate the shared lib's response schema (minItems/maxItems
+  // == items.length) -- no legitimate board approaches this: every preset in
+  // app/lib/collage.ts's ITEM_PRESETS has a handful of named material/
+  // fixture slots.
+  if (items.length > MAX_REFERENCE_IMAGES) {
+    throw new Error(`Describe no more than ${MAX_REFERENCE_IMAGES} items in one review.`);
+  }
   const ids = new Set<string>();
   for (const item of items) {
     if (!item.id) throw new Error(`Give ${item.role || "each item"} a unique ID.`);
@@ -114,10 +133,6 @@ function validateItems(raw: WorkbenchReviewPayload["items"]): AccuracyReviewItem
     if (!Number.isInteger(item.referenceCount) || item.referenceCount < 1 || item.referenceCount > MAX_REFERENCE_IMAGES) {
       throw new Error(`Item ${item.id} needs between 1 and ${MAX_REFERENCE_IMAGES} reference images.`);
     }
-  }
-  const totalReferences = items.reduce((total, item) => total + item.referenceCount, 0);
-  if (totalReferences > MAX_REFERENCE_IMAGES) {
-    throw new Error(`Use no more than ${MAX_REFERENCE_IMAGES} reference images in one review.`);
   }
   return items;
 }

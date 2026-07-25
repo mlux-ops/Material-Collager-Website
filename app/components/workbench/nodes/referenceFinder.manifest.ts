@@ -29,7 +29,20 @@ export const referenceFinderManifest: NodeManifest = {
     kind: "referenceFinder",
     title: "Reference Finder",
     description: "Search the web for a matching product image and import your pick.",
-    inputs: [{ id: "query", kind: "text", label: "Query", required: true }],
+    inputs: [
+      {
+        id: "query",
+        kind: "text",
+        label: "Query",
+        required: true,
+        // C1: the node's OWN matchQuery override is a working, higher-
+        // priority fallback that needs no upstream connection at all (see
+        // execute below) -- without this predicate, unmetRequiredInputs only
+        // checks edge connectivity and would permanently disable Run for the
+        // documented standalone-override path.
+        satisfiedByParams: (params) => Boolean(params.matchQuery?.trim()),
+      },
+    ],
     outputs: [{ id: "image", kind: "image", label: "Image" }],
     paid: true,
   },
@@ -48,10 +61,13 @@ export const referenceFinderManifest: NodeManifest = {
     if (!query) throw new Error("Connect a search query (e.g. from Reference Analyzer) first.");
 
     ctx.setProgress("Searching…");
+    // S-11: itemType is not one of referenceFinder's defaultParams/
+    // importSchema fields, so it was always undefined here -- dropped
+    // rather than sent as dead request surface.
     const response = await fetch("/api/references/matches", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, itemType: ctx.params.itemType }),
+      body: JSON.stringify({ query }),
       signal: ctx.signal,
     });
     const payload = (await response.json()) as MatchesResponse;

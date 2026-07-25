@@ -5,7 +5,9 @@ import { memo, useCallback, useMemo, useRef, useState, type PointerEvent as Reac
 import { readApiResponse } from "@/app/lib/api-client";
 import { compositeSelectiveEdit, type NormalizedBox } from "@/app/lib/selective-edit";
 import { getBlob, putBlob } from "../blob-cache";
+import { recordUsageCalibration } from "../cost";
 import { useWorkbenchStore } from "../store";
+import { useModalDismiss } from "../useModalDismiss";
 import styles from "../workbench.module.css";
 import type { ExecuteContext, NodeOutputValue, WorkbenchNode, WorkbenchParams } from "../types";
 import { buildGenerationPayload, decodeBase64Image } from "./generation";
@@ -52,6 +54,14 @@ function MaskModal({
     initial ? { x: initial[0], y: initial[1], width: initial[2], height: initial[3] } : undefined,
   );
   const dragStart = useRef<{ x: number; y: number } | null>(null);
+  // Both dismissal paths animate out: Apply stashes its box here so the
+  // shared exit animation runs before onApply/onCancel fires.
+  const pendingApply = useRef<NormalizedBox | null>(null);
+  const { closing, requestClose } = useModalDismiss(() => {
+    const box = pendingApply.current;
+    if (box) onApply(box);
+    else onCancel();
+  });
 
   const toNormalized = useCallback((clientX: number, clientY: number) => {
     const rect = areaRef.current?.getBoundingClientRect();
@@ -88,7 +98,7 @@ function MaskModal({
   const canApply = Boolean(draft && draft.width > 8 && draft.height > 8);
 
   return (
-    <div className={styles.maskModalOverlay} role="dialog" aria-modal="true" aria-label="Select a region to edit">
+    <div className={`${styles.maskModalOverlay} ${closing ? styles.overlayClosing : ""}`} role="dialog" aria-modal="true" aria-label="Select a region to edit">
       <div className={styles.maskModal}>
         <p className={styles.hint}>
           Drag to select the region to edit — everything outside is protected. Masking is guidance, not pixel-exact.
@@ -116,12 +126,16 @@ function MaskModal({
           )}
         </div>
         <div className={styles.maskModalActions}>
-          <button type="button" className="nodrag" onClick={onCancel}>Cancel</button>
+          <button type="button" className="nodrag" onClick={requestClose}>Cancel</button>
           <button
             type="button"
             className="nodrag"
             disabled={!canApply}
-            onClick={() => draft && onApply([draft.x, draft.y, draft.width, draft.height])}
+            onClick={() => {
+              if (!draft) return;
+              pendingApply.current = [draft.x, draft.y, draft.width, draft.height];
+              requestClose();
+            }}
           >
             Apply region
           </button>
@@ -266,4 +280,5 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
     }
   }
   ctx.applyRun({ runId, signature: ctx.signature, at: Date.now(), values: [images], usage: response.usage });
+  recordUsageCalibration(payload.size, payload.quality, response.usage, 1);
 }

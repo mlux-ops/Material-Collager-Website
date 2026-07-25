@@ -3,7 +3,7 @@
 // compositing the edited result back over the original with feathered blending
 // so unselected pixels are restored exactly. Extracted verbatim from the
 // generator page; runs in the browser (canvas, Image, document).
-import { type QaSelectionInput } from "@/app/lib/collage";
+import type { QaSelectionInput } from "./collage.ts";
 
 export type NormalizedBox = [number, number, number, number];
 

@@ -3,11 +3,12 @@
 import { memo } from "react";
 import { readApiResponse } from "@/app/lib/api-client";
 import { putBlob } from "../blob-cache";
+import { recordUsageCalibration } from "../cost";
 import { useWorkbenchStore } from "../store";
 import styles from "../workbench.module.css";
 import type { ExecuteContext, NodeOutputValue } from "../types";
 import { GENERATION_QUALITIES, decodeBase64Image } from "./generation";
-import { UPSCALE_LONG_RUN_THRESHOLD, UPSCALE_SIZES } from "./upscaler.manifest";
+import { resolveUpscaleSize, UPSCALE_LONG_RUN_THRESHOLD, UPSCALE_SIZES } from "./upscaler.manifest";
 import { blobFromImageValue, NodeShell, OutputPreview, RunFooter, useConnectedImageCount, type WorkbenchNodeProps } from "./shared";
 
 // A neutral, content-preserving upscale instruction — the node has no prompt
@@ -24,7 +25,11 @@ function targetLongestEdge(size: string): number {
 export const Component = memo(function UpscalerNode({ id, data }: WorkbenchNodeProps) {
   const updateParams = useWorkbenchStore((state) => state.updateParams);
   const inputImages = useConnectedImageCount(id, ["image"]);
-  const size = data.params.size || "2560x1440";
+  // issue-7: resolved, not raw -- the generic Inspector can write params.size
+  // to any string, and this is what the card must actually show/warn about
+  // (the <select> below only ever WRITES a valid UPSCALE_SIZES member, but
+  // its `value` must still match whatever the CURRENT resolved size is).
+  const size = resolveUpscaleSize(data.params.size);
   const isLongRun = targetLongestEdge(size) >= UPSCALE_LONG_RUN_THRESHOLD;
 
   return (
@@ -67,7 +72,12 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
   if (!base.length) throw new Error("Connect an input image first.");
   const file = await blobFromImageValue(base[0]);
 
-  const size = ctx.params.size || "2560x1440";
+  // issue-7: resolved, not raw -- ctx.params.size may be an arbitrary string
+  // from the generic Inspector (or a draft-mode-computed size that's a valid
+  // gpt-image-2 size but not a UPSCALE_SIZES menu member); this is the same
+  // resolution the manifest's estimateCost/stableParams already apply, so
+  // what gets estimated, signed, and submitted always agree.
+  const size = resolveUpscaleSize(ctx.params.size);
   const quality = ctx.params.quality || "high";
 
   const form = new FormData();
@@ -86,4 +96,5 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
     return { kind: "image", url: cachedUrl, cacheKey };
   });
   ctx.applyRun({ runId, signature: ctx.signature, at: Date.now(), values: [images], usage: response.usage });
+  recordUsageCalibration(size, quality, response.usage, 1);
 }

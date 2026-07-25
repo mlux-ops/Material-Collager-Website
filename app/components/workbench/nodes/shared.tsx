@@ -2,16 +2,18 @@
 "use client";
 
 import type { Edge } from "@xyflow/react";
-import { Handle, Position, useEdges, useNodeId, useReactFlow, type NodeProps } from "@xyflow/react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Handle, Position, useEdges, useNodeId, useNodes, useReactFlow, type NodeProps } from "@xyflow/react";
+import { memo, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { readApiResponse } from "@/app/lib/api-client";
 import { optimizeReferencesForTransport } from "@/app/lib/image-transport";
-import { ensureThumbnail, getBlob, putBlob } from "../blob-cache";
-import { confirmHighCost, formatUsd, recordImageTokenCalibration } from "../cost";
+import { ensureThumbnail, getBlob, getBlobUrl, putBlob } from "../blob-cache";
+import { confirmHighCost, formatUsd, recordUsageCalibration } from "../cost";
 import { cancelExecution, retryFrom, runNodes } from "../executor";
+import { MAX_IMAGE_BYTES } from "../export-import";
 import { activeRunOf, signatureFor, type SignatureContext } from "../signature";
 import { useWorkbenchStore } from "../store";
+import { useModalDismiss } from "../useModalDismiss";
 import styles from "../workbench.module.css";
 import {
   acceptedKindsFor,
@@ -31,9 +33,29 @@ import {
   GENERATION_SIZES,
   imageCacheKeysFromValue,
 } from "./generation";
-import { estimateCostMap, paidMap, specFor } from "./manifests";
+import { draftOverrideMap, estimateCostMap, paidMap, specFor } from "./manifests";
 
 export type WorkbenchNodeProps = NodeProps<WorkbenchNode>;
+
+// issue-9: Photo/References upload inputs advertise "PNG, JPEG, or WebP
+// under 50 MB" in their own card copy, but previously only checked
+// `file.type.startsWith("image/")` (accepting e.g. GIF/BMP/SVG) with no size
+// check at all -- the HTML <input accept="..."> attribute is a picker HINT
+// only, never a validation boundary (drag-drop and "all files" bypass it).
+// Enforces the SAME MIME allowlist and byte cap the import validator already
+// does (MAX_IMAGE_BYTES, from export-import.ts) so the live-upload boundary
+// and the import path agree.
+export const ALLOWED_UPLOAD_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+export const MAX_UPLOAD_IMAGE_BYTES = MAX_IMAGE_BYTES;
+
+// Returns an actionable rejection message for a single file, or null when
+// it's acceptable. Callers surface a non-null result via setStatus(id,
+// "error", message) so it renders through NodeShell's existing error text.
+export function validateUploadFile(file: File): string | null {
+  if (!ALLOWED_UPLOAD_MIME_TYPES.has(file.type)) return `"${file.name}" must be a PNG, JPEG, or WebP image.`;
+  if (file.size > MAX_UPLOAD_IMAGE_BYTES) return `"${file.name}" exceeds the 50MB limit.`;
+  return null;
+}
 
 const STATUS_LABEL: Record<WorkbenchNodeData["status"], string> = {
   idle: "Idle",
@@ -162,15 +184,28 @@ export function useMissingRequiredInputs(id: string, kind: NodeKind): PortSpec[]
       const required = specFor(kind).inputs.filter((port) => port.required);
       if (!required.length) return [];
       const connected = new Set(state.edges.filter((edge) => edge.target === id).map((edge) => edge.targetHandle));
-      return required.filter((port) => !connected.has(port.id));
+      // C1: a required port can also be satisfied by a param value with no
+      // connection at all (e.g. Reference Finder's query override).
+      const params = state.nodes.find((node) => node.id === id)?.data.params;
+      return required.filter((port) => !connected.has(port.id) && !(params && port.satisfiedByParams?.(params)));
     }),
   );
 }
 
 export function RunFooter({ id, data, inputImages }: { id: string; data: WorkbenchNodeData; inputImages: number }) {
   const running = useWorkbenchStore((state) => state.running);
+  const draft = useWorkbenchStore((state) => state.draft);
+  // N-7: apply the SAME effective (draft-overridden) params executor.ts's
+  // estimateStaleCost and executeNode already do, so this per-node price and
+  // the confirmHighCost gate below can never disagree with what a Run press
+  // will actually execute, sign, and bill -- before this fix, a large node's
+  // button kept showing (and confirming) its full non-draft price even
+  // though Draft mode would run it at a fraction of the cost, contradicting
+  // useCacheHit just below, which was already draft-aware.
+  const override = draft ? draftOverrideMap[data.kind] : undefined;
+  const effectiveParams = override ? override(data.params) : data.params;
   const estimateCost = estimateCostMap[data.kind];
-  const estimate = estimateCost ? estimateCost({ params: data.params, inputImages }) : null;
+  const estimate = estimateCost ? estimateCost({ params: effectiveParams, inputImages }) : null;
   const cacheHit = useCacheHit(id);
   const missing = useMissingRequiredInputs(id, data.kind);
   const disabledReason = missing.length ? `Missing required input: ${missing.map((port) => port.label).join(", ")}` : undefined;
@@ -211,6 +246,137 @@ export function RunFooter({ id, data, inputImages }: { id: string; data: Workben
   );
 }
 
+// AC20/issue-4: node cards never hold a full-res bitmap, not even
+// transiently while the thumbnail is still generating -- renders a neutral,
+// same-dimensioned placeholder until ensureThumbnail resolves, then the
+// thumbnail itself. Every card preview (OutputPreview below, Variations'
+// candidate grid, Photo/References/Crop source previews, the Inspector's
+// reference thumbnails) renders through this one component so "full
+// resolution only in a lightbox or an editing surface" holds uniformly
+// everywhere. memo()-wrapped to match every other node component's
+// convention (also independently reasonable for a component instantiated
+// many times per card, e.g. Variations' grid).
+export const ThumbnailImage = memo(function ThumbnailImage({
+  cacheKey,
+  alt,
+  width = 256,
+  height = 192,
+  className,
+  style,
+}: {
+  cacheKey: string | undefined;
+  alt: string;
+  width?: number;
+  height?: number;
+  className?: string;
+  style?: CSSProperties;
+}) {
+  // N-9: `undefined` = still generating (or not started yet); `null` =
+  // generation genuinely FAILED (ensureThumbnail resolved with no url) --
+  // kept distinct from "still generating" so a permanent failure never
+  // renders an eternal, indistinguishable-from-loading empty box. Before
+  // this fix, the user's own uploaded source (Photo/References/Crop) could
+  // silently show a blank placeholder forever with no way to tell "still
+  // working" from "this will never load".
+  const [thumbUrl, setThumbUrl] = useState<string | null | undefined>(undefined);
+  const [thumbKey, setThumbKey] = useState<string | undefined>(cacheKey);
+
+  // Adjust state during render (React's documented pattern) so a stale
+  // thumbnail from a previous cacheKey never flashes.
+  if (thumbKey !== cacheKey) {
+    setThumbKey(cacheKey);
+    setThumbUrl(undefined);
+  }
+
+  useEffect(() => {
+    if (!cacheKey) return undefined;
+    let cancelled = false;
+    void ensureThumbnail(cacheKey).then((url) => {
+      if (!cancelled) setThumbUrl(url ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [cacheKey]);
+
+  if (!cacheKey) return null;
+
+  // N-13: decorative usage (e.g. Inspector's per-item reference thumbnails,
+  // which pass alt="" because the surrounding row already labels the item)
+  // must stay silent in every state below -- previously the placeholder
+  // always announced role="img" + "<alt> (loading)" even for alt="", so up
+  // to 16 per-item placeholders could announce as an image labelled just
+  // " (loading)". A non-empty alt is informative content and gets a role/
+  // label appropriate to its actual state, matching the real <img> branch's
+  // existing (correct) alt="" handling.
+  const decorative = alt === "";
+
+  if (thumbUrl === undefined) {
+    // aspectRatio only (not a fixed width/height, which would override a
+    // responsive `width:100%` class -- e.g. thumbImg/candidateThumb -- and
+    // could overflow a narrower container): the placeholder should size the
+    // same way the eventual <img> does, constrained by className/CSS, with
+    // this just supplying the ratio those layouts need to compute a height
+    // from a 100%-wide box.
+    return (
+      <div
+        className={`${styles.thumbPlaceholder} ${className ?? ""}`}
+        style={{ aspectRatio: `${width} / ${height}`, ...style }}
+        {...(decorative ? { "aria-hidden": "true" as const } : { role: "img" as const, "aria-label": `${alt} (loading)` })}
+      />
+    );
+  }
+
+  if (thumbUrl === null) {
+    // issue-4/N-9: thumbnail generation genuinely failed (corrupt/oversized
+    // source, no createImageBitmap, no 2d canvas context, or toBlob returned
+    // null). Fall back to the tracked full-resolution URL -- if the source
+    // blob is still resident -- as a LAST RESORT only, never as the routine
+    // loading path above. If even that is unavailable, render a visibly
+    // distinct "preview unavailable" affordance rather than a box
+    // indistinguishable from "still loading".
+    const fallbackUrl = getBlobUrl(cacheKey);
+    if (fallbackUrl) {
+      return (
+        <img
+          src={fallbackUrl}
+          alt={alt}
+          draggable={false}
+          decoding="async"
+          loading="lazy"
+          width={width}
+          height={height}
+          className={className}
+          style={style}
+        />
+      );
+    }
+    return (
+      <div
+        className={`${styles.thumbPlaceholder} ${styles.thumbFailed} ${className ?? ""}`}
+        style={{ aspectRatio: `${width} / ${height}`, ...style }}
+        {...(decorative
+          ? { "aria-hidden": "true" as const }
+          : { role: "img" as const, "aria-label": `${alt} (preview unavailable)` })}
+      />
+    );
+  }
+
+  return (
+    <img
+      src={thumbUrl}
+      alt={alt}
+      draggable={false}
+      decoding="async"
+      loading="lazy"
+      width={width}
+      height={height}
+      className={className}
+      style={style}
+    />
+  );
+});
+
 // Node cards render a <=256px thumbnail (AC20) — never the full-res bitmap —
 // generated lazily and cached alongside the full-res blob (see
 // blob-cache.ts's ensureThumbnail). Full resolution opens only in the
@@ -221,28 +387,8 @@ export function OutputPreview({ id, data }: { id: string; data: WorkbenchNodeDat
   const run = data.runs[data.activeRun];
   const image = run?.values[0]?.find((value) => value.kind === "image");
   const cacheKey = image && image.kind === "image" ? image.cacheKey : undefined;
-  const [thumbUrl, setThumbUrl] = useState<string | undefined>(undefined);
-  const [thumbKey, setThumbKey] = useState<string | undefined>(cacheKey);
   const [lightboxOpen, setLightboxOpen] = useState(false);
-
-  // Reset the resolved thumbnail during render when the source key changes
-  // (React's documented "adjust state during render" pattern) so a stale thumb
-  // never flashes and we avoid setState-in-effect.
-  if (thumbKey !== cacheKey) {
-    setThumbKey(cacheKey);
-    setThumbUrl(undefined);
-  }
-
-  useEffect(() => {
-    if (!cacheKey) return undefined;
-    let cancelled = false;
-    void ensureThumbnail(cacheKey).then((url) => {
-      if (!cancelled) setThumbUrl(url);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [cacheKey]);
+  const { closing, requestClose } = useModalDismiss(() => setLightboxOpen(false));
 
   if (!image || image.kind !== "image") return null;
 
@@ -260,16 +406,7 @@ export function OutputPreview({ id, data }: { id: string; data: WorkbenchNodeDat
         onClick={() => setLightboxOpen(true)}
         aria-label="Open full-resolution image"
       >
-        <img
-          src={thumbUrl ?? image.url}
-          alt="Node output"
-          draggable={false}
-          decoding="async"
-          loading="lazy"
-          width={256}
-          height={192}
-          className={styles.thumbImg}
-        />
+        <ThumbnailImage cacheKey={cacheKey} alt="Node output" width={256} height={192} className={styles.thumbImg} />
       </button>
       <button
         type="button"
@@ -287,14 +424,14 @@ export function OutputPreview({ id, data }: { id: string; data: WorkbenchNodeDat
         </figcaption>
       )}
       {lightboxOpen && (
-        <div className={styles.lightboxOverlay} onClick={() => setLightboxOpen(false)} role="presentation">
+        <div className={`${styles.lightboxOverlay} ${closing ? styles.overlayClosing : ""}`} onClick={requestClose} role="presentation">
           <img
             src={image.url}
             alt="Full-resolution node output"
             className={styles.lightboxImage}
             onClick={(event) => event.stopPropagation()}
           />
-          <button type="button" className={styles.lightboxClose} onClick={() => setLightboxOpen(false)}>
+          <button type="button" className={styles.lightboxClose} onClick={requestClose}>
             Close
           </button>
         </div>
@@ -303,12 +440,32 @@ export function OutputPreview({ id, data }: { id: string; data: WorkbenchNodeDat
   );
 }
 
+// issue-6: the ACTUAL number of images a node's inputs currently carry, not
+// "how many edges" -- a single References edge can expand to many images,
+// so this resolves each matching edge's live upstream value and expands it
+// via imageCacheKeysFromValue (an image value contributes 1, a references
+// bundle contributes its own item count). Shares this exact expansion logic
+// with executor.ts's estimateStaleCost so the toolbar's stale-run aggregate
+// and this per-node display always agree on what a run would actually bill.
 export function useConnectedImageCount(id: string, portIds: string[]) {
   const edges = useEdges();
-  return useMemo(
-    () => edges.filter((edge) => edge.target === id && portIds.includes(edge.targetHandle || "")).length,
-    [edges, id, portIds],
-  );
+  const nodes = useNodes<WorkbenchNode>();
+  return useMemo(() => {
+    let total = 0;
+    for (const edge of edges) {
+      if (edge.target !== id || !portIds.includes(edge.targetHandle || "")) continue;
+      const source = nodes.find((candidate) => candidate.id === edge.source);
+      if (!source) continue;
+      const run = activeRunOf(source);
+      if (!run) continue;
+      const sourceSpec = specFor(source.data.kind);
+      const portIndex = sourceSpec.outputs.findIndex((port) => port.id === edge.sourceHandle);
+      const value = run.values[portIndex >= 0 ? portIndex : 0]?.[0];
+      if (!value) continue;
+      total += imageCacheKeysFromValue(value).length;
+    }
+    return total;
+  }, [edges, nodes, id, portIds]);
 }
 
 export function GenerationSettings({ id, data }: { id: string; data: WorkbenchNodeData }) {
@@ -389,10 +546,10 @@ export async function executeGeneration(ctx: ExecuteContext, options: { requireB
   });
   ctx.applyRun({ runId, signature: ctx.signature, at: Date.now(), values: [images], usage: response.usage });
 
-  // Self-calibration (S27/AC21): learn the real per-input-image USD cost from
-  // this run's actual usage detail, replacing the flat $0.02/image seed for
-  // this (size, quality) bucket. A run with no input images or no usage
-  // detail from the upstream API is a no-op inside recordImageTokenCalibration.
-  const imageTokens = (response.usage as { input_tokens_details?: { image_tokens?: number } } | undefined)?.input_tokens_details?.image_tokens;
-  recordImageTokenCalibration(payload.size, payload.quality, imageTokens, files.length);
+  // Self-calibration (S27/AC21/issue-6): learn the real per-input-image USD
+  // cost from this run's actual usage detail, replacing the flat $0.02/image
+  // seed for this (size, quality) bucket. A run with no input images or no
+  // usage detail from the upstream API is a no-op inside
+  // recordImageTokenCalibration.
+  recordUsageCalibration(payload.size, payload.quality, response.usage, files.length);
 }

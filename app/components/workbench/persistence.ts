@@ -6,7 +6,7 @@ import type { Edge } from "@xyflow/react";
 // pulled from "./types" below is type-only (`import type`), which Node's type
 // stripping erases entirely, so that one relative import never needs to
 // resolve at runtime and is left extensionless like the rest of the codebase.
-import { getBlob, putBlob, thumbnailKeyFor, totalCachedBytes } from "./blob-cache.ts";
+import { ensureThumbnail, getBlob, putBlob, thumbnailKeyFor, totalCachedBytes } from "./blob-cache.ts";
 import { defaultParams, MANIFESTS } from "./nodes/manifests.ts";
 import type { NodeKind, NodeOutputValue, NodeRun, WorkbenchNode, WorkbenchParams } from "./types";
 
@@ -61,6 +61,31 @@ export type GraphMeta = {
   name: string;
   savedAt: number;
   nodeCount: number;
+  /**
+   * @deprecated issue-2/AC17: legacy INLINE base64 data-URL thumbnail,
+   * written by saveGraph between round 3 and this fix -- violated the story
+   * constraint that image bytes never live in React state (GraphManager held
+   * the whole GraphMeta[] list, base64 and all) and duplicated per named
+   * graph. No longer ever written; existing records that still carry ONLY
+   * this field are tolerated read-only (graphThumbnailSource below renders
+   * it directly -- a data URL needs no object-URL lifecycle) until the graph
+   * is next saved with an image present, at which point thumbnailKey takes
+   * over and this field is cleared. Absent on records saved before either
+   * field existed, and absent on graphs with no image yet -- both valid.
+   */
+  thumbnail?: string;
+  // issue-2/AC17 ("meta index (id, name, savedAt, node count/thumbnail)"):
+  // the LOGICAL blob-cache key (see graphThumbnailStorageKey) under which
+  // the actual <=256px thumbnail JPEG bytes are namespaced-blob-stored --
+  // never the bytes themselves. GraphManager fetches the Blob on demand
+  // (getGraphThumbnailBlob) and renders it through a tracked, revoked object
+  // URL (see nodes/shared.tsx's ThumbnailImage for the identical pattern).
+  // Populated by saveGraph's full save from the most recently-produced image
+  // in the graph (or the first available one, if none has a later timestamp
+  // to prefer). Absent on graphs with no image yet -- a valid, unremarkable
+  // state; GraphManager renders a plain row when both this and the legacy
+  // field above are missing.
+  thumbnailKey?: string;
 };
 
 export type StoredNode = {
@@ -200,8 +225,30 @@ function migrateV1ToV2(transaction: IDBTransaction): void {
   };
 }
 
+// round 7 issue-1: a distinct, checkable error class for the ONE storage
+// failure that must never be silently treated as "no graph saved yet" --
+// WorkbenchApp.tsx's restore path checks `error instanceof
+// BlockedUpgradeError` so it can surface this exact, actionable message
+// (rather than a generic one) while still treating EVERY rejection (this or
+// any other) as "unsafe to assume a blank canvas" -- see its own comment.
+export class BlockedUpgradeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BlockedUpgradeError";
+  }
+}
+
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
+    // round 7 issue-2 (N-19): rejecting in onblocked does NOT stop the
+    // underlying IDBOpenDBRequest -- if the blocking connection later
+    // closes, onsuccess can still fire afterward with a live connection.
+    // `settled` makes every handler below a no-op once ANY of them has
+    // already resolved/rejected this promise (a Promise can only settle
+    // once anyway, but request.result still needs to be explicitly closed
+    // on a LATE onsuccess -- see there -- or it leaks open, unreachable, at
+    // v2 forever, itself becoming a blocker for any future upgrade).
+    let settled = false;
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = (event) => {
       const db = request.result;
@@ -213,9 +260,70 @@ function openDatabase(): Promise<IDBDatabase> {
       // into the v2 namespace, atomically, in this same transaction).
       if (transaction && event.oldVersion < 2) migrateV1ToV2(transaction);
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("Could not open workbench storage."));
+    request.onsuccess = () => {
+      if (settled) {
+        // This promise already rejected (via onblocked, below) before this
+        // fired -- resolving again would be a harmless no-op, but silently
+        // dropping this now-unreachable connection would leak it open.
+        request.result.close();
+        return;
+      }
+      settled = true;
+      const db = request.result;
+      // The standard companion to requesting an exclusive upgrade: if
+      // ANOTHER tab/connection later needs to upgrade past this version,
+      // this tab must not become ITS blocker -- closing on versionchange is
+      // exactly what onblocked's own message asks OTHER tabs to do.
+      db.onversionchange = () => db.close();
+      resolve(db);
+    };
+    request.onerror = () => {
+      if (settled) return;
+      settled = true;
+      reject(request.error || new Error("Could not open workbench storage."));
+    };
+    // N-18: a version-blocked open previously never settled at all --
+    // neither onsuccess nor onerror fires while blocked, only while waiting.
+    // The realistic trigger is another open connection (e.g. an older
+    // tab/build still holding a v1 connection) that hasn't closed to let
+    // this v2 upgrade proceed. Round 5 made switchGraph `await` a save
+    // before it can navigate, so an unsettled openDatabase() call would now
+    // wedge the whole graph-switch UI indefinitely rather than just being a
+    // silent no-op -- reject with an actionable, distinctly-typed error
+    // instead (round 7 issue-1: the restore path must NOT treat this the
+    // same as "no graph saved yet").
+    request.onblocked = () => {
+      if (settled) return;
+      settled = true;
+      reject(new BlockedUpgradeError("Close other Material Collager tabs and try again -- storage is upgrading."));
+    };
   });
+}
+
+// N-18: shared failure wiring for a transaction -- onerror (a request's
+// error bubbled up to the transaction) and onabort (ANY abort, including
+// one with NO preceding request error -- e.g. an explicit transaction.abort()
+// call, or the connection being force-closed by another tab's versionchange
+// upgrade) -- both close the connection and reject with the same message.
+// Previously only onerror was wired on every transaction in this file, so an
+// abort with no request error left its promise pending FOREVER. Safe to wire
+// both: when a request error DOES cause the abort, onerror fires first and
+// settles the promise, making onabort's later call a harmless no-op (a
+// Promise can only settle once). Exported (and typed loosely enough to
+// accept any onerror/onabort/close/error-shaped object) so this exact
+// wiring contract is directly unit-testable without a real IndexedDB.
+export function rejectTransactionFailures(
+  transaction: Pick<IDBTransaction, "onerror" | "onabort" | "error">,
+  db: Pick<IDBDatabase, "close">,
+  reject: (reason?: unknown) => void,
+  message: string,
+): void {
+  const onFailure = () => {
+    db.close();
+    reject(transaction.error || new Error(message));
+  };
+  transaction.onerror = onFailure;
+  transaction.onabort = onFailure;
 }
 
 export function createGraphId(): string {
@@ -370,14 +478,128 @@ function serializeEdges(edges: Edge[]): StoredGraph["edges"] {
   return edges.map(({ id, source, target, sourceHandle, targetHandle }) => ({ id, source, target, sourceHandle, targetHandle }));
 }
 
+// issue-2/AC17: the graph-list thumbnail's own logical blob-cache key, one
+// per graph, namespaced via the SAME blobStorageKey convention every other
+// SOURCE/OUTPUT blob already uses (`blob:<graphId>:graph-thumbnail`). This
+// is deliberately NOT content-addressed -- there is only ever one "current"
+// thumbnail per graph -- so a fresh save simply overwrites the previous
+// blob at this same key. Reusing the existing per-graph blob namespace means
+// deleteGraph's existing generic `blob:<graphId>:*` prefix sweep already
+// deletes this blob for free with no extra code (see deleteGraph below).
+const GRAPH_THUMBNAIL_CACHE_KEY = "graph-thumbnail";
+
+export function graphThumbnailStorageKey(graphId: string): string {
+  return blobStorageKey(graphId, GRAPH_THUMBNAIL_CACHE_KEY);
+}
+
+// issue-2/AC17: which thumbnail source a GraphMeta record should render.
+// Prefers the blob-keyed thumbnail (thumbnailKey) -- its bytes are fetched
+// on demand via getGraphThumbnailBlob and shown through a tracked, revoked
+// object URL, never inline as base64 in React state. A record saved between
+// round 3 and this fix may carry ONLY the legacy inline field (thumbnail) --
+// tolerated read-only (a data URL needs no object-URL lifecycle, so it
+// renders directly). Absent both, there is nothing to show. Framework-free
+// and pure so the "meta shape" decision itself is directly unit-testable
+// without a real IndexedDB/Blob.
+export type GraphThumbnailSource = { kind: "key"; key: string } | { kind: "legacy"; dataUrl: string } | { kind: "none" };
+
+export function graphThumbnailSource(meta: Pick<GraphMeta, "thumbnailKey" | "thumbnail">): GraphThumbnailSource {
+  if (meta.thumbnailKey) return { kind: "key", key: meta.thumbnailKey };
+  if (meta.thumbnail) return { kind: "legacy", dataUrl: meta.thumbnail };
+  return { kind: "none" };
+}
+
+// issue-2/AC17: reads JUST this graph's thumbnail Blob straight from
+// IndexedDB (not the full loadGraph) -- the graph-manager UI lists EVERY
+// named graph, almost none of which are the currently-active one, so most
+// have nothing resident in the in-memory blob cache (blob-cache.ts) at all.
+// Returns undefined for a graph with no thumbnail row (never saved one yet,
+// or a legacy record still on the inline-only path).
+export async function getGraphThumbnailBlob(graphId: string): Promise<Blob | undefined> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE, "readonly");
+    const store = transaction.objectStore(STORE);
+    const request = store.get(graphThumbnailStorageKey(graphId));
+    transaction.oncomplete = () => {
+      db.close();
+      resolve(request.result as Blob | undefined);
+    };
+    rejectTransactionFailures(transaction, db, reject, "Could not load the workbench graph thumbnail.");
+  });
+}
+
+// The graph-list thumbnail's SOURCE image -- the most recently-produced
+// image anywhere in the graph (by run.at across every node's active output,
+// covering both paid OUTPUT runs and a Photo/References SOURCE's own
+// display run), falling back to whichever image is available when nothing
+// is timestamped later than anything else (a single-image graph). Returns
+// the raw Blob (never a data URL -- issue-2/AC17: image bytes never live in
+// React state, and base64 is never aggregated across named graphs); the
+// caller (saveGraph) persists it under this graph's OWN namespaced
+// blob-storage key inside the same save transaction, and only a small
+// logical key marker travels through GraphMeta. Returns undefined when the
+// graph has no image yet, a valid, unremarkable state. Must run BEFORE any
+// IndexedDB transaction opens: ensureThumbnail is async (canvas/
+// createImageBitmap work), and an IDB transaction auto-commits once no
+// request is pending, so awaiting inside a transaction callback would risk
+// the transaction closing out from under it.
+async function computeGraphThumbnail(snapshots: NodeSnapshot[]): Promise<Blob | undefined> {
+  let best: { cacheKey: string; at: number } | undefined;
+  for (const snapshot of snapshots) {
+    for (const run of snapshot.outputs) {
+      for (const candidates of run.values) {
+        for (const value of candidates) {
+          if (value.kind !== "image") continue;
+          if (!best || run.at >= best.at) best = { cacheKey: value.cacheKey, at: run.at };
+        }
+      }
+    }
+  }
+  if (!best) return undefined;
+  try {
+    const thumbUrl = await ensureThumbnail(best.cacheKey);
+    if (!thumbUrl) return undefined;
+    return getBlob(thumbnailKeyFor(best.cacheKey));
+  } catch {
+    // Best-effort: a graph list row with no thumbnail is a fine degraded
+    // state, never worth failing the whole save over.
+    return undefined;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Save: structure-only (cheap, every dirtyStamp -- incl. drags) vs. full
 // (structure + blob write/GC + byte-budget eviction -- only on new-run,
 // pin-toggle, and upload/source-change events; see store.ts's blobStamp).
 // ---------------------------------------------------------------------------
 
+export type PendingSaveKind = "none" | "structure" | "full";
+
+// issue-1: which save WorkbenchApp.tsx's graph-switch flush should perform,
+// given what autosave still owes the CURRENT graph, WITHOUT ever performing
+// a redundant DOUBLE save. saveGraph (the "full" save) also rewrites the
+// structure record in the very same transaction (see its own comment
+// below), so a pending blob-save always takes priority and makes a
+// separately-pending structure-save moot -- calling BOTH would be a
+// pointless duplicate write, and (worse, if the caller doesn't cancel its
+// timers first) a race between two overlapping IDB transactions for the
+// same graph. Only when NEITHER is pending is there nothing to flush at
+// all. Pure and framework-free so this exact decision -- the crux of "don't
+// introduce a double-save" -- is directly unit-testable without a real
+// React component, timer, or IndexedDB.
+export function decidePendingSave(structureDirty: boolean, blobDirty: boolean): PendingSaveKind {
+  if (blobDirty) return "full";
+  if (structureDirty) return "structure";
+  return "none";
+}
+
 // Writes ONLY the graph + meta records -- no blob-store read or write at all.
 // Safe to call on every position drag: it can never touch a single blob.
+// The thumbnail (either shape -- see GraphMeta) is deliberately NOT
+// recomputed here (that would mean ensureThumbnail/blob-cache work on every
+// drag, exactly what this path exists to avoid) -- it just carries the
+// existing meta's thumbnail fields forward unchanged, same as the name.
 export async function saveGraphStructure(graphId: string, nodes: WorkbenchNode[], edges: Edge[]): Promise<void> {
   const storedNodes = toStoredNodes(snapshotNodes(nodes));
   const db = await openDatabase();
@@ -390,7 +612,14 @@ export async function saveGraphStructure(graphId: string, nodes: WorkbenchNode[]
       const existing = existingMetaRequest.result as GraphMeta | undefined;
       const savedAt = Date.now();
       const graph: StoredGraph = { version: 2, id: graphId, savedAt, nodes: storedNodes, edges: serializeEdges(edges) };
-      const meta: GraphMeta = { id: graphId, name: existing?.name ?? DEFAULT_GRAPH_NAME, savedAt, nodeCount: storedNodes.length };
+      const meta: GraphMeta = {
+        id: graphId,
+        name: existing?.name ?? DEFAULT_GRAPH_NAME,
+        savedAt,
+        nodeCount: storedNodes.length,
+        thumbnailKey: existing?.thumbnailKey,
+        thumbnail: existing?.thumbnail,
+      };
       store.put(graph, `${GRAPH_PREFIX}${graphId}`);
       store.put(meta, metaKey);
     };
@@ -398,10 +627,7 @@ export async function saveGraphStructure(graphId: string, nodes: WorkbenchNode[]
       db.close();
       resolve();
     };
-    transaction.onerror = () => {
-      db.close();
-      reject(transaction.error || new Error("Could not save the workbench graph."));
-    };
+    rejectTransactionFailures(transaction, db, reject, "Could not save the workbench graph.");
   });
 }
 
@@ -415,6 +641,11 @@ export async function saveGraph(graphId: string, nodes: WorkbenchNode[], edges: 
   const sourceKeys = new Set(snapshots.flatMap((snapshot) => snapshot.sourceKeys));
   applyByteBudget(snapshots, sourceKeys, budgetBytes);
   const storedNodes = toStoredNodes(snapshots);
+  // issue-2/AC17: the raw Blob, not a data URL -- written into this SAME
+  // transaction below under the graph's own namespaced thumbnail key, never
+  // inlined into the meta record or held in React state.
+  const thumbnailBlob = await computeGraphThumbnail(snapshots);
+  const thumbnailStorageKey = graphThumbnailStorageKey(graphId);
 
   const db = await openDatabase();
   await new Promise<void>((resolve, reject) => {
@@ -426,9 +657,27 @@ export async function saveGraph(graphId: string, nodes: WorkbenchNode[], edges: 
       const existing = existingMetaRequest.result as GraphMeta | undefined;
       const savedAt = Date.now();
       const graph: StoredGraph = { version: 2, id: graphId, savedAt, nodes: storedNodes, edges: serializeEdges(edges) };
-      const meta: GraphMeta = { id: graphId, name: existing?.name ?? DEFAULT_GRAPH_NAME, savedAt, nodeCount: storedNodes.length };
+      // Keep the previous thumbnail if this particular save has nothing
+      // newer to offer (e.g. every image was just evicted) rather than
+      // regressing a graph-list row back to blank -- true whenever EITHER a
+      // fresh blob-keyed thumbnail was just computed, OR an existing one
+      // (from a previous save) is already on record.
+      const keepsThumbnail = Boolean(thumbnailBlob) || Boolean(existing?.thumbnailKey);
+      const meta: GraphMeta = {
+        id: graphId,
+        name: existing?.name ?? DEFAULT_GRAPH_NAME,
+        savedAt,
+        nodeCount: storedNodes.length,
+        thumbnailKey: keepsThumbnail ? GRAPH_THUMBNAIL_CACHE_KEY : undefined,
+        // issue-2: never write a fresh legacy inline thumbnail again -- but a
+        // record still carrying ONLY the legacy field (no thumbnailKey yet,
+        // this save produced nothing newer either) keeps it, tolerated
+        // read-only, rather than silently losing its one thumbnail.
+        thumbnail: keepsThumbnail ? undefined : existing?.thumbnail,
+      };
       store.put(graph, `${GRAPH_PREFIX}${graphId}`);
       store.put(meta, metaKey);
+      if (thumbnailBlob) store.put(thumbnailBlob, thumbnailStorageKey);
 
       const graphBlobPrefix = `${BLOB_PREFIX}${graphId}:`;
       const keysRequest = store.getAllKeys();
@@ -450,6 +699,11 @@ export async function saveGraph(graphId: string, nodes: WorkbenchNode[], edges: 
             if (blob) store.put(blob, storageKey);
           }
         }
+        // The thumbnail blob is namespaced the same way (blob:<graphId>:...)
+        // but isn't node-owned, so it never appears in rawNeeded above --
+        // without this it would look "not needed" to the generic GC sweep
+        // just below and get deleted the instant after this save wrote it.
+        if (keepsThumbnail) neededStorageKeys.add(thumbnailStorageKey);
         for (const storageKey of existingBlobKeys) {
           if (!neededStorageKeys.has(storageKey)) store.delete(storageKey);
         }
@@ -459,10 +713,7 @@ export async function saveGraph(graphId: string, nodes: WorkbenchNode[], edges: 
       db.close();
       resolve();
     };
-    transaction.onerror = () => {
-      db.close();
-      reject(transaction.error || new Error("Could not save the workbench graph."));
-    };
+    rejectTransactionFailures(transaction, db, reject, "Could not save the workbench graph.");
   });
 }
 
@@ -581,10 +832,7 @@ export async function loadGraph(graphId: string): Promise<{ nodes: WorkbenchNode
       });
       resolve({ nodes, edges: record.edges as Edge[] });
     };
-    transaction.onerror = () => {
-      db.close();
-      reject(transaction.error || new Error("Could not load the workbench graph."));
-    };
+    rejectTransactionFailures(transaction, db, reject, "Could not load the workbench graph.");
   });
 }
 
@@ -616,10 +864,7 @@ export async function renameGraph(graphId: string, name: string): Promise<void> 
       db.close();
       resolve();
     };
-    transaction.onerror = () => {
-      db.close();
-      reject(transaction.error || new Error("Could not rename the workbench graph."));
-    };
+    rejectTransactionFailures(transaction, db, reject, "Could not rename the workbench graph.");
   });
 }
 
@@ -644,10 +889,7 @@ export async function deleteGraph(graphId: string): Promise<void> {
       db.close();
       resolve();
     };
-    transaction.onerror = () => {
-      db.close();
-      reject(transaction.error || new Error("Could not delete the workbench graph."));
-    };
+    rejectTransactionFailures(transaction, db, reject, "Could not delete the workbench graph.");
   });
 }
 
@@ -666,17 +908,92 @@ export async function createGraph(name: string): Promise<string> {
       db.close();
       resolve();
     };
-    transaction.onerror = () => {
-      db.close();
-      reject(transaction.error || new Error("Could not create a new workbench graph."));
-    };
+    rejectTransactionFailures(transaction, db, reject, "Could not create a new workbench graph.");
   });
   return graphId;
 }
 
+// round 7 issue-3: the exact inverse of blob-cache.ts's blobToDataUrl (which
+// base64-encodes a Blob) -- used ONLY by the legacy-thumbnail eager
+// migration below, since that is the one place this module ever needs to
+// turn a data URL back into bytes. Returns undefined for anything that
+// doesn't parse as a data URL (a corrupted/foreign string some record
+// happened to carry), so the caller can drop it rather than throw. Pure and
+// framework-free (Node has global Blob/atob) so this exact decode step is
+// directly unit-testable without a real browser.
+export function dataUrlToBlob(dataUrl: string): Blob | undefined {
+  const match = /^data:([^;,]*);base64,([\s\S]*)$/.exec(dataUrl);
+  if (!match) return undefined;
+  const [, mimeType, base64] = match;
+  try {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return new Blob([bytes], { type: mimeType || "image/jpeg" });
+  } catch {
+    return undefined;
+  }
+}
+
+// round 7 issue-3: the exact GraphMeta shape a legacy record becomes once
+// its inline thumbnail is migrated away -- the base64 field is ALWAYS
+// absent (a legacy thumbnail must never survive into the returned object,
+// even transiently); `migratedKey` is set only once the caller has
+// CONFIRMED the blob write actually landed, never speculatively. Pure and
+// framework-free so this exact "meta shape" decision -- the crux of
+// issue-3 -- is directly unit-testable without a real IndexedDB/Blob write.
+export function withoutLegacyThumbnail(meta: GraphMeta, migratedKey?: string): GraphMeta {
+  const stripped: GraphMeta = { id: meta.id, name: meta.name, savedAt: meta.savedAt, nodeCount: meta.nodeCount };
+  return migratedKey ? { ...stripped, thumbnailKey: migratedKey } : stripped;
+}
+
+// round 7 issue-3: legacy inline base64 thumbnails (written between round 3
+// and round 5) were tolerated read-only -- but that still put the base64
+// string into GraphManager's own GraphMeta[] React state on every
+// listGraphs() call, for every legacy graph, until it happened to be
+// individually resaved. Eagerly migrates ONE graph's thumbnail to the SAME
+// namespaced Blob storage a fresh save already uses, on the SHARED
+// connection `db` (already open from listGraphs' own read below -- kept
+// open across every graph's migration so N legacy graphs cost one
+// indexedDB.open(), not N), and always returns a meta with the inline field
+// gone -- so a legacy base64 string can never reach the caller, even
+// transiently, regardless of whether the persisted migration itself
+// succeeded. A non-legacy meta (already blob-keyed, or with no thumbnail at
+// all) passes through untouched. Deliberately does NOT close `db` on
+// failure (unlike rejectTransactionFailures) -- this connection is shared
+// across every graph's migration running concurrently below, so one
+// graph's migration failing must not tear the connection down out from
+// under the others still in flight.
+async function migrateLegacyThumbnail(db: IDBDatabase, meta: GraphMeta): Promise<GraphMeta> {
+  const source = graphThumbnailSource(meta);
+  if (source.kind !== "legacy") return meta;
+  const stripped = withoutLegacyThumbnail(meta);
+  const blob = dataUrlToBlob(source.dataUrl);
+  if (!blob) return stripped; // corrupted/unparseable -- drop it rather than throw
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(STORE, "readwrite");
+      const store = transaction.objectStore(STORE);
+      store.put(blob, graphThumbnailStorageKey(meta.id));
+      store.put(withoutLegacyThumbnail(meta, GRAPH_THUMBNAIL_CACHE_KEY), `${META_PREFIX}${meta.id}`);
+      transaction.oncomplete = () => resolve();
+      const onFailure = () => reject(transaction.error || new Error("Could not migrate the workbench graph thumbnail."));
+      transaction.onerror = onFailure;
+      transaction.onabort = onFailure;
+    });
+    return withoutLegacyThumbnail(meta, GRAPH_THUMBNAIL_CACHE_KEY);
+  } catch {
+    // Best-effort: drop the thumbnail rather than throw and break listing
+    // every other graph too. The STORED record is untouched on this path
+    // (the write above never completed), so the next listGraphs() call
+    // simply retries.
+    return stripped;
+  }
+}
+
 export async function listGraphs(): Promise<GraphMeta[]> {
   const db = await openDatabase();
-  return new Promise((resolve, reject) => {
+  const rawResults = await new Promise<GraphMeta[]>((resolve, reject) => {
     const transaction = db.transaction(STORE, "readonly");
     const store = transaction.objectStore(STORE);
     const results: GraphMeta[] = [];
@@ -690,13 +1007,20 @@ export async function listGraphs(): Promise<GraphMeta[]> {
         };
       }
     };
-    transaction.oncomplete = () => {
-      db.close();
-      resolve(results.sort((a, b) => b.savedAt - a.savedAt));
-    };
-    transaction.onerror = () => {
-      db.close();
-      reject(transaction.error || new Error("Could not list workbench graphs."));
-    };
+    // Deliberately does not close `db` here (unlike every other transaction
+    // wrapper in this file) -- round 7 issue-3's eager per-graph thumbnail
+    // migration below reuses this same connection, closed exactly once
+    // after every migration has settled.
+    transaction.oncomplete = () => resolve(results.sort((a, b) => b.savedAt - a.savedAt));
+    rejectTransactionFailures(transaction, db, reject, "Could not list workbench graphs.");
   });
+  try {
+    // Each graph's migration is fully independent (its own read-write
+    // transaction on the shared connection) and never throws (see
+    // migrateLegacyThumbnail's own try/catch), so Promise.all here can't
+    // let one graph's failure break the whole list.
+    return await Promise.all(rawResults.map((meta) => migrateLegacyThumbnail(db, meta)));
+  } finally {
+    db.close();
+  }
 }

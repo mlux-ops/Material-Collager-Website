@@ -8,7 +8,7 @@ import {
   type EdgeChange,
   type NodeChange,
 } from "@xyflow/react";
-import { releaseByPrefix } from "./blob-cache";
+import { releaseBlob, releaseByPrefix } from "./blob-cache";
 import { NODE_KINDS } from "./nodes/manifests";
 import {
   acceptedKindsFor,
@@ -22,6 +22,24 @@ import {
   type WorkbenchNode,
   type WorkbenchParams,
 } from "./types";
+
+// The OUTPUT-class blob-cache keys a run's own values reference (C4) --
+// mirrors persistence.ts's valueBlobKeys: only "image"/"mask" values carry a
+// standalone cacheKey. A "references" value's imageKeys are durable SOURCE
+// blobs owned by the node's params (see persistence.ts's persistBlobKeys),
+// never a per-run OUTPUT artifact, so they are deliberately excluded here --
+// releasing them just because one historical run object gets evicted would
+// destroy images the node's CURRENT params (or another surviving run) still
+// reference. "text"/"report" values carry no blob at all.
+function runImageBlobKeys(run: NodeRun): string[] {
+  const keys: string[] = [];
+  for (const candidates of run.values) {
+    for (const value of candidates) {
+      if (value.kind === "image" || value.kind === "mask") keys.push(value.cacheKey);
+    }
+  }
+  return keys;
+}
 
 function createNodeId() {
   return globalThis.crypto?.randomUUID?.().slice(0, 8) ?? `${Date.now()}-${Math.random()}`;
@@ -111,9 +129,17 @@ type WorkbenchStore = {
   nodes: WorkbenchNode[];
   edges: Edge[];
   running: boolean;
+  // round 7 issue-1: true while WorkbenchApp.tsx's initial restore has
+  // failed with a storage error (e.g. a version-blocked v1->v2 open) rather
+  // than either succeeding or confirming no graph exists yet. executor.ts's
+  // runNodes checks this alongside `running` so no paid node can execute
+  // (no external write of any kind) while it's unknown whether the graph
+  // currently on screen is real, migrated data or a blank canvas that would
+  // silently overwrite it once the block clears.
+  restoreBlocked: boolean;
   // Global run-mode flag: when true, nodes declaring a draftOverride run (and
-  // sign) their cheaper draft variant. No UI toggles it yet; the executor and
-  // signature already honor it.
+  // sign) their cheaper draft variant. Toggled by the toolbar's Draft On/Off
+  // button (WorkbenchApp.tsx); the executor and signature honor it.
   draft: boolean;
   dirtyStamp: number; // bumped on any persistable change (incl. drags); drives the lightweight structure-only autosave
   // Bumped ONLY on new-run, pin-toggle, and upload/source-change events --
@@ -136,10 +162,19 @@ type WorkbenchStore = {
   setPendingSelection: (id: string, pending: PendingReferenceSelection) => void;
   setActiveRun: (id: string, index: number) => void;
   // Output pinning (AC15): pins `runs[index]` as this node's permanent
-  // output (also browses to it), or clears the pin with index null. A
-  // history entry is "promoted to pinned" by calling this with its index.
-  setPinned: (id: string, index: number | null) => void;
+  // output, or clears the pin with index null. By default ALSO browses to
+  // the pinned entry (every pre-existing call site pins whatever is
+  // currently being browsed, so this is a no-op move for them) -- pass
+  // { browse: false } to pin an entry WITHOUT moving the card's browse
+  // position (N-1: needed when a caller pins a DIFFERENT historical run than
+  // the one currently active, e.g. Variations' selectCandidate re-pinning an
+  // older run after reordering the active run's own values -- "promote this
+  // history entry to pinned" and "browse to this entry" are genuinely
+  // separate intents). A history entry is "promoted to pinned" by calling
+  // this with its index.
+  setPinned: (id: string, index: number | null, options?: { browse?: boolean }) => void;
   setRunning: (running: boolean) => void;
+  setRestoreBlocked: (blocked: boolean) => void;
   setDraft: (draft: boolean) => void;
   // Explicit blob-ownership-changed event for the rare mutation path that
   // doesn't already go through applyRun/setPinned (maskedEdit's mask upload
@@ -158,6 +193,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
   nodes: [],
   edges: [],
   running: false,
+  restoreBlocked: false,
   draft: false,
   dirtyStamp: 0,
   blobStamp: 0,
@@ -270,10 +306,58 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
   },
 
   applyRun: (id, run) => {
+    let evictedRun: NodeRun | undefined;
     set((state) => ({
       nodes: state.nodes.map((node) => {
         if (node.id !== id) return node;
-        const runs = [run, ...node.data.runs].slice(0, MAX_RUNS_PER_NODE);
+        // N-3: a caller that re-applies the SAME runId as the current front
+        // entry (photo.manifest.ts's W-2 bookkeeping-only signature
+        // correction -- ctx.applyRun({ ...active, signature: ctx.signature })
+        // -- which deliberately reuses the existing runId so downstream is
+        // not spuriously invalidated) replaces that entry in place instead of
+        // prepending a duplicate. Otherwise the history buffer would accrue
+        // an identical-looking twin every time (one more per Photo
+        // re-upload, bounded by MAX_RUNS_PER_NODE), and a duplicate runId is
+        // a latent trap for any runId-identity lookup (e.g. Variations' W-1
+        // pin-restore, which finds a run by runId). A genuinely NEW run (a
+        // fresh runId, e.g. a real Photo re-upload, or References'/
+        // Variations' own fresh-runId rebuilds) still prepends exactly as
+        // before. The pin (if any) is left untouched here -- replacing an
+        // entry with the SAME identity is not "new content" superseding it,
+        // and this path is unreachable while pinned anyway (the executor
+        // never calls applyRun for a pinned node).
+        if (node.data.runs[0]?.runId === run.runId) {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              runs: [run, ...node.data.runs.slice(1)],
+              activeRun: 0,
+              status: "done" as const,
+              error: undefined,
+              progress: undefined,
+              pendingSelection: undefined,
+            },
+          };
+        }
+        const previousPin = node.data.pinnedOutput;
+        const hasPin = previousPin !== undefined && previousPin !== null;
+        const withNewRun = [run, ...node.data.runs];
+        let runs = withNewRun;
+        if (withNewRun.length > MAX_RUNS_PER_NODE) {
+          // Oldest-first eviction (unchanged default) UNLESS the oldest
+          // entry is the currently-pinned run: mirrors persistence.ts's
+          // byte-budget eviction, which already exempts the pinned index
+          // from OUTPUT eviction (AC16). Protecting it here too (W-1) means
+          // a caller that re-applies a pin right after this call (e.g.
+          // Variations' selectCandidate reordering the SAME output under a
+          // fresh runId -- see below) always finds a valid target to re-pin
+          // instead of it having just been silently evicted.
+          const pinnedShiftedIndex = hasPin ? (previousPin as number) + 1 : -1;
+          const dropIndex = withNewRun.length - 1 === pinnedShiftedIndex ? withNewRun.length - 2 : withNewRun.length - 1;
+          evictedRun = withNewRun[dropIndex];
+          runs = withNewRun.filter((_candidate, index) => index !== dropIndex);
+        }
         return {
           ...node,
           data: {
@@ -287,7 +371,11 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
             // directly, bypassing the executor's pin guard (Photo re-upload,
             // References edits, Variations' candidate reselection). The
             // executor itself never calls applyRun for a pinned node, so this
-            // is a no-op on the normal paid-node re-run path.
+            // is a no-op on the normal paid-node re-run path. Callers that
+            // want the pin to survive (e.g. Variations' selectCandidate, a
+            // presentation-level reorder rather than new content) re-apply
+            // setPinned themselves right after this call -- the eviction
+            // guard above guarantees they always find a valid run to re-pin.
             pinnedOutput: undefined,
             status: "done" as const,
             error: undefined,
@@ -303,6 +391,20 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
       dirtyStamp: Date.now(),
       blobStamp: Date.now(),
     }));
+    // Release the evicted run's OUTPUT blobs (C4: MAX_RUNS_PER_NODE eviction
+    // used to just drop the array entry, leaking its Blob/object-URL for the
+    // rest of the tab's session) -- but only keys no SURVIVING run of this
+    // node still references (e.g. Photo reuses the same stable cache key
+    // across every run rather than minting a fresh one per run, so a key the
+    // newest surviving run still claims must never be revoked out from
+    // under it).
+    if (evictedRun) {
+      const survivingNode = get().nodes.find((candidate) => candidate.id === id);
+      const survivingKeys = new Set(survivingNode ? survivingNode.data.runs.flatMap(runImageBlobKeys) : []);
+      for (const key of runImageBlobKeys(evictedRun)) {
+        if (!survivingKeys.has(key)) releaseBlob(key);
+      }
+    }
   },
 
   setPendingSelection: (id, pending) => {
@@ -332,13 +434,14 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
   // bump: the pin flag is part of the graph-structure JSON, and the pinned
   // run's blobs must be durably written (and exempted from byte-budget
   // eviction) right away rather than waiting for the next unrelated run.
-  setPinned: (id, index) => {
+  setPinned: (id, index, options) => {
+    const browse = options?.browse ?? true;
     set((state) => ({
       nodes: state.nodes.map((node) => {
         if (node.id !== id) return node;
         if (index === null) return { ...node, data: { ...node.data, pinnedOutput: undefined } };
         if (index < 0 || index >= node.data.runs.length) return node;
-        return { ...node, data: { ...node.data, pinnedOutput: index, activeRun: index } };
+        return { ...node, data: { ...node.data, pinnedOutput: index, activeRun: browse ? index : node.data.activeRun } };
       }),
       dirtyStamp: Date.now(),
       blobStamp: Date.now(),
@@ -346,6 +449,8 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
   },
 
   setRunning: (running) => set({ running }),
+
+  setRestoreBlocked: (restoreBlocked) => set({ restoreBlocked }),
 
   setDraft: (draft) => set({ draft }),
 

@@ -32,7 +32,7 @@
 //     other node's or an unrelated string's image data.
 
 import type { Edge } from "@xyflow/react";
-import { blobToDataUrl, getBlob, putBlob } from "./blob-cache.ts";
+import { blobToDataUrl, getBlob, getBlobUrl, putBlob } from "./blob-cache.ts";
 import { buildPhotoRun, PHOTO_SOURCE_KEY, sourceBlobKeysForNode } from "./persistence.ts";
 import { defaultParams, importSchemaMap, NODE_KINDS, specFor } from "./nodes/manifests.ts";
 // acceptedKindsFor is a real (value) import, so unlike the type-only imports
@@ -230,6 +230,18 @@ function validatePrimitive(value: unknown, rule: ImportParamRule): unknown {
       return typeof value === "boolean" ? value : undefined;
     case "enum":
       return typeof value === "string" && (rule.values as readonly string[]).includes(value) ? value : undefined;
+    case "stringList": {
+      if (!Array.isArray(value)) return undefined;
+      const maxItems = rule.maxItems ?? 64;
+      const maxLength = rule.maxLength ?? 256;
+      const items: string[] = [];
+      for (const entry of value) {
+        if (items.length >= maxItems) break;
+        if (typeof entry !== "string" || entry.length > maxLength) continue;
+        items.push(entry);
+      }
+      return items;
+    }
     default:
       return undefined;
   }
@@ -256,7 +268,10 @@ function remapBlobKey(
 }
 
 const DEFAULT_MAX_REFERENCE_ITEMS = 64;
-const DEFAULT_MAX_IMAGES_PER_ITEM = 16;
+// issue-9: exported so the LIVE upload boundary (references.tsx's addImages)
+// can enforce the identical per-item image-count cap the import validator
+// already does, rather than the two drifting independently.
+export const DEFAULT_MAX_IMAGES_PER_ITEM = 16;
 
 function validateReferenceItemList(
   value: unknown,
@@ -517,7 +532,14 @@ export function materializeImport(validated: ValidatedImport): { nodes: Workbenc
       const key = PHOTO_SOURCE_KEY(node.id);
       const blob = getBlob(key);
       if (blob) {
-        const url = URL.createObjectURL(blob);
+        // issue-10: reuse the URL putBlob already minted and tracked above
+        // (getBlobUrl), rather than calling URL.createObjectURL(blob) again.
+        // A second, independently-created object URL is never entered into
+        // blob-cache's own urls map, so releaseBlob(key) can revoke only the
+        // FIRST (tracked) one -- the run's displayed image would keep
+        // pointing at an untracked URL that never gets revoked, for the rest
+        // of the tab's session.
+        const url = getBlobUrl(key) ?? URL.createObjectURL(blob);
         built.data.runs = [buildPhotoRun(node.id, url, key, node.params.fileFingerprint, Date.now())];
         built.data.status = "done";
       }

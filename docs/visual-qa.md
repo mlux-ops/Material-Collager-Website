@@ -1,3 +1,78 @@
+# Visual QA - Workbench Node Editor Phase 2 (S32)
+
+Date: 2026-07-25
+Status: **PENDING - NOT YET EXECUTED**
+
+## Explicit status
+
+No browser session has been opened for this QA pass. Every row in the
+checklist and viewport matrix below is unverified and marked PENDING. This
+implementation pass (plan-refined.json S1-S31, plus seven post-approval fix
+rounds) completed the code, the framework-free unit-test gate (`npm run
+test:workbench`, 127/127 passing), `npm run lint` (0 errors), `npx tsc
+--noEmit` (0 workbench-scoped errors), and `npm run build` (production build
+succeeds). It did **not** include a real
+Browser tool session against a running `vinext dev`/`vinext start` instance,
+so none of S32's required screenshots, interaction checks, or the seeded-v1-
+IndexedDB migration check have been captured. Do not treat this section as
+evidence that visual/browser QA occurred - it is a scaffold recording exactly
+what remains to be checked, per plan.
+
+## Required viewport matrix (all PENDING)
+
+| Viewport | Purpose | Status |
+| --- | --- | --- |
+| 1440 x 900 | Primary desktop workbench canvas | PENDING |
+| 1280 x 800 | Secondary desktop size | PENDING |
+| 1024 x 768 | Smallest supported desktop size | PENDING |
+| 390 x 844 | Touch/stylus Masked Edit region modal ONLY (workbench is desktop-first otherwise) | PENDING |
+
+## Required states/screenshots (all PENDING)
+
+| # | State | Plan step | Status |
+| --- | --- | --- | --- |
+| 1 | Empty-canvas templates gallery (3 domain presets + blank) | S25 | PENDING |
+| 2 | A wired multi-node graph with source-kind edge colors, verified to survive a save + reload (colors re-derived from source-handle metadata, not persisted) | S1 | PENDING |
+| 3 | A paused Reference Finder awaiting selection, candidate cards visible (thumbnail/source/confidence/official badge) | S11 | PENDING |
+| 4 | A Variations candidate grid with an active-candidate selection (not index 0) propagating downstream | S14 | PENDING |
+| 5 | The Masked Edit region-selection modal, exercised via touch/stylus at 390x844 | S15 | PENDING |
+| 6 | A report/QA-correction chain: Accuracy Reviewer -> QA Correction with a corrected image | S17/S18 | PENDING |
+| 7 | Pin badge, "Cached - no charge" badge, high-cost confirm dialog, and the Draft mode toggle, all visible in one or more screenshots | S21/S27/S28 | PENDING |
+| 8 | Inspector panel (selected node), Spotlight add-menu (search + drag-wire-to-empty-canvas filtered by compatible kind), and the Graph Manager UI (new/rename/delete/switch) | S29 | PENDING |
+
+## Required interaction checks (all PENDING)
+
+- [ ] Connect/validate/reject: Photo(image) and References(references) both validate into a reference input; text->image is rejected.
+- [ ] Run workflow, then Cancel mid-run; confirm the paid upstream call is actually aborted (network tab), not just the UI state.
+- [ ] Reference Finder pause/resume: run halts at Finder with downstream nodes idle (not failed); picking a candidate resumes downstream execution and reuses cached ancestors (no re-bill visible in Network tab).
+- [ ] Retry-from-failed-node after a mid-graph failure re-runs only from the failed node onward.
+- [ ] A node missing a required input shows a disabled Run button with a visible reason.
+- [ ] aria-live region announces run start/finish/failure (verify via accessibility tree/screen reader or the DOM `aria-live` node's text changes).
+- [ ] Export a graph to JSON, then import it back; confirm images and structure round-trip.
+- [ ] Attempt a cyclic connection (e.g. wiring QA Correction's output back to the Accuracy Reviewer it descends from) and confirm it is rejected.
+
+## Required IndexedDB migration check (PENDING - cannot be done in a Node unit test, W4)
+
+- [ ] Seed a populated v1 database (the pre-named-graph `current` singleton, with at least one Photo/References upload and one paid-node output) in a real browser profile.
+- [ ] Load the workbench and confirm the `onupgradeneeded` v1->v2 transaction migrates it into a named graph with no data loss and no orphaned legacy `blob:` keys (inspect via DevTools > Application > IndexedDB).
+- [ ] Confirm a node with multiple blobs (uploads + candidates + thumbnails + pinned/active outputs) round-trips without key collisions, and that multiple named graphs coexist without blob-key collisions.
+
+## No-deploy confirmation
+
+No `wrangler deploy` or any production push has been run as part of this
+implementation pass. All changes remain uncommitted in the working tree per
+the pipeline's stage-6 instructions.
+
+## Next action
+
+A future pass with an interactive Browser tool session against
+`vinext dev`/`vinext start` (local URL, e.g. `http://localhost:3000/workbench`
+or the project's configured dev port) must complete every PENDING row above,
+replacing "PENDING" with the actual observed result (Passed/Failed/Notes) and
+attaching real captured evidence, before S32 can be considered satisfied.
+
+---
+
 # Visual QA - Scene Lab V2 production promotion
 
 Date: 2026-07-18

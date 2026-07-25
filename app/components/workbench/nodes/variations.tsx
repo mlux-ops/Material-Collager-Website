@@ -1,14 +1,24 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import { readApiResponse } from "@/app/lib/api-client";
 import { putBlob } from "../blob-cache";
+import { recordUsageCalibration } from "../cost";
 import { useWorkbenchStore } from "../store";
+import { useModalDismiss } from "../useModalDismiss";
 import styles from "../workbench.module.css";
 import type { ExecuteContext, NodeOutputValue } from "../types";
 import { buildGenerationPayload, decodeBase64Image } from "./generation";
-import { blobFromImageValue, GenerationSettings, NodeShell, RunFooter, useConnectedImageCount, type WorkbenchNodeProps } from "./shared";
+import {
+  blobFromImageValue,
+  GenerationSettings,
+  NodeShell,
+  RunFooter,
+  ThumbnailImage,
+  useConnectedImageCount,
+  type WorkbenchNodeProps,
+} from "./shared";
 
 function createSelectionRunId() {
   return globalThis.crypto?.randomUUID?.().slice(0, 8) ?? `sel-${Date.now()}`;
@@ -26,6 +36,8 @@ export const Component = memo(function VariationsNode({ id, data }: WorkbenchNod
   const applyRun = useWorkbenchStore((state) => state.applyRun);
   const setPinned = useWorkbenchStore((state) => state.setPinned);
   const inputImages = useConnectedImageCount(id, ["image"]);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const { closing: lightboxClosing, requestClose: requestLightboxClose } = useModalDismiss(() => setLightboxOpen(false));
   const run = data.runs[data.activeRun];
   const candidates = useMemo(() => run?.values[0] ?? [], [run]);
   const orderedCandidates = useMemo(
@@ -47,7 +59,40 @@ export const Component = memo(function VariationsNode({ id, data }: WorkbenchNod
     const selected = candidates.find((value) => value.kind === "image" && value.cacheKey === cacheKey);
     if (!selected) return;
     const reordered = [selected, ...candidates.filter((value) => value !== selected)];
+
+    // W-1: reselecting a candidate reorders the SAME already-generated
+    // output under a fresh runId -- it is not a new paid run, so a pin the
+    // user set before clicking a different candidate must survive it
+    // (AC15's "will not re-run or re-bill" guarantee). store.ts's applyRun
+    // unconditionally clears any pin because a genuinely new run usually
+    // DOES supersede old pinned content, which isn't true here.
+    const pinnedIndex = data.pinnedOutput;
+    const pinWasOnThisRun = pinnedIndex !== undefined && pinnedIndex !== null && pinnedIndex === data.activeRun;
+    const pinnedElsewhereRunId =
+      !pinWasOnThisRun && pinnedIndex !== undefined && pinnedIndex !== null ? data.runs[pinnedIndex]?.runId : undefined;
+
     applyRun(id, { runId: createSelectionRunId(), signature: run.signature, at: Date.now(), values: [reordered], usage: run.usage });
+
+    if (pinWasOnThisRun) {
+      // applyRun always prepends, so the reordered run always lands at 0.
+      setPinned(id, 0);
+    } else if (pinnedElsewhereRunId) {
+      // store.ts's eviction guard exempts the pinned run from the 8-run cap
+      // precisely so this lookup always finds it (even if a slot had to be
+      // evicted to make room for this reorder's new entry); guard anyway
+      // rather than ever pin an invalid index. { browse: false } (N-1):
+      // setPinned normally ALSO browses to the pinned index -- here that
+      // would silently jump the CARD away from the candidate just clicked to
+      // the unrelated older pinned run (applyRun above already put activeRun
+      // at 0, showing the new selection). Downstream propagation still
+      // correctly stays frozen on the pinned run either way (activeRunOf
+      // honors the pin over activeRun, which is exactly AC15's "will not
+      // re-run" guarantee) -- only the card's own browse position was the
+      // unintended side effect being fixed here.
+      const fresh = useWorkbenchStore.getState().nodes.find((node) => node.id === id);
+      const shiftedIndex = fresh?.data.runs.findIndex((candidateRun) => candidateRun.runId === pinnedElsewhereRunId) ?? -1;
+      if (shiftedIndex >= 0) setPinned(id, shiftedIndex, { browse: false });
+    }
   }
 
   return (
@@ -66,7 +111,20 @@ export const Component = memo(function VariationsNode({ id, data }: WorkbenchNod
       </label>
       {activeValue && activeValue.kind === "image" && (
         <figure className={styles.preview}>
-          <img src={activeValue.url} alt="Selected candidate" draggable={false} />
+          <button
+            type="button"
+            className={styles.thumbButton}
+            onClick={() => setLightboxOpen(true)}
+            aria-label="Open full-resolution image"
+          >
+            <ThumbnailImage
+              cacheKey={activeValue.cacheKey}
+              alt="Selected candidate"
+              width={256}
+              height={192}
+              className={styles.thumbImg}
+            />
+          </button>
         </figure>
       )}
       {run && (
@@ -89,9 +147,22 @@ export const Component = memo(function VariationsNode({ id, data }: WorkbenchNod
               onClick={() => selectCandidate(value.cacheKey)}
               title={value.cacheKey === selectedCacheKey ? "Propagating downstream" : "Use this candidate downstream"}
             >
-              <img src={value.url} alt="Candidate" draggable={false} />
+              <ThumbnailImage cacheKey={value.cacheKey} alt="Candidate" width={96} height={96} />
             </button>
           ))}
+        </div>
+      )}
+      {lightboxOpen && activeValue && activeValue.kind === "image" && (
+        <div className={`${styles.lightboxOverlay} ${lightboxClosing ? styles.overlayClosing : ""}`} onClick={requestLightboxClose} role="presentation">
+          <img
+            src={activeValue.url}
+            alt="Full-resolution selected candidate"
+            className={styles.lightboxImage}
+            onClick={(event) => event.stopPropagation()}
+          />
+          <button type="button" className={styles.lightboxClose} onClick={requestLightboxClose}>
+            Close
+          </button>
         </div>
       )}
     </NodeShell>
@@ -125,4 +196,5 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
     return { kind: "image", url: cachedUrl, cacheKey };
   });
   ctx.applyRun({ runId, signature: ctx.signature, at: Date.now(), values: [images], usage: response.usage });
+  recordUsageCalibration(payload.size, payload.quality, response.usage, 1);
 }

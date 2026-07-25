@@ -6,6 +6,7 @@ import { readApiResponse } from "@/app/lib/api-client";
 import { base64ImageToObjectUrl, optimizeReferencesForTransport } from "@/app/lib/image-transport";
 import { compositeSelectiveEdit, createSelectiveEditAssets, type QaResult } from "@/app/lib/selective-edit";
 import { putBlob } from "../blob-cache";
+import { recordUsageCalibration } from "../cost";
 import styles from "../workbench.module.css";
 import type { ExecuteContext, NodeOutputValue, WorkbenchNode } from "../types";
 import { fileFromCacheKey, GenerationSettings, NodeShell, OutputPreview, RunFooter, useConnectedImageCount, type WorkbenchNodeProps } from "./shared";
@@ -136,4 +137,5 @@ export const execute = async (ctx: ExecuteContext): Promise<void> => {
     values: [[{ kind: "image", url: cachedUrl, cacheKey }]],
     usage: response.usage,
   });
+  recordUsageCalibration(payload.size, payload.quality, response.usage, files.length);
 };

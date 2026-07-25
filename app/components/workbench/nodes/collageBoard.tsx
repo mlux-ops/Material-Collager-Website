@@ -14,6 +14,7 @@ import {
 } from "@/app/lib/collage";
 import { optimizeReferencesForTransport } from "@/app/lib/image-transport";
 import { putBlob } from "../blob-cache";
+import { recordUsageCalibration } from "../cost";
 import { useWorkbenchStore } from "../store";
 import styles from "../workbench.module.css";
 import type { ExecuteContext, NodeOutputValue } from "../types";
@@ -138,4 +139,5 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
     return { kind: "image", url: cachedUrl, cacheKey };
   });
   ctx.applyRun({ runId, signature: ctx.signature, at: Date.now(), values: [images], usage: response.usage });
+  recordUsageCalibration(size, request.quality, response.usage, files.length);
 }
