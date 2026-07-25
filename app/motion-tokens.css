@@ -36,4 +36,25 @@
   --blur-small: 2px;  /* panel reveal, icon swap, text swap, skeleton reveal, number pop-in */
   --blur-medium: 3px;  /* page slide, text reveal */
   --blur-large: 8px;  /* success check open */
+
+  /* transitions-dev 06-modal — semantic tunables */
+  --modal-open-dur: 250ms;
+  --modal-close-dur: 150ms;
+  --modal-scale: 0.96;
+  --modal-scale-close: 0.96;
+  --modal-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* transitions-dev 17-tooltip — semantic tunables */
+  --tt-in-dur: 150ms;
+  --tt-out-dur: 50ms;
+  --tt-scale: 0.98;
+  --tt-delay: 80ms;
+  --tt-in-ease: ease-out;
+  --tt-out-ease: ease-out;
+
+  /* transitions-dev 21-accordion — semantic tunables */
+  --acc-expand: 250ms;
+  --acc-collapse: 250ms;
+  --acc-chevron: 250ms;
+  --acc-ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
