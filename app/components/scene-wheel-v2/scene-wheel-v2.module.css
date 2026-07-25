@@ -65,7 +65,7 @@
   white-space: nowrap;
   -webkit-backdrop-filter: blur(24px);
   backdrop-filter: blur(24px);
-  transition: background-color 140ms ease, color 140ms ease;
+  transition: background-color var(--duration-quick) ease, color var(--duration-quick) ease;
 }
 
 .chromeCell[aria-current="page"] {
@@ -427,14 +427,14 @@
 
 .pageRevealed .canvas {
   opacity: 1;
-  transition: opacity 850ms ease-out;
+  transition: opacity var(--duration-very-slow) ease-out;
 }
 
 .pageRevealed .chrome,
 .pageRevealed .caption,
 .pageRevealed .scrollCue {
   opacity: 1;
-  transition: opacity 650ms ease-out 260ms;
+  transition: opacity var(--duration-very-slow) ease-out 260ms;
 }
 
 @media (prefers-reduced-motion: reduce) {

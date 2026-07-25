@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
+import "./motion-tokens.css";
 import "./globals.css";
 
 const inter = localFont({
