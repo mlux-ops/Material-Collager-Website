@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { DropdownSelect } from "../components/DropdownSelect";
 import {
   COLLAGE_TYPES,
   COMPOSITIONS,
@@ -1416,35 +1417,38 @@ export default function Home() {
           <div className="control-grid setup-controls">
             <label className="wide-field">
               <span>Board type</span>
-              <select value={collageType} onChange={(event) => changeType(event.target.value as CollageType)}>
-                {COLLAGE_TYPES.map((type) => (
-                  <option key={type} value={type}>{labelFor(type)}</option>
-                ))}
-              </select>
+              <DropdownSelect
+                value={collageType}
+                onChange={(next) => changeType(next as CollageType)}
+                options={COLLAGE_TYPES.map((type) => ({ value: type, label: labelFor(type) }))}
+              />
             </label>
             <label>
               <span>Orientation</span>
-              <select value={orientation} onChange={(event) => setOrientation(event.target.value as Orientation)}>
-                {ORIENTATIONS.map((option) => (
-                  <option key={option} value={option}>{labelFor(option)}</option>
-                ))}
-              </select>
+              <DropdownSelect
+                value={orientation}
+                onChange={(next) => setOrientation(next as Orientation)}
+                options={ORIENTATIONS.map((option) => ({ value: option, label: labelFor(option) }))}
+              />
             </label>
             <label>
               <span>Resolution</span>
-              <select value={outputResolution} onChange={(event) => setOutputResolution(event.target.value as OutputResolution)}>
-                {OUTPUT_RESOLUTIONS.map((option) => (
-                  <option key={option} value={option}>{option === "studio" ? "Studio 2K" : option === "final" ? "Final maximum" : "Standard"}</option>
-                ))}
-              </select>
+              <DropdownSelect
+                value={outputResolution}
+                onChange={(next) => setOutputResolution(next as OutputResolution)}
+                options={OUTPUT_RESOLUTIONS.map((option) => ({
+                  value: option,
+                  label: option === "studio" ? "Studio 2K" : option === "final" ? "Final maximum" : "Standard",
+                }))}
+              />
             </label>
             <label className="wide-field">
               <span>Render quality</span>
-              <select value={quality} onChange={(event) => setQuality(event.target.value as Quality)}>
-                {QUALITIES.map((option) => (
-                  <option key={option} value={option}>{labelFor(option)}</option>
-                ))}
-              </select>
+              <DropdownSelect
+                value={quality}
+                onChange={(next) => setQuality(next as Quality)}
+                options={QUALITIES.map((option) => ({ value: option, label: labelFor(option) }))}
+              />
             </label>
           </div>
 
@@ -1459,48 +1463,47 @@ export default function Home() {
           <div className="control-grid art-controls">
             <label>
               <span>Composition</span>
-              <select value={composition} onChange={(event) => setComposition(event.target.value as Composition)}>
-                {COMPOSITIONS.map((option) => (
-                  <option key={option} value={option}>{labelFor(option)}</option>
-                ))}
-              </select>
+              <DropdownSelect
+                value={composition}
+                onChange={(next) => setComposition(next as Composition)}
+                options={COMPOSITIONS.map((option) => ({ value: option, label: labelFor(option) }))}
+              />
             </label>
             <label>
               <span>Spacing</span>
-              <select value={density} onChange={(event) => setDensity(event.target.value as Density)}>
-                {DENSITIES.map((option) => (
-                  <option key={option} value={option}>{labelFor(option)}</option>
-                ))}
-              </select>
+              <DropdownSelect
+                value={density}
+                onChange={(next) => setDensity(next as Density)}
+                options={DENSITIES.map((option) => ({ value: option, label: labelFor(option) }))}
+              />
             </label>
             <label>
               <span>Lighting</span>
-              <select value={lighting} onChange={(event) => setLighting(event.target.value as LightingOption)}>
-                {LIGHTING_OPTIONS.map((option) => (
-                  <option key={option} value={option}>{labelFor(option)}</option>
-                ))}
-              </select>
+              <DropdownSelect
+                value={lighting}
+                onChange={(next) => setLighting(next as LightingOption)}
+                options={LIGHTING_OPTIONS.map((option) => ({ value: option, label: labelFor(option) }))}
+              />
             </label>
             <label>
               <span>Styling</span>
-              <select
+              <DropdownSelect
                 value={collageType === "appliance_collage" ? "materials_only" : styling}
-                onChange={(event) => setStyling(event.target.value as StylingOption)}
+                onChange={(next) => setStyling(next as StylingOption)}
                 disabled={collageType === "appliance_collage"}
-              >
-                {STYLING_OPTIONS.map((option) => (
-                  <option key={option} value={option}>{labelFor(option)}</option>
-                ))}
-              </select>
+                options={STYLING_OPTIONS.map((option) => ({ value: option, label: labelFor(option) }))}
+              />
             </label>
             <label className="wide-field">
               <span>Hero item</span>
-              <select value={heroItemId} onChange={(event) => setHeroItemId(event.target.value)}>
-                <option value="">Automatic</option>
-                {heroOptions.map((item) => (
-                  <option key={item.uiKey} value={item.id}>{item.id || item.role}</option>
-                ))}
-              </select>
+              <DropdownSelect
+                value={heroItemId}
+                onChange={setHeroItemId}
+                options={[
+                  { value: "", label: "Automatic" },
+                  ...heroOptions.map((item) => ({ value: item.id, label: item.id || item.role })),
+                ]}
+              />
             </label>
           </div>
 

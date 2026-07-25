@@ -298,6 +298,127 @@ select:disabled {
   color: #7c847e;
 }
 
+/* transitions-dev 05-menu-dropdown: recipe block (verbatim) — the menu
+   grows from its trigger, origin-aware via data-origin. */
+.t-dropdown {
+  transform-origin: top left;
+  transform: scale(var(--dropdown-pre-scale));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--dropdown-open-dur) var(--dropdown-ease),
+    opacity   var(--dropdown-open-dur) var(--dropdown-ease);
+  will-change: transform, opacity;
+}
+.t-dropdown[data-origin="top-right"]     { transform-origin: top right; }
+.t-dropdown[data-origin="top-center"]    { transform-origin: top center; }
+.t-dropdown[data-origin="bottom-left"]   { transform-origin: bottom left; }
+.t-dropdown[data-origin="bottom-center"] { transform-origin: bottom center; }
+.t-dropdown[data-origin="bottom-right"]  { transform-origin: bottom right; }
+
+.t-dropdown.is-open {
+  transform: scale(1);
+  opacity: 1;
+  pointer-events: auto;
+}
+.t-dropdown.is-closing {
+  transform: scale(var(--dropdown-closing-scale));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--dropdown-close-dur) var(--dropdown-ease),
+    opacity   var(--dropdown-close-dur) var(--dropdown-ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-dropdown { transition: none !important; }
+}
+
+/* DropdownSelect skin: trigger mirrors the native select fields it
+   replaces; the menu is fixed-positioned so it escapes scrollable
+   panels (coordinates come from the trigger's rect in JS). */
+.dropdown-field {
+  display: block;
+  min-width: 0;
+  position: relative;
+}
+
+.dropdown-trigger {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  color: var(--ink);
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-height: 40px;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.dropdown-trigger:hover {
+  border-color: #88958c;
+}
+
+.dropdown-trigger:disabled {
+  background: #eef0ed;
+  color: #7c847e;
+}
+
+.dropdown-trigger::after {
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+  content: "";
+  flex: 0 0 auto;
+  opacity: 0.55;
+}
+
+.dropdown-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dropdown-menu {
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  box-shadow: 0 14px 34px rgba(25, 33, 28, 0.18);
+  max-height: 260px;
+  overflow: auto;
+  padding: 4px;
+  position: fixed;
+  z-index: 1200;
+}
+
+.dropdown-option {
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--ink);
+  display: block;
+  font-size: 12px;
+  justify-content: flex-start;
+  min-height: 34px;
+  padding: 7px 9px;
+  text-align: left;
+  width: 100%;
+}
+
+.dropdown-option:hover,
+.dropdown-option:focus-visible {
+  background: var(--surface-soft);
+}
+
+.dropdown-option[aria-selected="true"] {
+  background: #edf6f2;
+  color: var(--accent-dark);
+  font-weight: 650;
+}
+
 textarea {
   min-height: 82px;
   resize: vertical;
@@ -1392,10 +1513,16 @@ body {
 
 .controls-surface input,
 .controls-surface select,
-.controls-surface textarea {
+.controls-surface textarea,
+.controls-surface .dropdown-trigger {
   font-size: 11px;
   min-height: 34px;
   padding: 6px 7px;
+}
+
+.controls-surface .dropdown-option {
+  font-size: 11px;
+  min-height: 30px;
 }
 
 .surface-divider {
