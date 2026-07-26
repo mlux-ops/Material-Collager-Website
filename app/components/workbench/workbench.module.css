@@ -686,11 +686,41 @@
   user-select: none;
 }
 
-.maskRegionBox {
+/* Shape preview overlay: bitmap kept in sync with the displayed image via a
+   ResizeObserver; pointer events stay on the parent surface. */
+.maskPreviewCanvas {
   position: absolute;
-  border: 2px dashed #7c3aed;
-  background: rgba(124, 58, 237, 0.2);
+  inset: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
+}
+
+.maskToolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.maskToolButton[aria-pressed="true"],
+.maskToolActive {
+  background: #7c3aed;
+  border-color: #7c3aed;
+  color: #fff;
+}
+
+.maskBrushSize {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #555;
+}
+
+.maskBrushSize input[type="range"] {
+  width: 110px;
+  accent-color: #7c3aed;
 }
 
 .maskModalActions {

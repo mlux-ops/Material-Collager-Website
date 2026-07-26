@@ -138,6 +138,15 @@ export type NodeRun = {
   usage?: Record<string, unknown>;
 };
 
+// Masked Edit mask geometry. Coordinates are normalized 0-1000 against the
+// image width (x) and height (y) — the NormalizedBox convention. Polygon and
+// brush points are flat [x0, y0, x1, y1, ...] arrays to keep the serialized
+// maskShapes param compact; brush radius is normalized against width.
+export type MaskShape =
+  | { kind: "rect"; x: number; y: number; width: number; height: number }
+  | { kind: "polygon"; points: number[] }
+  | { kind: "brush"; points: number[]; radius: number };
+
 export type WorkbenchParams = {
   // photo
   fileName?: string;
@@ -172,13 +181,18 @@ export type WorkbenchParams = {
   selectedLibraryId?: string;
   // variations
   n?: number;
-  // maskedEdit — the editable rectangle, normalized 0-1000 (matches
-  // app/lib/selective-edit.ts's NormalizedBox convention); maskCacheKey
-  // caches the rendered PNG mask blob (persisted via persistBlobKeys).
-  // engine picks the backend: gpt-image-2 (guidance mask, paid), Workers AI
-  // SD 1.5 inpainting (pixel-exact mask, free tier), or FLUX.1 Fill [pro]
-  // (pixel-exact mask, ~$0.05/image via the BFL API).
+  // maskedEdit — maskShapes is the source of truth: a JSON-serialized
+  // MaskShape[] (rects, polygons, brush strokes; coordinates normalized
+  // 0-1000 like NormalizedBox). maskRegion* is the derived union bounding
+  // box, kept for import compatibility and pre-shapes graphs (which carry
+  // only the rectangle). maskCacheKey caches the rendered PNG mask blob
+  // (persisted via persistBlobKeys); its key embeds a shape-content hash so
+  // mask edits change the memoization signature. engine picks the backend:
+  // gpt-image-2 (guidance mask, paid), Workers AI SD 1.5 inpainting
+  // (pixel-exact mask, free tier), or FLUX.1 Fill [pro] (pixel-exact mask,
+  // ~$0.05/image via the BFL API).
   engine?: "gpt-image" | "workers-ai" | "flux-fill";
+  maskShapes?: string;
   maskCacheKey?: string;
   maskRegionX?: number;
   maskRegionY?: number;
