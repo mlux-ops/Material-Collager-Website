@@ -2,10 +2,14 @@ import type { ImportParamRule, NodeManifest } from "../types";
 import { estimateGenerationCost, GENERATION_QUALITIES, GENERATION_SIZES, generationDraftOverride } from "./generation.ts";
 
 // Backend engines: "gpt-image" posts to /api/workbench/edit (gpt-image-2,
-// mask is guidance, paid per image); "workers-ai" posts to
-// /api/workbench/inpaint (SD 1.5 mask-conditioned inpainting on the Workers
-// AI free tier, mask is pixel-exact).
-export const MASKED_EDIT_ENGINES = ["gpt-image", "workers-ai"] as const;
+// mask is guidance, paid per image); "workers-ai" and "flux-fill" post to
+// /api/workbench/inpaint (mask-conditioned, pixel-exact) — SD 1.5 on the
+// Workers AI free tier vs FLUX.1 Fill [pro] via the BFL API (~$0.05/image,
+// far better prompt adherence).
+export const MASKED_EDIT_ENGINES = ["gpt-image", "workers-ai", "flux-fill"] as const;
+
+// flux-pro-1.0-fill is flat-priced per generated image on the BFL API.
+const FLUX_FILL_USD_PER_IMAGE = 0.05;
 
 export const MASKED_EDIT_PARAM_RULES = {
   engine: { type: "enum", optional: true, values: MASKED_EDIT_ENGINES },
@@ -31,7 +35,7 @@ export const maskedEditManifest: NodeManifest = {
   spec: {
     kind: "maskedEdit",
     title: "Masked Edit",
-    description: "Edit only a selected region; the rest is protected. Engines: gpt-image-2 (guidance) or Workers AI inpainting (pixel-exact, free).",
+    description: "Edit only a selected region; the rest is protected. Engines: gpt-image-2 (guidance), Workers AI inpainting (pixel-exact, free), or FLUX Fill (pixel-exact, best prompt-following).",
     inputs: [
       { id: "image", kind: "image", label: "Image", required: true },
       { id: "prompt", kind: "text", label: "Prompt", required: true },
@@ -46,12 +50,18 @@ export const maskedEditManifest: NodeManifest = {
   },
   // Workers AI inpainting runs on the free tier: $0, and shown as such in the
   // workflow cost estimate rather than hidden (null would mean "unknown").
-  estimateCost: (input) => (input.params.engine === "workers-ai" ? 0 : estimateGenerationCost(input)),
+  // FLUX Fill is flat-priced per image; gpt-image-2 uses the token estimator.
+  estimateCost: (input) => {
+    if (input.params.engine === "workers-ai") return 0;
+    if (input.params.engine === "flux-fill") return FLUX_FILL_USD_PER_IMAGE;
+    return estimateGenerationCost(input);
+  },
   paid: true,
-  // Draft mode's cheaper size/quality only applies to the paid engine —
-  // rewriting size/quality for workers-ai (which ignores both) would change
-  // the signature and force a spurious re-run when toggling draft mode.
-  draftOverride: (params) => (params.engine === "workers-ai" ? params : generationDraftOverride(params)),
+  // Draft mode's cheaper size/quality only applies to the gpt-image engine —
+  // rewriting size/quality for the inpaint engines (which ignore both) would
+  // change the signature and force a spurious re-run when toggling draft mode.
+  draftOverride: (params) =>
+    params.engine === "workers-ai" || params.engine === "flux-fill" ? params : generationDraftOverride(params),
   // The region (maskRegionX/Y/Width/Height) drives the memoization signature
   // like every other param here — an unchanged region+prompt+size/quality is
   // a cache hit; moving the rectangle produces a different signature.

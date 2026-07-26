@@ -250,33 +250,34 @@ export const Component = memo(function MaskedEditNode({ id, data }: WorkbenchNod
   return (
     <NodeShell data={data} footer={<RunFooter id={id} data={data} inputImages={inputImages} />}>
       <p className={styles.hint}>
-        {engine === "workers-ai"
-          ? "Pixel-exact: only the selected region is repainted (free)."
-          : "Masking is guidance, not pixel-exact."}
+        {engine === "workers-ai" && "Pixel-exact: only the selected region is repainted (free; best at removal/fill)."}
+        {engine === "flux-fill" && "Pixel-exact: only the selected region is repainted (FLUX, ~$0.05/run)."}
+        {engine === "gpt-image" && "Masking is guidance, not pixel-exact."}
       </p>
       <label className={styles.field}>
         <span>Engine</span>
         <select
           className="nodrag"
           value={engine}
-          onChange={(event) => updateParams(id, { engine: event.target.value as "gpt-image" | "workers-ai" })}
+          onChange={(event) => updateParams(id, { engine: event.target.value as "gpt-image" | "workers-ai" | "flux-fill" })}
         >
           <option value="gpt-image">gpt-image-2 — guidance mask (paid)</option>
           <option value="workers-ai">Workers AI SD 1.5 — exact mask (free)</option>
+          <option value="flux-fill">FLUX Fill pro — exact mask (~$0.05)</option>
         </select>
       </label>
       <button type="button" className="nodrag" onClick={() => setModalOpen(true)} disabled={!inputImageUrl}>
         {region ? "Change selected region…" : "Select region…"}
       </button>
-      {/* Size/quality are gpt-image-2 knobs; the workers-ai engine derives its
+      {/* Size/quality are gpt-image-2 knobs; the inpaint engines derive their
           working size from the input image, so hide them there. */}
-      {engine !== "workers-ai" && <GenerationSettings id={id} data={data} />}
+      {engine === "gpt-image" && <GenerationSettings id={id} data={data} />}
       <OutputPreview id={id} data={data} />
       {modalOpen && inputImageUrl && (
         <MaskModal
           imageUrl={inputImageUrl}
           initial={region}
-          pixelExact={engine === "workers-ai"}
+          pixelExact={engine !== "gpt-image"}
           onCancel={() => setModalOpen(false)}
           onApply={applyRegion}
         />
@@ -314,21 +315,25 @@ async function compositedOutputs(
   return images;
 }
 
-// SD 1.5's quality sweet spot; the full-resolution original is composited
-// back over the result, so only the edited region pays the downscale.
-const WORKERS_AI_LONG_EDGE = 1024;
+// Per-engine working sizes; the full-resolution original is composited back
+// over the result, so only the edited region pays the downscale. SD 1.5's
+// quality sweet spot is 1024; FLUX Fill holds up at 2048 (and is priced flat
+// per image, so the larger canvas costs nothing extra).
+const INPAINT_LONG_EDGE = { "workers-ai": 1024, "flux-fill": 2048 } as const;
 
-// Workers AI engine: rebuild the base image + a white-on-black mask (SD
-// convention: white = repaint) at the model's working size, straight from the
-// region params — no dependency on the cached OpenAI-convention mask blob.
-async function executeWorkersAiInpaint(
+// Mask-conditioned engines (Workers AI SD 1.5 / FLUX Fill): rebuild the base
+// image + a white-on-black mask (white = repaint) at the engine's working
+// size, straight from the region params — no dependency on the cached
+// OpenAI-convention mask blob.
+async function executeInpaintEngine(
   ctx: ExecuteContext,
+  engine: keyof typeof INPAINT_LONG_EDGE,
   prompt: string,
   originalUrl: string,
   region: NormalizedBox,
 ): Promise<void> {
   const image = await loadInputImage(originalUrl);
-  const scale = Math.min(1, WORKERS_AI_LONG_EDGE / Math.max(image.naturalWidth, image.naturalHeight, 1));
+  const scale = Math.min(1, INPAINT_LONG_EDGE[engine] / Math.max(image.naturalWidth, image.naturalHeight, 1));
   // Model bounds: 256-2048, dimensions divisible by 8.
   const toDimension = (value: number) => Math.min(2048, Math.max(256, Math.round((value * scale) / 8) * 8));
   const width = toDimension(image.naturalWidth);
@@ -360,11 +365,11 @@ async function executeWorkersAiInpaint(
 
   const [baseBlob, maskBlob] = await Promise.all([canvasToBlob(baseCanvas), canvasToBlob(maskCanvas)]);
   const form = new FormData();
-  form.append("payload", JSON.stringify({ prompt, width, height }));
+  form.append("payload", JSON.stringify({ engine, prompt, width, height }));
   form.append("image", new File([baseBlob], "input.png", { type: "image/png" }), "input.png");
   form.append("mask", new File([maskBlob], "mask.png", { type: "image/png" }), "mask.png");
 
-  ctx.setProgress("Inpainting region…");
+  ctx.setProgress(engine === "flux-fill" ? "Inpainting region (FLUX)…" : "Inpainting region…");
   const response = await fetch("/api/workbench/inpaint", { method: "POST", body: form, signal: ctx.signal })
     .then((value) => readApiResponse<{ ok: boolean; images: string[]; mimeType: string }>(value));
 
@@ -390,8 +395,8 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
   const region = regionFromParams(ctx.params);
   if (!region) throw new Error("Select a region to edit first.");
 
-  if (ctx.params.engine === "workers-ai") {
-    await executeWorkersAiInpaint(ctx, payload.prompt, baseValue.url, region);
+  if (ctx.params.engine === "workers-ai" || ctx.params.engine === "flux-fill") {
+    await executeInpaintEngine(ctx, ctx.params.engine, payload.prompt, baseValue.url, region);
     return;
   }
 

@@ -175,9 +175,10 @@ export type WorkbenchParams = {
   // maskedEdit — the editable rectangle, normalized 0-1000 (matches
   // app/lib/selective-edit.ts's NormalizedBox convention); maskCacheKey
   // caches the rendered PNG mask blob (persisted via persistBlobKeys).
-  // engine picks the backend: gpt-image-2 (guidance mask, paid) or Workers
-  // AI SD 1.5 inpainting (pixel-exact mask, free tier).
-  engine?: "gpt-image" | "workers-ai";
+  // engine picks the backend: gpt-image-2 (guidance mask, paid), Workers AI
+  // SD 1.5 inpainting (pixel-exact mask, free tier), or FLUX.1 Fill [pro]
+  // (pixel-exact mask, ~$0.05/image via the BFL API).
+  engine?: "gpt-image" | "workers-ai" | "flux-fill";
   maskCacheKey?: string;
   maskRegionX?: number;
   maskRegionY?: number;
