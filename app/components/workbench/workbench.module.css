@@ -22,6 +22,103 @@
   position: relative;
 }
 
+/* --- React Flow chrome theming ----------------------------------------- */
+/* Align the library's stock chrome (controls, minimap, selection box, edges)
+   with the site's monochrome pill language: white surfaces, hairline
+   borders, the same 12px radius + soft shadow the palette window uses. */
+
+.canvasFlow :global(.react-flow) {
+  --xy-selection-background-color: rgba(0, 0, 0, 0.045);
+  --xy-selection-border-default: 1px dashed rgba(0, 0, 0, 0.4);
+}
+
+.canvasFlow :global(.react-flow__controls) {
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.13);
+}
+
+.canvasFlow :global(.react-flow__controls-button) {
+  background: #fff;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.canvasFlow :global(.react-flow__controls-button:hover) {
+  background: #f2f2f2;
+}
+
+.canvasFlow :global(.react-flow__minimap) {
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.13);
+}
+
+/* Edges: a touch heavier than the library default so the port-kind colors
+   read at a glance; hover/selected bump for scanability. Animated (running)
+   edges use React Flow's own marching-dash keyframes. */
+.canvasFlow :global(.react-flow__edge-path) {
+  stroke-width: 1.75;
+}
+
+.canvasFlow :global(.react-flow__edge:hover .react-flow__edge-path),
+.canvasFlow :global(.react-flow__edge.selected .react-flow__edge-path) {
+  stroke-width: 2.75;
+}
+
+/* Drag-time alignment guides (rendered in flow coordinates through
+   ViewportPortal; the 100000px extents just mean "spans the canvas"). */
+.helperLineVertical,
+.helperLineHorizontal {
+  position: absolute;
+  pointer-events: none;
+  background: #8b5cf6;
+  opacity: 0.8;
+}
+
+.helperLineVertical {
+  width: 1px;
+  height: 100000px;
+}
+
+.helperLineHorizontal {
+  width: 100000px;
+  height: 1px;
+}
+
+/* Floating quick-action pill above a selected node (<NodeToolbar>). */
+.nodeToolbar {
+  display: flex;
+  gap: 2px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 999px;
+  padding: 3px 5px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14);
+}
+
+.nodeToolbar button {
+  font-size: 9px;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+  border: none;
+  background: transparent;
+  color: #000;
+  padding: 4px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.nodeToolbar button:hover {
+  background: #efefef;
+}
+
+.nodeToolbar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .toolbar {
   display: flex;
   gap: 8px;

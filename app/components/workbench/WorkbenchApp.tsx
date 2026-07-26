@@ -7,12 +7,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
   Controls,
+  getBezierPath,
   MiniMap,
   Panel,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
+  ViewportPortal,
+  type ConnectionLineComponentProps,
   type IsValidConnection,
+  type NodeChange,
   type OnConnectEnd,
 } from "@xyflow/react";
 import { useShallow } from "zustand/react/shallow";
@@ -28,6 +32,7 @@ import {
   validateImport,
 } from "./export-import";
 import { GraphManager, type SwitchGraphOptions } from "./GraphManager";
+import { computeHelperLines, tidyLayout, type HelperLines } from "./layout";
 import { Inspector } from "./Inspector";
 import { BlockedUpgradeError, decidePendingSave, DEFAULT_GRAPH_ID, loadGraph, saveGraph, saveGraphStructure } from "./persistence";
 import { connectionIsValid, nodeKindsForWire, useWorkbenchStore } from "./store";
@@ -40,6 +45,35 @@ import { acceptedKindsFor, PORT_COLORS, specFor, type NodeKind, type PortKind, t
 function bytesLabel(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// The in-flight wire while dragging a connection: same bezier as settled
+// edges, dashed, and colored by the port kind it started from (source OR
+// target handle — a drag can begin at either end), so the wire telegraphs
+// its data kind before it lands.
+function WireConnectionLine({ fromX, fromY, toX, toY, fromPosition, toPosition, fromNode, fromHandle }: ConnectionLineComponentProps) {
+  let stroke = "#999";
+  const data = fromNode?.data as WorkbenchNode["data"] | undefined;
+  if (data && fromHandle?.id) {
+    const spec = specFor(data.kind);
+    const ports = fromHandle.type === "source" ? spec.outputs : spec.inputs;
+    const port = ports.find((candidate) => candidate.id === fromHandle.id);
+    if (port) stroke = PORT_COLORS[port.kind];
+  }
+  const [path] = getBezierPath({
+    sourceX: fromX,
+    sourceY: fromY,
+    sourcePosition: fromPosition,
+    targetX: toX,
+    targetY: toY,
+    targetPosition: toPosition,
+  });
+  return (
+    <g>
+      <path d={path} fill="none" stroke={stroke} strokeWidth={2} strokeDasharray="6 4" />
+      <circle cx={toX} cy={toY} r={4} fill="#fff" stroke={stroke} strokeWidth={1.5} />
+    </g>
+  );
 }
 
 // The empty-canvas onboarding gallery (AC19): three domain presets plus a
@@ -298,19 +332,73 @@ function CanvasInner({
   // in the node registry — nothing is persisted on the edge itself, so graphs
   // reloaded from storage (whose edges carry no style metadata) recolor
   // themselves the same way. Selected edges keep React Flow's highlight.
+  // Edges into a currently-running node animate (React Flow's marching
+  // dashes), so during a workflow run the canvas shows where data is flowing.
   const coloredEdges = useMemo(
     () =>
       edges.map((edge) => {
-        if (edge.selected) return edge;
+        const animated = nodes.find((node) => node.id === edge.target)?.data.status === "running";
+        if (edge.selected) return edge.animated === animated ? edge : { ...edge, animated };
         const source = nodes.find((node) => node.id === edge.source);
         if (!source) return edge;
         const outputs = specFor(source.data.kind).outputs;
         const port = outputs.find((candidate) => candidate.id === edge.sourceHandle) ?? outputs[0];
         if (!port) return edge;
-        return { ...edge, style: { ...edge.style, stroke: PORT_COLORS[port.kind] } };
+        return { ...edge, animated, style: { ...edge.style, stroke: PORT_COLORS[port.kind] } };
       }),
     [nodes, edges],
   );
+
+  // Drag-time alignment guides: intercept single-node position changes,
+  // snap to a nearby edge/center alignment with another card, and remember
+  // the guide coordinates for the <ViewportPortal> lines below. Multi-select
+  // drags pass through untouched (several cards moving at once has no single
+  // meaningful alignment).
+  const [helperLines, setHelperLines] = useState<HelperLines>({});
+  const handleNodesChange = useCallback((changes: NodeChange<WorkbenchNode>[]) => {
+    const positionChanges = changes.filter((change) => change.type === "position");
+    const dragging = positionChanges.some((change) => change.type === "position" && change.dragging);
+    let next = changes;
+    if (dragging && positionChanges.length === 1) {
+      const change = positionChanges[0];
+      if (change.type === "position" && change.position) {
+        const state = useWorkbenchStore.getState();
+        const node = state.nodes.find((candidate) => candidate.id === change.id);
+        const moving = {
+          x: change.position.x,
+          y: change.position.y,
+          width: node?.measured?.width ?? 232,
+          height: node?.measured?.height ?? 200,
+        };
+        const others = state.nodes
+          .filter((candidate) => candidate.id !== change.id)
+          .map((candidate) => ({
+            x: candidate.position.x,
+            y: candidate.position.y,
+            width: candidate.measured?.width ?? 232,
+            height: candidate.measured?.height ?? 200,
+          }));
+        const { snapX, snapY, lines } = computeHelperLines(moving, others);
+        setHelperLines(lines);
+        next = changes.map((candidate) =>
+          candidate === change
+            ? { ...change, position: { x: snapX ?? moving.x, y: snapY ?? moving.y } }
+            : candidate,
+        );
+      }
+    } else if (helperLines.vertical !== undefined || helperLines.horizontal !== undefined) {
+      setHelperLines({});
+    }
+    onNodesChange(next);
+  }, [onNodesChange, helperLines]);
+
+  const tidy = useCallback(() => {
+    const state = useWorkbenchStore.getState();
+    const placed = tidyLayout(state.nodes as WorkbenchNode[], state.edges);
+    if (!placed.length) return;
+    onNodesChange(placed.map((entry) => ({ id: entry.id, type: "position" as const, position: entry.position })));
+    fitSoon();
+  }, [onNodesChange, fitSoon]);
 
   const isValidConnection: IsValidConnection = useCallback(
     (connection) => {
@@ -446,10 +534,11 @@ function CanvasInner({
       nodes={nodes}
       edges={coloredEdges}
       nodeTypes={NODE_TYPES}
-      onNodesChange={onNodesChange}
+      onNodesChange={handleNodesChange}
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
       onConnectEnd={handleConnectEnd}
+      connectionLineComponent={WireConnectionLine}
       isValidConnection={isValidConnection}
       snapToGrid
       snapGrid={[22, 22]}
@@ -475,12 +564,39 @@ function CanvasInner({
       connectionRadius={compact ? 34 : undefined}
       proOptions={{ hideAttribution: true }}
     >
-      <Background gap={22} size={1.4} />
+      <Background gap={22} size={1.4} color="#d0d0d0" />
       <Controls showInteractive={false} />
       {/* The minimap is a 200x150 opaque overlay -- a sixth of a 360x640
           Android viewport -- and its own drag gesture competes with panning
-          the canvas underneath. Dropped entirely in the compact layout. */}
-      {!compact && <MiniMap pannable zoomable />}
+          the canvas underneath. Dropped entirely in the compact layout.
+          Status-tinted cards: running nodes glow violet, errors red, so the
+          minimap doubles as a workflow progress readout. */}
+      {!compact && (
+        <MiniMap
+          pannable
+          zoomable
+          nodeBorderRadius={10}
+          nodeStrokeColor="rgba(0, 0, 0, 0.2)"
+          maskColor="rgba(0, 0, 0, 0.07)"
+          nodeColor={(node) => {
+            const status = (node as WorkbenchNode).data?.status;
+            if (status === "running") return "#8b5cf6";
+            if (status === "error") return "#dc2626";
+            if (status === "done") return "#cfcfcf";
+            return "#e8e8e8";
+          }}
+        />
+      )}
+      {/* Alignment guides while dragging a card (flow-coordinate space via
+          ViewportPortal, so they pan/zoom with the canvas). */}
+      <ViewportPortal>
+        {helperLines.vertical !== undefined && (
+          <div className={styles.helperLineVertical} style={{ transform: `translate(${helperLines.vertical}px, -50000px)` }} />
+        )}
+        {helperLines.horizontal !== undefined && (
+          <div className={styles.helperLineHorizontal} style={{ transform: `translate(-50000px, ${helperLines.horizontal}px)` }} />
+        )}
+      </ViewportPortal>
       <div aria-live="polite" role="status" className={styles.srOnly}>{liveMessage}</div>
       <Panel position="top-left">
         {compact ? (
@@ -565,6 +681,15 @@ function CanvasInner({
                 title="Draft mode: draft-capable paid nodes run at low quality/small size for cheap iteration. Turning it off re-bills them at full quality."
               >
                 Draft {draft ? "On" : "Off"}
+              </button>
+              <button
+                type="button"
+                className={styles.toolbarGhost}
+                disabled={nodes.length < 2}
+                onClick={() => { setToolbarMenuOpen(false); tidy(); }}
+                title="Auto-arrange the graph left-to-right by data flow."
+              >
+                Tidy
               </button>
               <button type="button" className={styles.toolbarGhost} onClick={() => { setToolbarMenuOpen(false); setManualOpen(true); }}>
                 Templates

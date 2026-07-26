@@ -2,14 +2,14 @@
 "use client";
 
 import type { Edge } from "@xyflow/react";
-import { Handle, Position, useEdges, useNodeId, useNodes, useReactFlow, type NodeProps } from "@xyflow/react";
+import { Handle, NodeToolbar, Position, useEdges, useNodeId, useNodes, useReactFlow, type NodeProps } from "@xyflow/react";
 import { memo, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { readApiResponse } from "@/app/lib/api-client";
 import { optimizeReferencesForTransport } from "@/app/lib/image-transport";
 import { ensureThumbnail, getBlob, getBlobUrl, putBlob } from "../blob-cache";
 import { confirmHighCost, formatUsd, recordUsageCalibration } from "../cost";
-import { cancelExecution, retryFrom, runNodes } from "../executor";
+import { cancelExecution, estimateStaleCost, retryFrom, runNodes } from "../executor";
 import { MAX_IMAGE_BYTES } from "../export-import";
 import { activeRunOf, signatureFor, type SignatureContext } from "../signature";
 import { useWorkbenchStore } from "../store";
@@ -120,10 +120,46 @@ export function NodeDeleteButton() {
   );
 }
 
+// Floating quick-action pill above the selected node (React Flow
+// <NodeToolbar>: rendered into a portal at canvas level, so it never clips
+// against the card or its neighbors, and only shows while the node is
+// selected). Run mirrors RunFooter's semantics via the same executor path —
+// estimateStaleCost gives the draft-aware price for the confirmHighCost gate.
+function NodeQuickActions() {
+  const id = useNodeId();
+  const { deleteElements } = useReactFlow();
+  const duplicateNode = useWorkbenchStore((state) => state.duplicateNode);
+  const running = useWorkbenchStore((state) => state.running);
+  if (!id) return null;
+  return (
+    <NodeToolbar position={Position.Top} offset={10} className={styles.nodeToolbar}>
+      <button
+        type="button"
+        className="nodrag nopan"
+        disabled={running}
+        onClick={() => {
+          const { totalUsd } = estimateStaleCost([id]);
+          if (!confirmHighCost(totalUsd)) return;
+          void runNodes([id]);
+        }}
+      >
+        Run
+      </button>
+      <button type="button" className="nodrag nopan" onClick={() => duplicateNode(id)}>
+        Duplicate
+      </button>
+      <button type="button" className="nodrag nopan" onClick={() => void deleteElements({ nodes: [{ id }] })}>
+        Delete
+      </button>
+    </NodeToolbar>
+  );
+}
+
 export function NodeShell({ data, children, footer }: { data: WorkbenchNodeData; children: ReactNode; footer?: ReactNode }) {
   const spec = specFor(data.kind);
   return (
     <div className={`${styles.node} ${data.status === "error" ? styles.nodeError : ""}`}>
+      <NodeQuickActions />
       <PortHandles spec={spec} />
       <NodeDeleteButton />
       <header className={styles.nodeHeader}>

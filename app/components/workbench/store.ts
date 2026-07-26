@@ -9,7 +9,7 @@ import {
   type NodeChange,
 } from "@xyflow/react";
 import { releaseBlob, releaseByPrefix } from "./blob-cache";
-import { NODE_KINDS } from "./nodes/manifests";
+import { importSchemaMap, NODE_KINDS } from "./nodes/manifests";
 import {
   acceptedKindsFor,
   defaultParams,
@@ -154,6 +154,13 @@ type WorkbenchStore = {
   // Returns the new node's id so callers (e.g. Spotlight's drag-wire-to-empty-
   // canvas flow) can immediately wire an edge to/from it.
   addNode: (kind: NodeKind, position: { x: number; y: number }) => string;
+  // Fresh node of the same kind with the source's params copied, offset a
+  // grid step away. Runs/status/pins are NOT copied (they belong to the
+  // original's history), and neither are blob-owning params (sourceBlobKeys
+  // and reference items): blob-cache keys are namespaced by node id and
+  // released when their owner is deleted, so sharing them across two nodes
+  // would let deleting one break the other.
+  duplicateNode: (id: string) => string | undefined;
   updateParams: (id: string, patch: Partial<WorkbenchParams>) => void;
   setStatus: (id: string, status: NodeStatus, error?: string, progress?: string) => void;
   applyRun: (id: string, run: NodeRun) => void;
@@ -273,6 +280,27 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
       type: kind,
       position,
       data: { kind, params: defaultParams(kind), status: "idle", runs: [], activeRun: 0 },
+    };
+    set((state) => ({ nodes: [...state.nodes, node], dirtyStamp: Date.now() }));
+    return node.id;
+  },
+
+  duplicateNode: (id) => {
+    const source = get().nodes.find((node) => node.id === id);
+    if (!source) return undefined;
+    const kind = source.data.kind;
+    const params: WorkbenchParams = { ...source.data.params };
+    for (const key of importSchemaMap[kind].sourceBlobKeys) {
+      delete (params as Record<string, unknown>)[key];
+    }
+    // Reference items carry per-item imageKeys (SOURCE blobs owned by the
+    // original node) — same cross-node blob-sharing hazard as above.
+    if (params.referenceItems) params.referenceItems = [];
+    const node: WorkbenchNode = {
+      id: `${kind}-${createNodeId()}`,
+      type: kind,
+      position: { x: source.position.x + 44, y: source.position.y + 44 },
+      data: { kind, params, status: "idle", runs: [], activeRun: 0 },
     };
     set((state) => ({ nodes: [...state.nodes, node], dirtyStamp: Date.now() }));
     return node.id;
