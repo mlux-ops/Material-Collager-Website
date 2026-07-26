@@ -7,7 +7,9 @@ import { MAX_REFERENCE_IMAGES } from "@/app/lib/collage";
 import { downscaleForReview, fileToBase64 } from "@/app/lib/image-transport";
 import { useWorkbenchStore } from "../store";
 import styles from "../workbench.module.css";
-import type { ExecuteContext, NodeOutputValue, ReferenceItem, ReportResult, WorkbenchNode } from "../types";
+import type { ExecuteContext, NodeOutputValue, ReportResult, WorkbenchNode } from "../types";
+import { referenceItemsFromValues } from "./generation";
+import { specFor } from "./manifests";
 import { fileFromCacheKey, NodeShell, RunFooter, useConnectedImageCount, type WorkbenchNodeProps } from "./shared";
 
 // Maps the node's domain param (shared with promptBuilder) to the accuracy
@@ -28,24 +30,10 @@ type ReviewResponse = {
   items: Array<{ id: string; passed: boolean; finding: string; box?: [number, number, number, number] }>;
 };
 
-function isReferencesValue(value: NodeOutputValue): value is Extract<NodeOutputValue, { kind: "references" }> {
-  return value.kind === "references";
-}
-
-function orderedReferenceItems(value: Extract<NodeOutputValue, { kind: "references" }>): ReferenceItem[] {
-  const byId = new Map(value.items.map((item) => [item.id, item]));
-  const orderedIds = value.order.length ? value.order : value.items.map((item) => item.id);
-  const seen = new Set<string>();
-  const items: ReferenceItem[] = [];
-  for (const id of orderedIds) {
-    if (seen.has(id)) continue;
-    const item = byId.get(id);
-    if (!item || !item.imageKeys.length) continue;
-    seen.add(id);
-    items.push(item);
-  }
-  return items;
-}
+// The references port is multi and accepts plain images alongside References
+// bundles — referenceItemsFromValues (shared with Collage Board) flattens the
+// mixed inputs into one ordered item list, synthesizing a one-image item per
+// plain image output.
 
 export const Component = memo(function AccuracyReviewerNode({ id, data }: WorkbenchNodeProps) {
   const updateParams = useWorkbenchStore((state) => state.updateParams);
@@ -54,12 +42,23 @@ export const Component = memo(function AccuracyReviewerNode({ id, data }: Workbe
   const edges = useEdges();
 
   const referenceItems = useMemo(() => {
-    const edge = edges.find((candidate) => candidate.target === id && candidate.targetHandle === "references");
-    if (!edge) return [] as ReferenceItem[];
-    const source = nodes.find((candidate) => candidate.id === edge.source);
-    const run = source?.data.runs[source.data.activeRun];
-    const value = run?.values[0]?.find(isReferencesValue);
-    return value ? orderedReferenceItems(value) : [];
+    // Mirror the executor's input gathering (executor.ts inputValues): every
+    // edge into the references port in edge order, resolving each edge's
+    // source output port and taking its FIRST candidate — so the "Score
+    // only" checkboxes always list exactly what a run would review against.
+    const values: NodeOutputValue[] = [];
+    for (const edge of edges) {
+      if (edge.target !== id || edge.targetHandle !== "references") continue;
+      const source = nodes.find((candidate) => candidate.id === edge.source);
+      if (!source) continue;
+      const run = source.data.runs[source.data.activeRun];
+      if (!run) continue;
+      const outputs = specFor(source.data.kind).outputs;
+      const portIndex = outputs.findIndex((port) => port.id === edge.sourceHandle);
+      const first = (run.values[portIndex >= 0 ? portIndex : 0] ?? [])[0];
+      if (first) values.push(first);
+    }
+    return referenceItemsFromValues(values);
   }, [edges, nodes, id]);
 
   const selectedItemIds = data.params.selectedItemIds ?? [];
@@ -123,10 +122,8 @@ export const execute = async (ctx: ExecuteContext): Promise<void> => {
   const imageValue = ctx.inputs("image").find((value): value is Extract<NodeOutputValue, { kind: "image" }> => value.kind === "image");
   if (!imageValue) throw new Error("Connect the generated image to review.");
 
-  const referencesValue = ctx.inputs("references").find(isReferencesValue);
-  if (!referencesValue) throw new Error("Connect a References node with at least one item to review against.");
-  const items = orderedReferenceItems(referencesValue);
-  if (!items.length) throw new Error("The connected References node has no uploaded images yet.");
+  const items = referenceItemsFromValues(ctx.inputs("references"));
+  if (!items.length) throw new Error("Connect at least one image or References node to review against.");
 
   const selectedItemIds = (ctx.params.selectedItemIds ?? []).filter((itemId) => items.some((item) => item.id === itemId));
 

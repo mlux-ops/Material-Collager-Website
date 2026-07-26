@@ -59,7 +59,10 @@ export const collageBoardManifest: NodeManifest = {
     kind: "collageBoard",
     title: "Collage Board",
     description: "Arrange reference items into an editorial material collage.",
-    inputs: [{ id: "items", kind: "references", label: "Items", multi: true, required: true }],
+    // Accepts References bundles AND plain image outputs (each image becomes
+    // a one-image synthetic item via referenceItemsFromValues) — a board
+    // doesn't require routing every input through a References node.
+    inputs: [{ id: "items", kind: "references", label: "Items", multi: true, required: true, acceptedKinds: ["image", "references"] }],
     outputs: [{ id: "image", kind: "image", label: "Image" }],
     paid: true,
   },

@@ -6,7 +6,7 @@
 
 import { smallestValidEditSize } from "../../../lib/image-edit.ts";
 import { estimateRunUsd } from "../cost.ts";
-import type { CostEstimateInput, ImportParamRule, NodeOutputValue, WorkbenchParams } from "../types";
+import type { CostEstimateInput, ImportParamRule, NodeOutputValue, ReferenceItem, WorkbenchParams } from "../types";
 
 export const GENERATION_SIZES = ["1024x1024", "1536x1024", "1024x1536", "2048x2048", "2560x1440"] as const;
 export const GENERATION_QUALITIES = ["low", "medium", "high"] as const;
@@ -61,6 +61,39 @@ export function imageCacheKeysFromValue(value: NodeOutputValue): string[] {
     return keys;
   }
   return [];
+}
+
+// Normalizes a mixed reference-input port (acceptedKinds ["image",
+// "references"]) into one ordered ReferenceItem list: a references bundle
+// contributes its items in the bundle's own order (deduped, empty items
+// skipped), and a plain image value becomes a one-image synthetic item — so
+// nodes that consume reference items (Collage Board, Accuracy Reviewer) take
+// direct Photo/Generate outputs without routing through a References node.
+// Synthetic ids reuse the image's cacheKey, which is stable per output run,
+// so params that reference item ids (e.g. selectedItemIds) stay valid across
+// renders of the same run.
+export function referenceItemsFromValues(values: NodeOutputValue[]): ReferenceItem[] {
+  const items: ReferenceItem[] = [];
+  const seen = new Set<string>();
+  let imageIndex = 0;
+  for (const value of values) {
+    if (value.kind === "image") {
+      imageIndex += 1;
+      if (seen.has(value.cacheKey)) continue;
+      seen.add(value.cacheKey);
+      items.push({ id: value.cacheKey, role: `reference image ${imageIndex}`, imageKeys: [value.cacheKey] });
+    } else if (value.kind === "references") {
+      const byId = new Map(value.items.map((item) => [item.id, item]));
+      const orderedIds = value.order.length ? value.order : value.items.map((item) => item.id);
+      for (const id of orderedIds) {
+        const item = byId.get(id);
+        if (!item || !item.imageKeys.length || seen.has(id)) continue;
+        seen.add(id);
+        items.push(item);
+      }
+    }
+  }
+  return items;
 }
 
 export function estimateGenerationCost({ params, inputImages }: CostEstimateInput): number | null {

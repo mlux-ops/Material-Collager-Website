@@ -18,7 +18,7 @@ import { recordUsageCalibration } from "../cost";
 import { useWorkbenchStore } from "../store";
 import styles from "../workbench.module.css";
 import type { ExecuteContext, NodeOutputValue } from "../types";
-import { decodeBase64Image } from "./generation";
+import { decodeBase64Image, referenceItemsFromValues } from "./generation";
 import {
   fileFromCacheKey,
   NodeShell,
@@ -70,31 +70,23 @@ export const Component = memo(function CollageBoardNode({ id, data }: WorkbenchN
   );
 });
 
-// Flattens every connected References bundle (in each edge's own order) into
-// one ordered CollageItemInput list, reusing the generator's item shape
-// (CollageItemInput + buildGenerationPrompt) unchanged.
+// Flattens every connected input (in each edge's own order) into one ordered
+// CollageItemInput list, reusing the generator's item shape (CollageItemInput
+// + buildGenerationPrompt) unchanged. References bundles contribute their
+// items; plain image outputs become one-image synthetic items (via the shared
+// referenceItemsFromValues normalizer), so a board can be fed straight from
+// Photo/Generate nodes without a References node in between.
 function itemsFromReferenceValues(values: NodeOutputValue[]): CollageItemInput[] {
-  const items: CollageItemInput[] = [];
-  for (const value of values) {
-    if (value.kind !== "references") continue;
-    const byId = new Map(value.items.map((item) => [item.id, item]));
-    const order = value.order.length ? value.order : value.items.map((item) => item.id);
-    for (const itemId of order) {
-      const item = byId.get(itemId);
-      if (!item || !item.imageKeys.length) continue;
-      items.push({
-        id: item.id,
-        role: item.role,
-        imageKeys: item.imageKeys,
-        brand: item.brand,
-        name: item.name,
-        finish: item.finish,
-        notes: item.notes,
-        required: item.required,
-      });
-    }
-  }
-  return items;
+  return referenceItemsFromValues(values).map((item) => ({
+    id: item.id,
+    role: item.role,
+    imageKeys: item.imageKeys,
+    brand: item.brand,
+    name: item.name,
+    finish: item.finish,
+    notes: item.notes,
+    required: item.required,
+  }));
 }
 
 // DOM-touching execute wrapper: builds a CollageRequestInput from the
@@ -103,7 +95,7 @@ function itemsFromReferenceValues(values: NodeOutputValue[]): CollageItemInput[]
 // never /api/generate. QA runs separately via the Accuracy Reviewer node.
 export async function execute(ctx: ExecuteContext): Promise<void> {
   const items = itemsFromReferenceValues(ctx.inputs("items"));
-  if (!items.length) throw new Error("Connect a References node with at least one uploaded item image.");
+  if (!items.length) throw new Error("Connect at least one image or References node with an uploaded item image.");
 
   const request: CollageRequestInput = {
     collageType: (ctx.params.collageType as CollageRequestInput["collageType"]) || "kitchen_material_palette",

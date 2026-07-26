@@ -24,9 +24,12 @@ export const accuracyReviewerManifest: NodeManifest = {
     description: "Check a generated image against its reference items and report findings.",
     inputs: [
       { id: "image", kind: "image", label: "Image", required: true },
-      // C3: execute() unconditionally throws without a connected References
-      // node -- required:true surfaces that pre-run too.
-      { id: "references", kind: "references", label: "References", required: true },
+      // C3: execute() unconditionally throws without a connected reference
+      // input -- required:true surfaces that pre-run too. Accepts References
+      // bundles AND plain image outputs (multi, so several images can feed
+      // one review) — each image becomes a one-image synthetic item via
+      // referenceItemsFromValues.
+      { id: "references", kind: "references", label: "References", required: true, multi: true, acceptedKinds: ["image", "references"] },
     ],
     outputs: [{ id: "report", kind: "report", label: "Report" }],
     paid: true,
