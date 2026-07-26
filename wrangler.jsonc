@@ -30,6 +30,15 @@
     "binding": "IMAGES"
   },
 
+  // Workers AI binding used by /api/workbench/inpaint (Masked Edit node's
+  // pixel-exact engine, @cf/runwayml/stable-diffusion-v1-5-inpainting).
+  // Note: in local dev the AI binding proxies to Cloudflare's network, so it
+  // needs a logged-in wrangler session and consumes the account's free-tier
+  // neurons even locally.
+  "ai": {
+    "binding": "AI"
+  },
+
   // Defense-in-depth for Cloudflare Access (see docs/DEPLOYING.md): the
   // Worker rejects any request that bypassed the Access login in front of
   // the workers.dev domain. Values come from Zero Trust -> Access ->

@@ -2,6 +2,7 @@
 
 import { useEdges, useNodes } from "@xyflow/react";
 import { memo, useCallback, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
 import { readApiResponse } from "@/app/lib/api-client";
 import { compositeSelectiveEdit, type NormalizedBox } from "@/app/lib/selective-edit";
 import { getBlob, putBlob } from "../blob-cache";
@@ -35,17 +36,44 @@ function regionFromParams(params: WorkbenchParams): NormalizedBox | undefined {
   return [params.maskRegionX, params.maskRegionY, params.maskRegionWidth, params.maskRegionHeight];
 }
 
+function loadInputImage(url: string): Promise<HTMLImageElement> {
+  const image = new Image();
+  image.decoding = "async";
+  return new Promise((resolve, reject) => {
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not read the input image."));
+    image.src = url;
+  });
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((value) => (value ? resolve(value) : reject(new Error("Could not build the mask."))), "image/png"),
+  );
+}
+
 // Rectangle/region-selection surface: pointer events (not mouse-only) so the
 // drag works with mouse, touch, and stylus alike. Freehand selection is
 // deferred; masking is guidance, not pixel-exact geometry.
+//
+// Rendered through createPortal(document.body): the node component lives
+// inside a React Flow node wrapper, which (a) owns a native d3-drag listener
+// that treats any un-`nodrag`-classed pointerdown as "drag the node" — it
+// steals the pointer before a single move event reaches the drawing surface —
+// and (b) is `transform`-positioned, which hijacks the fixed overlay's
+// containing block. Portaling out of the wrapper fixes both; the nodrag/
+// nopan/nowheel classes below are defense in depth should the portal target
+// ever change.
 function MaskModal({
   imageUrl,
   initial,
+  pixelExact,
   onCancel,
   onApply,
 }: {
   imageUrl: string;
   initial?: NormalizedBox;
+  pixelExact: boolean;
   onCancel: () => void;
   onApply: (box: NormalizedBox) => void;
 }) {
@@ -73,6 +101,13 @@ function MaskModal({
   }, []);
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    // Primary pointer only: ignore right/middle clicks and multi-touch
+    // secondaries so a stray second finger can't restart the rectangle.
+    if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
+    // preventDefault kills native image ghost-drag/text selection;
+    // stopPropagation keeps the gesture out of any ancestor handlers.
+    event.preventDefault();
+    event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     const point = toNormalized(event.clientX, event.clientY);
     dragStart.current = point;
@@ -80,7 +115,8 @@ function MaskModal({
   }, [toNormalized]);
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!dragStart.current) return;
+    if (!dragStart.current || !event.isPrimary) return;
+    event.stopPropagation();
     const point = toNormalized(event.clientX, event.clientY);
     const start = dragStart.current;
     setDraft({
@@ -97,15 +133,16 @@ function MaskModal({
 
   const canApply = Boolean(draft && draft.width > 8 && draft.height > 8);
 
-  return (
-    <div className={`${styles.maskModalOverlay} ${closing ? styles.overlayClosing : ""}`} role="dialog" aria-modal="true" aria-label="Select a region to edit">
+  return createPortal(
+    <div className={`${styles.maskModalOverlay} nodrag nopan nowheel ${closing ? styles.overlayClosing : ""}`} role="dialog" aria-modal="true" aria-label="Select a region to edit">
       <div className={styles.maskModal}>
         <p className={styles.hint}>
-          Drag to select the region to edit — everything outside is protected. Masking is guidance, not pixel-exact.
+          Drag to select the region to edit — everything outside is protected.{" "}
+          {pixelExact ? "Only the selected pixels are repainted." : "Masking is guidance, not pixel-exact."}
         </p>
         <div
           ref={areaRef}
-          className={styles.maskCanvasArea}
+          className={`${styles.maskCanvasArea} nodrag nopan nowheel`}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
@@ -141,7 +178,8 @@ function MaskModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -163,6 +201,7 @@ export const Component = memo(function MaskedEditNode({ id, data }: WorkbenchNod
   }, [edges, nodes, id]);
 
   const region = regionFromParams(data.params);
+  const engine = data.params.engine || "gpt-image";
 
   const applyRegion = useCallback(async (box: NormalizedBox) => {
     setModalOpen(false);
@@ -170,13 +209,7 @@ export const Component = memo(function MaskedEditNode({ id, data }: WorkbenchNod
     const [x, y, width, height] = box;
     const cacheKey = `${id}:mask:${Math.round(x)}-${Math.round(y)}-${Math.round(width)}-${Math.round(height)}`;
 
-    const image = new Image();
-    image.decoding = "async";
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error("Could not read the input image."));
-      image.src = inputImageUrl;
-    });
+    const image = await loadInputImage(inputImageUrl);
 
     const canvas = document.createElement("canvas");
     canvas.width = image.naturalWidth;
@@ -193,9 +226,7 @@ export const Component = memo(function MaskedEditNode({ id, data }: WorkbenchNod
       Math.ceil((height / 1000) * canvas.height),
     );
 
-    const blob = await new Promise<Blob>((resolve, reject) =>
-      canvas.toBlob((value) => (value ? resolve(value) : reject(new Error("Could not build the mask."))), "image/png"),
-    );
+    const blob = await canvasToBlob(canvas);
     if (blob.size >= 4 * 1024 * 1024) {
       window.alert("The selected region produced a mask over 4MB. Select a smaller region.");
       return;
@@ -218,24 +249,137 @@ export const Component = memo(function MaskedEditNode({ id, data }: WorkbenchNod
 
   return (
     <NodeShell data={data} footer={<RunFooter id={id} data={data} inputImages={inputImages} />}>
-      <p className={styles.hint}>Masking is guidance, not pixel-exact.</p>
+      <p className={styles.hint}>
+        {engine === "workers-ai"
+          ? "Pixel-exact: only the selected region is repainted (free)."
+          : "Masking is guidance, not pixel-exact."}
+      </p>
+      <label className={styles.field}>
+        <span>Engine</span>
+        <select
+          className="nodrag"
+          value={engine}
+          onChange={(event) => updateParams(id, { engine: event.target.value as "gpt-image" | "workers-ai" })}
+        >
+          <option value="gpt-image">gpt-image-2 — guidance mask (paid)</option>
+          <option value="workers-ai">Workers AI SD 1.5 — exact mask (free)</option>
+        </select>
+      </label>
       <button type="button" className="nodrag" onClick={() => setModalOpen(true)} disabled={!inputImageUrl}>
         {region ? "Change selected region…" : "Select region…"}
       </button>
-      <GenerationSettings id={id} data={data} />
+      {/* Size/quality are gpt-image-2 knobs; the workers-ai engine derives its
+          working size from the input image, so hide them there. */}
+      {engine !== "workers-ai" && <GenerationSettings id={id} data={data} />}
       <OutputPreview id={id} data={data} />
       {modalOpen && inputImageUrl && (
-        <MaskModal imageUrl={inputImageUrl} initial={region} onCancel={() => setModalOpen(false)} onApply={applyRegion} />
+        <MaskModal
+          imageUrl={inputImageUrl}
+          initial={region}
+          pixelExact={engine === "workers-ai"}
+          onCancel={() => setModalOpen(false)}
+          onApply={applyRegion}
+        />
       )}
     </NodeShell>
   );
 });
 
-// DOM-touching execute wrapper: uploads the rendered PNG mask (<4MB, opaque
-// elsewhere / transparent inside the selected region) alongside the base
-// image, then composites the edited result back over the original using the
-// extracted selective-edit compositor (feathered protection outside the
-// region) — reused verbatim from app/lib/selective-edit.ts.
+// Composite each returned candidate back over the full-resolution original
+// (feathered inside the region, bit-identical outside) and cache the results.
+// Shared by both engines — it's what makes protection pixel-exact regardless
+// of what the model returned or at what size.
+async function compositedOutputs(
+  ctx: ExecuteContext,
+  runId: string,
+  base64Images: string[],
+  mimeType: string,
+  originalUrl: string,
+  region: NormalizedBox,
+): Promise<NodeOutputValue[]> {
+  const images: NodeOutputValue[] = [];
+  for (let index = 0; index < base64Images.length; index += 1) {
+    const cacheKey = `${ctx.nodeId}:${runId}:${index}`;
+    const bytes = decodeBase64Image(base64Images[index]);
+    const editedUrl = URL.createObjectURL(new Blob([bytes], { type: mimeType || "image/png" }));
+    try {
+      const compositedUrl = await compositeSelectiveEdit(originalUrl, editedUrl, [region], []);
+      const compositedBlob = await fetch(compositedUrl).then((value) => value.blob());
+      URL.revokeObjectURL(compositedUrl);
+      images.push({ kind: "image", url: putBlob(cacheKey, compositedBlob), cacheKey });
+    } finally {
+      URL.revokeObjectURL(editedUrl);
+    }
+  }
+  return images;
+}
+
+// SD 1.5's quality sweet spot; the full-resolution original is composited
+// back over the result, so only the edited region pays the downscale.
+const WORKERS_AI_LONG_EDGE = 1024;
+
+// Workers AI engine: rebuild the base image + a white-on-black mask (SD
+// convention: white = repaint) at the model's working size, straight from the
+// region params — no dependency on the cached OpenAI-convention mask blob.
+async function executeWorkersAiInpaint(
+  ctx: ExecuteContext,
+  prompt: string,
+  originalUrl: string,
+  region: NormalizedBox,
+): Promise<void> {
+  const image = await loadInputImage(originalUrl);
+  const scale = Math.min(1, WORKERS_AI_LONG_EDGE / Math.max(image.naturalWidth, image.naturalHeight, 1));
+  // Model bounds: 256-2048, dimensions divisible by 8.
+  const toDimension = (value: number) => Math.min(2048, Math.max(256, Math.round((value * scale) / 8) * 8));
+  const width = toDimension(image.naturalWidth);
+  const height = toDimension(image.naturalHeight);
+
+  const baseCanvas = document.createElement("canvas");
+  baseCanvas.width = width;
+  baseCanvas.height = height;
+  const baseContext = baseCanvas.getContext("2d");
+  if (!baseContext) throw new Error("This browser cannot prepare the image for inpainting.");
+  baseContext.imageSmoothingQuality = "high";
+  baseContext.drawImage(image, 0, 0, width, height);
+
+  const [x, y, regionWidth, regionHeight] = region;
+  const maskCanvas = document.createElement("canvas");
+  maskCanvas.width = width;
+  maskCanvas.height = height;
+  const maskContext = maskCanvas.getContext("2d");
+  if (!maskContext) throw new Error("This browser cannot prepare the mask for inpainting.");
+  maskContext.fillStyle = "#000";
+  maskContext.fillRect(0, 0, width, height);
+  maskContext.fillStyle = "#fff";
+  maskContext.fillRect(
+    Math.floor((x / 1000) * width),
+    Math.floor((y / 1000) * height),
+    Math.ceil((regionWidth / 1000) * width),
+    Math.ceil((regionHeight / 1000) * height),
+  );
+
+  const [baseBlob, maskBlob] = await Promise.all([canvasToBlob(baseCanvas), canvasToBlob(maskCanvas)]);
+  const form = new FormData();
+  form.append("payload", JSON.stringify({ prompt, width, height }));
+  form.append("image", new File([baseBlob], "input.png", { type: "image/png" }), "input.png");
+  form.append("mask", new File([maskBlob], "mask.png", { type: "image/png" }), "mask.png");
+
+  ctx.setProgress("Inpainting region…");
+  const response = await fetch("/api/workbench/inpaint", { method: "POST", body: form, signal: ctx.signal })
+    .then((value) => readApiResponse<{ ok: boolean; images: string[]; mimeType: string }>(value));
+
+  const runId = ctx.createRunId();
+  const images = await compositedOutputs(ctx, runId, response.images, response.mimeType, originalUrl, region);
+  ctx.applyRun({ runId, signature: ctx.signature, at: Date.now(), values: [images] });
+}
+
+// DOM-touching execute wrapper. gpt-image engine: uploads the rendered PNG
+// mask (<4MB, opaque elsewhere / transparent inside the selected region)
+// alongside the base image to /api/workbench/edit. workers-ai engine:
+// executeWorkersAiInpaint above. Both composite the edited result back over
+// the original using the extracted selective-edit compositor (feathered
+// protection outside the region) — reused verbatim from
+// app/lib/selective-edit.ts.
 export async function execute(ctx: ExecuteContext): Promise<void> {
   const payload = buildGenerationPayload(ctx.params, ctx.inputs("prompt"));
   const base = ctx.inputs("image");
@@ -245,6 +389,12 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
 
   const region = regionFromParams(ctx.params);
   if (!region) throw new Error("Select a region to edit first.");
+
+  if (ctx.params.engine === "workers-ai") {
+    await executeWorkersAiInpaint(ctx, payload.prompt, baseValue.url, region);
+    return;
+  }
+
   const maskCacheKey = ctx.params.maskCacheKey;
   if (!maskCacheKey) throw new Error("Select a region to edit first.");
   const maskBlob = getBlob(maskCacheKey);
@@ -264,21 +414,7 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
     .then((value) => readApiResponse<{ ok: boolean; images: string[]; mimeType: string; usage?: Record<string, unknown> }>(value));
 
   const runId = ctx.createRunId();
-  const originalUrl = baseValue.url;
-  const images: NodeOutputValue[] = [];
-  for (let index = 0; index < response.images.length; index += 1) {
-    const cacheKey = `${ctx.nodeId}:${runId}:${index}`;
-    const bytes = decodeBase64Image(response.images[index]);
-    const editedUrl = URL.createObjectURL(new Blob([bytes], { type: response.mimeType || "image/png" }));
-    try {
-      const compositedUrl = await compositeSelectiveEdit(originalUrl, editedUrl, [region], []);
-      const compositedBlob = await fetch(compositedUrl).then((value) => value.blob());
-      URL.revokeObjectURL(compositedUrl);
-      images.push({ kind: "image", url: putBlob(cacheKey, compositedBlob), cacheKey });
-    } finally {
-      URL.revokeObjectURL(editedUrl);
-    }
-  }
+  const images = await compositedOutputs(ctx, runId, response.images, response.mimeType, baseValue.url, region);
   ctx.applyRun({ runId, signature: ctx.signature, at: Date.now(), values: [images], usage: response.usage });
   recordUsageCalibration(payload.size, payload.quality, response.usage, 1);
 }

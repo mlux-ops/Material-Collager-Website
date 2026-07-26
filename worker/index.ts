@@ -6,6 +6,10 @@ import { enforceAccessJwt, type AccessEnv } from "./access";
 interface Env extends AccessEnv {
   ASSETS: Fetcher;
   DB: D1Database;
+  // Workers AI (wrangler.jsonc "ai" binding); consumed by
+  // app/api/workbench/inpaint via `import { env } from "cloudflare:workers"`.
+  // Typed minimally here — image models return a binary ReadableStream.
+  AI: { run(model: string, inputs: Record<string, unknown>): Promise<ReadableStream<Uint8Array>> };
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
