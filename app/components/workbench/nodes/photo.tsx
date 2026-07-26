@@ -47,7 +47,7 @@ export const Component = memo(function PhotoNode({ id, data }: WorkbenchNodeProp
           </figure>
         )
         : <p className={styles.hint}>PNG, JPEG, or WebP under 50 MB.</p>}
-      <button type="button" className={styles.smallButton} onClick={() => inputRef.current?.click()}>
+      <button type="button" className={`nodrag ${styles.smallButton}`} onClick={() => inputRef.current?.click()}>
         {image ? "Replace image" : "Choose image"}
       </button>
       <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(event) => choose(event.target.files)} />

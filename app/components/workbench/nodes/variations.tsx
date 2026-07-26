@@ -113,7 +113,7 @@ export const Component = memo(function VariationsNode({ id, data }: WorkbenchNod
         <figure className={styles.preview}>
           <button
             type="button"
-            className={styles.thumbButton}
+            className={`nodrag ${styles.thumbButton}`}
             onClick={() => setLightboxOpen(true)}
             aria-label="Open full-resolution image"
           >
@@ -160,7 +160,7 @@ export const Component = memo(function VariationsNode({ id, data }: WorkbenchNod
             className={styles.lightboxImage}
             onClick={(event) => event.stopPropagation()}
           />
-          <button type="button" className={styles.lightboxClose} onClick={requestLightboxClose}>
+          <button type="button" className={`nodrag ${styles.lightboxClose}`} onClick={requestLightboxClose}>
             Close
           </button>
         </div>

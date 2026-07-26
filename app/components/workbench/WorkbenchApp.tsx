@@ -159,6 +159,36 @@ function rejectAfter(ms: number, message: string): Promise<never> {
   });
 }
 
+// Narrow-viewport / touch chrome. The desktop layout docks a 264px palette
+// top-left, a seven-button toolbar top-right, a 200x150 minimap bottom-right
+// and a 280px inspector down the side; on a 360-420px Android viewport those
+// overlays cover the whole canvas, so the graph is unreachable rather than
+// merely cramped. In the compact branch the palette collapses to a single
+// "Add node" button that opens the same Spotlight as a modal, the toolbar's
+// secondary controls move into a dropdown, and the minimap is dropped.
+//
+// MUST stay identical to the matching media queries in workbench.module.css
+// (which own the layout half: the inspector bottom sheet, panel margins and
+// the .toolbarSecondary dropdown) -- a mismatch would render compact chrome
+// inside the desktop layout, or the reverse.
+const COMPACT_QUERY = "(max-width: 760px), (pointer: coarse) and (max-width: 1024px)";
+
+function useIsCompact(): boolean {
+  // Starts false and settles on mount: matchMedia has no server-side
+  // answer, and this tree is already client-only (workbench/page.tsx loads
+  // it with ssr:false), so there is no hydration mismatch to guard beyond
+  // not touching `window` during render.
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia(COMPACT_QUERY);
+    const sync = () => setCompact(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
+  return compact;
+}
+
 function CanvasInner({
   restored,
   switchGraph,
@@ -192,7 +222,7 @@ function CanvasInner({
       importGraph: state.importGraph,
     })),
   );
-  const { screenToFlowPosition, fitView } = useReactFlow();
+  const { screenToFlowPosition, fitView, deleteElements } = useReactFlow();
   const placedCount = useRef(0);
   // Auto-offer is entirely DERIVED from render inputs (restored/nodes.length/
   // dismissed) rather than toggled from an effect: once restored settles
@@ -208,6 +238,21 @@ function CanvasInner({
   const [exportOpen, setExportOpen] = useState(false);
   const [graphManagerOpen, setGraphManagerOpen] = useState(false);
   const [wirePrompt, setWirePrompt] = useState<WirePrompt | null>(null);
+  const compact = useIsCompact();
+  // Compact-only chrome state: the tap-to-open add-node Spotlight, and the
+  // dropdown holding whichever toolbar controls no longer fit inline.
+  const [addOpen, setAddOpen] = useState(false);
+  const [toolbarMenuOpen, setToolbarMenuOpen] = useState(false);
+  // Crossing the compact boundary (rotating an Android phone into landscape,
+  // resizing a tablet) must not leave the dropdown open into a layout that
+  // has nowhere to render it. Adjusted during render -- React's documented
+  // pattern, the same one ThumbnailImage uses for its cacheKey resets --
+  // rather than from an effect, which would cascade an extra render.
+  const [menuLayout, setMenuLayout] = useState(compact);
+  if (menuLayout !== compact) {
+    setMenuLayout(compact);
+    setToolbarMenuOpen(false);
+  }
   // Exit animation for the wire-drop prompt below; picking a target
   // (pickWireTarget) still dismisses instantly so node creation stays snappy.
   const { closing: wireClosing, requestClose: requestWireClose } = useModalDismiss(() => setWirePrompt(null));
@@ -386,6 +431,16 @@ function CanvasInner({
   }, [running, nodes]);
   const firstFailed = nodes.find((node) => node.data.status === "error");
 
+  // Deleting a WIRE has only ever been reachable through deleteKeyCode
+  // (Backspace/Delete) -- there is no on-canvas edge affordance the way
+  // nodes have their corner button. On a phone there is no keyboard, so a
+  // mis-drawn wire was permanent: onConnect (store.ts) replaces the edge on
+  // a single-input port, but a multi:true port just accumulates them
+  // forever. This is the same deleteElements path the key press and the
+  // node corner button already take -- compact-only, since a keyboard
+  // makes it redundant on desktop.
+  const selectedEdges = useMemo(() => edges.filter((edge) => edge.selected).map((edge) => ({ id: edge.id })), [edges]);
+
   return (
     <ReactFlow
       nodes={nodes}
@@ -408,60 +463,126 @@ function CanvasInner({
       }}
       minZoom={0.2}
       maxZoom={2}
+      // Touch ergonomics. A fingertip never lands perfectly still, and the
+      // library's default 1px drag threshold turns that wobble into a node
+      // drag -- which swallows the tap on every in-card control. 5px is
+      // below the browser's own tap-slop so a deliberate drag still feels
+      // immediate. connectionRadius is the snap distance when a wire is
+      // released near a port: 20px is a mouse figure, and the ports are only
+      // 15px across even after the coarse-pointer bump in the stylesheet.
+      // Both are compact-only so the desktop feel is unchanged.
+      nodeDragThreshold={compact ? 5 : undefined}
+      connectionRadius={compact ? 34 : undefined}
       proOptions={{ hideAttribution: true }}
     >
       <Background gap={22} size={1.4} />
       <Controls showInteractive={false} />
-      <MiniMap pannable zoomable />
+      {/* The minimap is a 200x150 opaque overlay -- a sixth of a 360x640
+          Android viewport -- and its own drag gesture competes with panning
+          the canvas underneath. Dropped entirely in the compact layout. */}
+      {!compact && <MiniMap pannable zoomable />}
       <div aria-live="polite" role="status" className={styles.srOnly}>{liveMessage}</div>
       <Panel position="top-left">
-        <div className={styles.palette}>
-          <p className={styles.paletteTitle}>Add node</p>
-          <Spotlight kinds={NODE_KINDS} onPick={(kind) => place(kind)} emptyHint="No node type matches that search." />
-        </div>
+        {compact ? (
+          <button type="button" className={`nopan ${styles.compactAdd}`} onClick={() => setAddOpen(true)} aria-label="Add node">
+            + Add
+          </button>
+        ) : (
+          <div className={styles.palette}>
+            <p className={styles.paletteTitle}>Add node</p>
+            <Spotlight kinds={NODE_KINDS} onPick={(kind) => place(kind)} emptyHint="No node type matches that search." />
+          </div>
+        )}
       </Panel>
       <Panel position="top-right">
         <div className={styles.toolbar}>
           <button type="button" className={styles.toolbarButton} disabled={runDisabled} title={runReason} onClick={handleRunAll}>
-            Run workflow{staleCount > 0 ? ` · ${staleCount} to run${totalUsd !== null ? ` · ~${formatUsd(totalUsd)}` : ""}` : nodes.length ? " · up to date" : ""}
+            {/* The full desktop label ("Run workflow · 4 to run · ~$0.12")
+                is wider than the whole toolbar has to spare next to the
+                "+ Add" button at 360px, so the compact label keeps only the
+                count -- the per-node Run buttons still show their price, and
+                confirmHighCost still gates an expensive run. */}
+            {compact
+              ? `Run${staleCount > 0 ? ` · ${staleCount}` : ""}`
+              : `Run workflow${staleCount > 0 ? ` · ${staleCount} to run${totalUsd !== null ? ` · ~${formatUsd(totalUsd)}` : ""}` : nodes.length ? " · up to date" : ""}`}
           </button>
-          {runReason && <span className={styles.disabledReason}>{runReason}</span>}
-          {running && (
-            <button type="button" className={styles.toolbarGhost} onClick={cancelExecution}>
-              Cancel
-            </button>
-          )}
-          {firstFailed && !running && (
+          {compact && selectedEdges.length > 0 && (
             <button
               type="button"
               className={styles.toolbarGhost}
-              onClick={() => void retryFrom(firstFailed.id)}
-              title="Re-run from the first failed node onward, reusing every already-succeeded ancestor's cached output."
+              onClick={() => void deleteElements({ edges: selectedEdges })}
             >
-              Retry failed
+              Delete wire{selectedEdges.length > 1 ? "s" : ""}
             </button>
           )}
-          <button
-            type="button"
-            className={`${styles.toolbarGhost} ${styles.draftToggle}`}
-            aria-pressed={draft}
-            onClick={() => setDraft(!draft)}
-            title="Draft mode: draft-capable paid nodes run at low quality/small size for cheap iteration. Turning it off re-bills them at full quality."
-          >
-            Draft {draft ? "On" : "Off"}
-          </button>
-          <button type="button" className={styles.toolbarGhost} onClick={() => setManualOpen(true)}>
-            Templates
-          </button>
-          <button type="button" className={styles.toolbarGhost} onClick={() => setGraphManagerOpen(true)}>
-            Workbenches
-          </button>
-          <button type="button" className={styles.toolbarGhost} disabled={nodes.length === 0} onClick={() => setExportOpen(true)}>
-            Export
-          </button>
-          <button type="button" className={styles.toolbarGhost} onClick={() => importInputRef.current?.click()}>
-            Import
-          </button>
+          {compact && (
+            <button
+              type="button"
+              className={styles.toolbarGhost}
+              aria-expanded={toolbarMenuOpen}
+              onClick={() => setToolbarMenuOpen((open) => !open)}
+            >
+              {toolbarMenuOpen ? "Close" : "Menu"}
+            </button>
+          )}
+          {/* Stays inline (not inside the dropdown) on every layout: `title`
+              never surfaces on touch, so this text is the ONLY explanation a
+              phone user gets for a disabled Run button. Rendered after the
+              Menu toggle because .disabledReason is flex-basis:100% and so
+              forces a line break for everything that follows it (which is
+              exactly the existing desktop behaviour, unchanged: the toggle
+              does not render there). */}
+          {runReason && <span className={styles.disabledReason}>{runReason}</span>}
+          {/* display:contents on desktop, so these stay direct flex children
+              of .toolbar and the row is laid out exactly as before; in the
+              compact layout the same wrapper becomes the dropdown panel.
+              nopan/nowheel are compact-only for the same reason: on desktop
+              the wrapper box is gone but React Flow's closest() lookups
+              would still find the classes, silently changing how the
+              existing toolbar row responds to wheel and drag. */}
+          {(!compact || toolbarMenuOpen) && (
+            <div className={`${compact ? "nopan nowheel " : ""}${styles.toolbarSecondary}`}>
+              {running && (
+                <button type="button" className={styles.toolbarGhost} onClick={cancelExecution}>
+                  Cancel
+                </button>
+              )}
+              {firstFailed && !running && (
+                <button
+                  type="button"
+                  className={styles.toolbarGhost}
+                  onClick={() => void retryFrom(firstFailed.id)}
+                  title="Re-run from the first failed node onward, reusing every already-succeeded ancestor's cached output."
+                >
+                  Retry failed
+                </button>
+              )}
+              <button
+                type="button"
+                className={`${styles.toolbarGhost} ${styles.draftToggle}`}
+                aria-pressed={draft}
+                onClick={() => setDraft(!draft)}
+                title="Draft mode: draft-capable paid nodes run at low quality/small size for cheap iteration. Turning it off re-bills them at full quality."
+              >
+                Draft {draft ? "On" : "Off"}
+              </button>
+              <button type="button" className={styles.toolbarGhost} onClick={() => { setToolbarMenuOpen(false); setManualOpen(true); }}>
+                Templates
+              </button>
+              <button type="button" className={styles.toolbarGhost} onClick={() => { setToolbarMenuOpen(false); setGraphManagerOpen(true); }}>
+                Workbenches
+              </button>
+              <button type="button" className={styles.toolbarGhost} disabled={nodes.length === 0} onClick={() => { setToolbarMenuOpen(false); setExportOpen(true); }}>
+                Export
+              </button>
+              <button type="button" className={styles.toolbarGhost} onClick={() => { setToolbarMenuOpen(false); importInputRef.current?.click(); }}>
+                Import
+              </button>
+            </div>
+          )}
+          {/* Kept OUTSIDE the collapsible wrapper: the Import button closes
+              the dropdown before calling .click(), so the input must not
+              unmount in the same commit. */}
           <input
             ref={importInputRef}
             type="file"
@@ -471,6 +592,14 @@ function CanvasInner({
           />
         </div>
       </Panel>
+      {compact && addOpen && (
+        <Spotlight
+          kinds={NODE_KINDS}
+          onPick={(kind) => { setAddOpen(false); place(kind); }}
+          onClose={() => setAddOpen(false)}
+          emptyHint="No node type matches that search."
+        />
+      )}
       {galleryOpen && <TemplateGallery onPick={pickTemplate} onClose={closeGallery} />}
       {exportOpen && <ExportDialog nodes={nodes} edges={edges} onClose={() => setExportOpen(false)} />}
       {wirePrompt && (

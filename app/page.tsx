@@ -11,7 +11,9 @@ const LibrarySceneV2 = dynamic(
     loading: () => (
       <main
         aria-busy="true"
-        style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "#fff" }}
+        // dvh: on Android the browser toolbar makes 100vh taller than what is
+        // actually visible, which pushes this centred counter below the fold.
+        style={{ minHeight: "100dvh", display: "grid", placeItems: "center", background: "#fff" }}
       >
         <p style={{ color: "#111", fontSize: 11, letterSpacing: "0.1em" }}>0%</p>
       </main>

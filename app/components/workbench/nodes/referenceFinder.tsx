@@ -95,7 +95,7 @@ export const Component = memo(function ReferenceFinderNode({ id, data }: Workben
               </div>
               <button
                 type="button"
-                className={styles.smallButton}
+                className={`nodrag ${styles.smallButton}`}
                 disabled={!candidate.imageUrl || importingUrl === candidate.imageUrl}
                 onClick={() => void pick(candidate)}
               >

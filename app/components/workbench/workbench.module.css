@@ -140,10 +140,16 @@
   display: flex;
 }
 
-.nodeDelete:hover {
-  background: #000;
-  color: #fff;
-  border-color: #000;
+/* Every :hover affordance in this file is gated behind a hover-capable
+   pointer. On Android (and any touch surface) a tap leaves the tapped
+   element in the :hover state until the next tap lands elsewhere, so an
+   ungated inverse-on-hover rule reads as a stuck "selected" control. */
+@media (hover: hover) {
+  .nodeDelete:hover {
+    background: #000;
+    color: #fff;
+    border-color: #000;
+  }
 }
 
 .nodeError {
@@ -391,9 +397,11 @@
   cursor: pointer;
 }
 
-.smallButton:hover:not(:disabled) {
-  background: #000;
-  color: #fff;
+@media (hover: hover) {
+  .smallButton:hover:not(:disabled) {
+    background: #000;
+    color: #fff;
+  }
 }
 
 .runRow {
@@ -492,9 +500,13 @@
   cursor: zoom-out;
 }
 
+/* dvh (not vh) throughout: Android's dynamic browser toolbar makes vh the
+   LARGE viewport, so a 88vh box is taller than what is actually on screen
+   while the toolbar is showing and its bottom edge (Close buttons, action
+   rows) sits under the chrome. */
 .lightboxImage {
   max-width: 92vw;
-  max-height: 88vh;
+  max-height: 88dvh;
   object-fit: contain;
   cursor: default;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
@@ -649,7 +661,7 @@
   border-radius: 10px;
   padding: 16px;
   max-width: 92vw;
-  max-height: 92vh;
+  max-height: 92dvh;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -659,7 +671,7 @@
   position: relative;
   touch-action: none;
   max-width: 80vw;
-  max-height: 70vh;
+  max-height: 70dvh;
   overflow: hidden;
   cursor: crosshair;
   line-height: 0;
@@ -668,7 +680,7 @@
 .maskCanvasArea img {
   display: block;
   max-width: 80vw;
-  max-height: 70vh;
+  max-height: 70dvh;
   width: auto;
   height: auto;
   user-select: none;
@@ -782,7 +794,7 @@
   padding: 20px;
   max-width: 720px;
   width: 100%;
-  max-height: 88vh;
+  max-height: 88dvh;
   overflow: auto;
   display: flex;
   flex-direction: column;
@@ -820,10 +832,12 @@
   cursor: pointer;
 }
 
-.templateCard:hover {
-  background: #000;
-  color: #fff;
-  border-color: #000;
+@media (hover: hover) {
+  .templateCard:hover {
+    background: #000;
+    color: #fff;
+    border-color: #000;
+  }
 }
 
 .templateFlagship {
@@ -959,9 +973,11 @@
   flex-shrink: 0;
 }
 
-.spotlightItem:hover {
-  background: #000;
-  color: #fff;
+@media (hover: hover) {
+  .spotlightItem:hover {
+    background: #000;
+    color: #fff;
+  }
 }
 
 .spotlightItemTitle {
@@ -1069,7 +1085,7 @@
   padding: 20px;
   max-width: 480px;
   width: 100%;
-  max-height: 80vh;
+  max-height: 80dvh;
   overflow: auto;
   display: flex;
   flex-direction: column;
@@ -1137,4 +1153,274 @@
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.06);
   flex-shrink: 0;
+}
+
+/* --- Compact / touch adaptation (Android phones, small tablets) ---------
+   The desktop chrome is a 264px docked palette (top-left), a seven-button
+   toolbar row (top-right), a 200x150 minimap and a 280px docked inspector.
+   At a 360-420px Android viewport those overlays cover the entire canvas,
+   so the graph is not merely cramped -- it is unreachable.
+
+   WorkbenchApp.tsx watches the SAME query as the two blocks below and
+   swaps the palette for .compactAdd and the toolbar's secondary controls
+   for .toolbarMenu; everything here is the matching layout half. Keep the
+   query strings in this file and COMPACT_QUERY in WorkbenchApp.tsx in
+   sync -- a mismatch would show the compact chrome inside the desktop
+   layout (or the reverse). */
+
+/* Wraps the toolbar's secondary controls. Transparent on desktop
+   (display:contents keeps the buttons as direct flex children of
+   .toolbar, so the row is laid out exactly as before). */
+.toolbarSecondary {
+  display: contents;
+}
+
+/* Tap-to-open replacements for the docked palette (rendered only in the
+   compact branch, so these need no desktop counterpart). */
+.compactAdd {
+  font-size: 11px;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+  background: #000;
+  color: #fff;
+  border: 1px solid #000;
+  border-radius: 999px;
+  min-height: 44px;
+  padding: 0 18px;
+  cursor: pointer;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.2);
+}
+
+@media (max-width: 760px), (pointer: coarse) and (max-width: 1024px) {
+  /* React Flow's own 15px panel margin plus the palette/toolbar leaves no
+     usable canvas on a phone; pull the overlays into the corners and clear
+     the notch/rounded-corner insets while we are here. */
+  .canvasFlow :global(.react-flow__panel) {
+    margin: 8px;
+  }
+
+  .canvasFlow :global(.react-flow__panel.left) {
+    margin-left: max(8px, env(safe-area-inset-left));
+  }
+
+  .canvasFlow :global(.react-flow__panel.right) {
+    margin-right: max(8px, env(safe-area-inset-right));
+  }
+
+  .canvasFlow :global(.react-flow__panel.bottom) {
+    margin-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+
+  /* The toolbar keeps only Run + Menu inline; the rest drop into a
+     dropdown anchored to the toolbar's bottom-right corner. */
+  .toolbar {
+    position: relative;
+    justify-content: flex-end;
+    max-width: calc(100vw - 90px);
+  }
+
+  .toolbarSecondary {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 6;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    width: 200px;
+    max-height: calc(100dvh - 190px);
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid rgba(0, 0, 0, 0.14);
+    border-radius: 12px;
+    padding: 10px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.13);
+  }
+
+  /* Docked side panel -> bottom sheet. position:fixed takes it out of
+     .canvasWrap's flex row, so the canvas keeps the full width instead of
+     being squeezed to ~80px behind a 280px panel. */
+  .inspector {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 20;
+    width: auto;
+    max-height: 58dvh;
+    border-left: 0;
+    border-top: 1px solid rgba(0, 0, 0, 0.18);
+    border-radius: 14px 14px 0 0;
+    padding: 12px 14px max(12px, env(safe-area-inset-bottom));
+    box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.14);
+    overscroll-behavior: contain;
+  }
+
+  /* Modal scrims: 24px of padding on each side costs a sixth of a 360px
+     viewport, and the dialogs below already carry their own padding. */
+  .templateOverlay {
+    padding:
+      max(10px, env(safe-area-inset-top))
+      max(10px, env(safe-area-inset-right))
+      max(10px, env(safe-area-inset-bottom))
+      max(10px, env(safe-area-inset-left));
+  }
+
+  .templateGallery,
+  .exportDialog,
+  .graphManager,
+  .spotlightModal,
+  .maskModal {
+    padding: 14px;
+    max-height: 86dvh;
+  }
+
+  .templateGrid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Thumb + name + Rename + Delete cannot share one 300px row; let the two
+     actions wrap under the name instead of overflowing the dialog. */
+  .graphRow {
+    flex-wrap: wrap;
+  }
+
+  .graphSwitchButton {
+    flex: 1 0 100%;
+  }
+
+  .lightboxClose {
+    top: max(12px, env(safe-area-inset-top));
+    right: max(12px, env(safe-area-inset-right));
+  }
+}
+
+@media (pointer: coarse) {
+  /* React Flow ships 6x6px port handles -- effectively impossible to hit
+     with a fingertip, which makes wiring (the whole point of the canvas)
+     unusable on touch. They stay centred on the same anchor point because
+     React Flow positions them with translate(-50%, -50%). */
+  .node :global(.react-flow__handle),
+  .note :global(.react-flow__handle) {
+    width: 15px;
+    height: 15px;
+    min-width: 15px;
+    min-height: 15px;
+    border-width: 1.5px;
+  }
+
+  /* Edges carry an invisible 20px-wide interaction stroke for hit-testing.
+     Selecting a wire is the ONLY way to reach the "Delete wire" control, so
+     widen it for a fingertip. A CSS stroke-width beats React Flow's
+     strokeWidth presentation attribute, so no per-edge prop is needed. */
+  .canvasFlow :global(.react-flow__edge-interaction) {
+    stroke-width: 34px;
+  }
+
+  /* Its own 26x26px zoom buttons are below the 44px guidance too. */
+  .canvasFlow :global(.react-flow__controls-button) {
+    width: 40px;
+    height: 40px;
+  }
+
+  .canvasFlow :global(.react-flow__controls-button svg) {
+    max-width: 16px;
+    max-height: 16px;
+  }
+
+  /* --- Tap targets ---------------------------------------------------
+     Node cards are only 232px wide, so several controls cannot themselves
+     grow to 44x44 without redesigning the card. Those get a transparent
+     ::after that extends the HIT area to 44x44 while the painted control
+     stays small. */
+  .nodeDelete {
+    top: -11px;
+    right: -11px;
+    width: 26px;
+    height: 26px;
+    font-size: 16px;
+  }
+
+  .nodeDelete::after,
+  .referenceThumbRemove::after,
+  .history button::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 44px;
+    height: 44px;
+    transform: translate(-50%, -50%);
+  }
+
+  .referenceThumbRemove {
+    top: -8px;
+    right: -8px;
+    width: 22px;
+    height: 22px;
+    line-height: 20px;
+    font-size: 13px;
+  }
+
+  .referenceThumb {
+    width: 48px;
+    height: 48px;
+  }
+
+  .history {
+    position: static;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 4px;
+    background: none;
+  }
+
+  .history button {
+    position: relative;
+    min-width: 32px;
+    min-height: 32px;
+    font-size: 18px;
+  }
+
+  .toolbarButton,
+  .toolbarGhost,
+  .runButton,
+  .cancelButton,
+  .smallButton,
+  .lightboxClose {
+    min-height: 44px;
+  }
+
+  .pinToggle,
+  .spotlightItem {
+    min-height: 44px;
+  }
+
+  /* 16px is the threshold below which a mobile browser may zoom the page
+     on focus; it is also simply the smallest comfortably tappable/legible
+     field size. Mirrors the same rule the generator shell already applies
+     in globals.css. */
+  .field input:not([type="checkbox"]):not([type="radio"]),
+  .field select,
+  .textarea,
+  .noteText,
+  .spotlightInput {
+    font-size: 16px;
+  }
+
+  .field input:not([type="checkbox"]):not([type="radio"]),
+  .field select,
+  .spotlightInput {
+    min-height: 44px;
+  }
+
+  .field input[type="checkbox"],
+  .field input[type="radio"] {
+    width: 22px;
+    height: 22px;
+  }
+
+  /* A 4px-tall native range thumb is unusable with a finger. */
+  .slider {
+    min-height: 44px;
+  }
 }

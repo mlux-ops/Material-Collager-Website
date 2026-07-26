@@ -146,9 +146,9 @@ export const Component = memo(function ReferencesNode({ id, data }: WorkbenchNod
               onChange={(event) => updateItem(item.id, { role: event.target.value })}
               style={{ flex: 1, fontSize: 11 }}
             />
-            <button type="button" className={styles.smallButton} onClick={() => moveItem(item.id, -1)} disabled={index === 0}>↑</button>
-            <button type="button" className={styles.smallButton} onClick={() => moveItem(item.id, 1)} disabled={index === items.length - 1}>↓</button>
-            <button type="button" className={styles.smallButton} onClick={() => removeItem(item.id)}>✕</button>
+            <button type="button" className={`nodrag ${styles.smallButton}`} onClick={() => moveItem(item.id, -1)} disabled={index === 0}>↑</button>
+            <button type="button" className={`nodrag ${styles.smallButton}`} onClick={() => moveItem(item.id, 1)} disabled={index === items.length - 1}>↓</button>
+            <button type="button" className={`nodrag ${styles.smallButton}`} onClick={() => removeItem(item.id)}>✕</button>
           </div>
           <input
             className="nodrag"
@@ -196,11 +196,11 @@ export const Component = memo(function ReferencesNode({ id, data }: WorkbenchNod
             {item.imageKeys.map((key) => (
               <span key={key} className={styles.referenceThumb}>
                 <ThumbnailImage cacheKey={key} alt="Reference" width={36} height={36} />
-                <button type="button" className={styles.referenceThumbRemove} onClick={() => removeImage(item.id, key)}>✕</button>
+                <button type="button" className={`nodrag ${styles.referenceThumbRemove}`} onClick={() => removeImage(item.id, key)}>✕</button>
               </span>
             ))}
           </div>
-          <button type="button" className={styles.smallButton} onClick={() => inputRefs.current[item.id]?.click()}>
+          <button type="button" className={`nodrag ${styles.smallButton}`} onClick={() => inputRefs.current[item.id]?.click()}>
             Add images
           </button>
           <input
@@ -214,7 +214,7 @@ export const Component = memo(function ReferencesNode({ id, data }: WorkbenchNod
         </div>
       ))}
 
-      <button type="button" className={styles.smallButton} onClick={addItem}>+ Add item</button>
+      <button type="button" className={`nodrag ${styles.smallButton}`} onClick={addItem}>+ Add item</button>
     </NodeShell>
   );
 });

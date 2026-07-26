@@ -35,7 +35,7 @@ export const Component = memo(function ExportDownloadNode({ id, data }: Workbenc
       </label>
       <button
         type="button"
-        className={styles.smallButton}
+        className={`nodrag ${styles.smallButton}`}
         disabled={running}
         // N-2: marks this as an explicit single-node press so the manifest's
         // alwaysExecute flag (W-4) applies -- a second identical Download

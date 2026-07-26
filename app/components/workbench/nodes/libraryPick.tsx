@@ -38,7 +38,7 @@ export const Component = memo(function LibraryPickNode({ id, data }: WorkbenchNo
 
   return (
     <NodeShell data={data} footer={<RunFooter id={id} data={data} inputImages={0} />}>
-      <button type="button" className={styles.smallButton} onClick={() => void refresh()} disabled={loading}>
+      <button type="button" className={`nodrag ${styles.smallButton}`} onClick={() => void refresh()} disabled={loading}>
         {loading ? "Loading…" : "Refresh library"}
       </button>
       {error && <p className={styles.errorText}>{error}</p>}

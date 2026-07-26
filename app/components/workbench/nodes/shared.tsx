@@ -220,7 +220,7 @@ export function RunFooter({ id, data, inputImages }: { id: string; data: Workben
     <div className={styles.runRow}>
       <button
         type="button"
-        className={styles.runButton}
+        className={`nodrag ${styles.runButton}`}
         disabled={running || Boolean(disabledReason)}
         title={disabledReason}
         onClick={runNow}
@@ -240,7 +240,7 @@ export function RunFooter({ id, data, inputImages }: { id: string; data: Workben
         </button>
       )}
       {running && data.status === "running" && (
-        <button type="button" className={styles.cancelButton} onClick={cancelExecution}>Cancel</button>
+        <button type="button" className={`nodrag ${styles.cancelButton}`} onClick={cancelExecution}>Cancel</button>
       )}
     </div>
   );
@@ -402,7 +402,7 @@ export function OutputPreview({ id, data }: { id: string; data: WorkbenchNodeDat
     <figure className={styles.preview}>
       <button
         type="button"
-        className={styles.thumbButton}
+        className={`nodrag ${styles.thumbButton}`}
         onClick={() => setLightboxOpen(true)}
         aria-label="Open full-resolution image"
       >
@@ -418,9 +418,9 @@ export function OutputPreview({ id, data }: { id: string; data: WorkbenchNodeDat
       </button>
       {data.runs.length > 1 && (
         <figcaption className={styles.history}>
-          <button type="button" onClick={() => setActiveRun(id, Math.min(data.activeRun + 1, data.runs.length - 1))} disabled={data.activeRun >= data.runs.length - 1}>‹</button>
+          <button type="button" className="nodrag" onClick={() => setActiveRun(id, Math.min(data.activeRun + 1, data.runs.length - 1))} disabled={data.activeRun >= data.runs.length - 1}>‹</button>
           <span>{data.runs.length - data.activeRun}/{data.runs.length}{hasPin && !pinnedHere ? " (pinned elsewhere)" : ""}</span>
-          <button type="button" onClick={() => setActiveRun(id, Math.max(data.activeRun - 1, 0))} disabled={data.activeRun <= 0}>›</button>
+          <button type="button" className="nodrag" onClick={() => setActiveRun(id, Math.max(data.activeRun - 1, 0))} disabled={data.activeRun <= 0}>›</button>
         </figcaption>
       )}
       {lightboxOpen && (
@@ -431,7 +431,7 @@ export function OutputPreview({ id, data }: { id: string; data: WorkbenchNodeDat
             className={styles.lightboxImage}
             onClick={(event) => event.stopPropagation()}
           />
-          <button type="button" className={styles.lightboxClose} onClick={requestClose}>
+          <button type="button" className={`nodrag ${styles.lightboxClose}`} onClick={requestClose}>
             Close
           </button>
         </div>

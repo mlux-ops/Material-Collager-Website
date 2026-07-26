@@ -14,6 +14,11 @@ export type DropdownOption = { value: string; label: string };
 const CLOSE_MS = 150;
 // Estimated max menu height used only for the flip-up decision.
 const FLIP_PROBE_PX = 280;
+// Gap kept between the menu and the viewport edge it opens toward, and the
+// floor its computed max-height is never allowed to fall below (a menu
+// shorter than this is worse than one that slightly overhangs).
+const VIEWPORT_MARGIN_PX = 8;
+const MIN_MENU_HEIGHT_PX = 132;
 
 export function DropdownSelect({
   value,
@@ -29,7 +34,7 @@ export function DropdownSelect({
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState(false); // drives .is-open one frame after mount
   const [closing, setClosing] = useState(false);
-  const [rect, setRect] = useState<{ left: number; width: number; top?: number; bottom?: number } | null>(null);
+  const [rect, setRect] = useState<{ left: number; width: number; maxHeight: number; top?: number; bottom?: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<number | null>(null);
@@ -43,11 +48,18 @@ export function DropdownSelect({
     if (closeTimer.current) window.clearTimeout(closeTimer.current);
     setClosing(false);
     const r = trigger.getBoundingClientRect();
-    const flipUp = window.innerHeight - r.bottom < FLIP_PROBE_PX && r.top > window.innerHeight - r.bottom;
+    const below = window.innerHeight - r.bottom;
+    const flipUp = below < FLIP_PROBE_PX && r.top > below;
+    // The stylesheet's flat 260px cap assumes a desktop viewport. On a phone
+    // in landscape (or with the soft keyboard up) NEITHER side has 260px, so
+    // the menu ran off the edge of the screen with its last options
+    // unreachable -- there is nothing to scroll when the overflowing box is
+    // the menu itself. Cap it to the space the chosen side actually has.
+    const maxHeight = Math.max(MIN_MENU_HEIGHT_PX, (flipUp ? r.top : below) - VIEWPORT_MARGIN_PX - 4);
     setRect(
       flipUp
-        ? { left: r.left, width: r.width, bottom: window.innerHeight - r.top + 4 }
-        : { left: r.left, width: r.width, top: r.bottom + 4 }
+        ? { left: r.left, width: r.width, maxHeight, bottom: window.innerHeight - r.top + 4 }
+        : { left: r.left, width: r.width, maxHeight, top: r.bottom + 4 }
     );
     setOpen(true);
   }, []);
@@ -166,7 +178,7 @@ export function DropdownSelect({
           className={`t-dropdown dropdown-menu${shown ? " is-open" : ""}${closing ? " is-closing" : ""}`}
           data-origin={flippedUp ? "bottom-left" : "top-left"}
           role="listbox"
-          style={{ left: rect.left, width: rect.width, top: rect.top, bottom: rect.bottom }}
+          style={{ left: rect.left, width: rect.width, maxHeight: rect.maxHeight, top: rect.top, bottom: rect.bottom }}
           onKeyDown={onMenuKeyDown}
         >
           {options.map((option) => (

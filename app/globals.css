@@ -408,9 +408,14 @@ select:disabled {
   width: 100%;
 }
 
-.dropdown-option:hover,
 .dropdown-option:focus-visible {
   background: var(--surface-soft);
+}
+
+@media (hover: hover) {
+  .dropdown-option:hover {
+    background: var(--surface-soft);
+  }
 }
 
 .dropdown-option[aria-selected="true"] {
@@ -2470,11 +2475,21 @@ body {
 }
 
 .site-navigation nav a.active,
-.site-navigation nav a:hover,
 .site-navigation nav a:focus-visible {
   background: var(--mono-black);
   color: var(--mono-white);
   outline: none;
+}
+
+/* Hover-gated: this rule paints the same inverted chip as .active, and on
+   touch the tapped link keeps :hover after a client-side navigation -- so
+   ungated it renders TWO links looking like the current page. */
+@media (hover: hover) {
+  .site-navigation nav a:hover {
+    background: var(--mono-black);
+    color: var(--mono-white);
+    outline: none;
+  }
 }
 
 /* Library */

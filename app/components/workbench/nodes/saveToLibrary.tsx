@@ -19,7 +19,7 @@ export const Component = memo(function SaveToLibraryNode({ id, data }: Workbench
         <span>Filename</span>
         <input className="nodrag" type="text" value={data.params.filename ?? ""} onChange={(event) => updateParams(id, { filename: event.target.value })} />
       </label>
-      <button type="button" className={styles.smallButton} disabled={running} onClick={() => void runNodes([id])}>
+      <button type="button" className={`nodrag ${styles.smallButton}`} disabled={running} onClick={() => void runNodes([id])}>
         Save to Library
       </button>
       {data.status === "done" && savedJobId && <p className={styles.hint}>Saved. It will stay in the Library for 6 months.</p>}
