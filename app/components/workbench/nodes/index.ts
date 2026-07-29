@@ -11,6 +11,7 @@ import { Component as CompareComponent } from "./compare";
 import { Component as CropComponent, execute as cropExecute } from "./crop";
 import { Component as ExportDownloadComponent, execute as exportDownloadExecute } from "./exportDownload";
 import { Component as ImageEditComponent, execute as imageEditExecute } from "./imageEdit";
+import { Component as ImageDescriptionComponent, execute as imageDescriptionExecute } from "./imageDescription";
 import { Component as ImageGenerateComponent, execute as imageGenerateExecute } from "./imageGenerate";
 import { Component as LibraryPickComponent, execute as libraryPickExecute } from "./libraryPick";
 import { Component as MaskedEditComponent, execute as maskedEditExecute } from "./maskedEdit";
@@ -40,6 +41,7 @@ export const NODE_TYPES = {
   // Phase 2 node kinds.
   references: ReferencesComponent,
   referenceAnalyzer: ReferenceAnalyzerComponent,
+  imageDescription: ImageDescriptionComponent,
   referenceFinder: ReferenceFinderComponent,
   libraryPick: LibraryPickComponent,
   collageBoard: CollageBoardComponent,
@@ -62,6 +64,7 @@ const DOM_EXECUTES: Partial<Record<NodeKind, NodeExecute>> = {
   imageEdit: imageEditExecute,
   saveToLibrary: saveToLibraryExecute,
   referenceAnalyzer: referenceAnalyzerExecute,
+  imageDescription: imageDescriptionExecute,
   libraryPick: libraryPickExecute,
   resize: resizeExecute,
   crop: cropExecute,

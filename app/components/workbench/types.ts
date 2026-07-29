@@ -15,6 +15,7 @@ export type NodeKind =
   // Phase 2 node kinds (scaffolded; see nodes/<kind>.manifest.ts for specs).
   | "references"
   | "referenceAnalyzer"
+  | "imageDescription"
   | "referenceFinder"
   | "libraryPick"
   | "collageBoard"
@@ -181,6 +182,7 @@ export type WorkbenchParams = {
   selectedLibraryId?: string;
   // variations
   n?: number;
+  separateOutputs?: boolean;
   // maskedEdit — maskShapes is the source of truth: a JSON-serialized
   // MaskShape[] (rects, polygons, brush strokes; coordinates normalized
   // 0-1000 like NormalizedBox). maskRegion* is the derived union bounding
@@ -192,6 +194,7 @@ export type WorkbenchParams = {
   // (pixel-exact mask, free tier), or FLUX.1 Fill [pro] (pixel-exact mask,
   // ~$0.05/image via the BFL API).
   engine?: "gpt-image" | "workers-ai" | "flux-fill";
+  referenceInstruction?: string;
   maskShapes?: string;
   maskCacheKey?: string;
   maskRegionX?: number;
@@ -338,6 +341,15 @@ export type NodeManifest = {
   // isPinned is checked first) so an unchanged signature never silently
   // short-circuits it into a no-op.
   alwaysExecute?: boolean;
+  // OPTIONAL compatibility/output adapter. Most nodes store one values array
+  // per declared output port directly on the run. A node whose output surface
+  // expands without re-running (Variations' opt-in per-candidate handles)
+  // can resolve a declared port from an older aggregate-only run here.
+  resolveOutputValues?: (run: NodeRun, portId: string) => NodeOutputValue[];
+  // OPTIONAL visible/active output subset. Every port remains declared for
+  // import and edge validation, but presentation-only modes may expose only
+  // a subset at a time (Variations' aggregate vs individual handles).
+  activeOutputIds?: (params: WorkbenchParams) => string[];
 };
 
 // NODE_SPECS/specFor/defaultParams are reconstructed from the per-node

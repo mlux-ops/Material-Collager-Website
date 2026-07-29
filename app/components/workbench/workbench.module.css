@@ -461,6 +461,21 @@
   color: #000;
 }
 
+.inlineToggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: rgba(0, 0, 0, 0.68);
+  cursor: pointer;
+}
+
+.inlineToggle input {
+  margin: 1px 0 0;
+  flex: 0 0 auto;
+}
+
 .textarea {
   width: 100%;
   font-size: 12px;
@@ -1037,6 +1052,12 @@
   background: #f59e0b;
   color: #000;
   border-color: #f59e0b;
+}
+
+.autoSaveToggle[aria-pressed="true"] {
+  background: #dff4e7;
+  color: #0d5f34;
+  border-color: #72b98f;
 }
 
 /* Visually hidden but announced by assistive tech (aria-live run-status). */

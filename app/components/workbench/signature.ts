@@ -61,7 +61,17 @@ export function signatureFor(context: SignatureContext, node: WorkbenchNode): st
       .map((edge) => {
         const live = context.liveNode(edge.source);
         const run = live ? activeRunOf(live) : undefined;
-        return `${port.id}<${edge.source}#${run?.runId ?? "unrun"}`;
+        // A multi-output source can expose different values from the same
+        // runId (Variations' individual photos). Preserve the legacy primary
+        // output token exactly, but identify non-primary handles so rewiring
+        // variation-1 to variation-2 cannot incorrectly hit the old cache.
+        const sourceOutputs = live ? specFor(live.data.kind).outputs : [];
+        const primaryHandle = sourceOutputs[0]?.id;
+        const outputHandle =
+          sourceOutputs.length > 1 && edge.sourceHandle && edge.sourceHandle !== primaryHandle
+            ? `@${edge.sourceHandle}`
+            : "";
+        return `${port.id}<${edge.source}${outputHandle}#${run?.runId ?? "unrun"}`;
       })
       .join(",");
   });

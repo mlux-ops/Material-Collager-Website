@@ -22,6 +22,11 @@ import {
 import { useShallow } from "zustand/react/shallow";
 import { NODE_KINDS, NODE_TYPES } from "./nodes/index";
 import { cancelExecution, estimateStaleCost, retryFrom, runAll, unmetRequiredInputs } from "./executor";
+import {
+  autoSaveFinalOutputs,
+  readAutoSaveFinalPreference,
+  writeAutoSaveFinalPreference,
+} from "./auto-save-final";
 import { confirmHighCost, formatUsd } from "./cost";
 import {
   buildExportGraph,
@@ -277,6 +282,9 @@ function CanvasInner({
   // dropdown holding whichever toolbar controls no longer fit inline.
   const [addOpen, setAddOpen] = useState(false);
   const [toolbarMenuOpen, setToolbarMenuOpen] = useState(false);
+  const [autoSaveFinal, setAutoSaveFinal] = useState(readAutoSaveFinalPreference);
+  const [autoSaving, setAutoSaving] = useState(false);
+  const [liveMessage, setLiveMessage] = useState("");
   // Crossing the compact boundary (rotating an Android phone into landscape,
   // resizing a tablet) must not leave the dropdown open into a layout that
   // has nowhere to render it. Adjusted during render -- React's documented
@@ -493,8 +501,10 @@ function CanvasInner({
   // fire regardless of UI state), but disabling the button too means a
   // click doesn't silently no-op; the blocking overlay covers the canvas
   // either way, so this is defense-in-depth, not the primary protection.
-  const runDisabled = running || restoreBlocked || nodes.length === 0 || blockers.length > 0;
-  const runReason = restoreBlocked
+  const runDisabled = running || autoSaving || restoreBlocked || nodes.length === 0 || blockers.length > 0;
+  const runReason = autoSaving
+    ? "Saving final outputs to the library."
+    : restoreBlocked
     ? "Your workbench could not be loaded -- see the message above."
     : blockers.length
       ? `${blockers.length} node(s) are missing a required input — e.g. ${blockers[0].label}: ${blockers[0].missing.join(", ")}.`
@@ -502,12 +512,39 @@ function CanvasInner({
 
   const handleRunAll = useCallback(() => {
     if (!confirmHighCost(totalUsd)) return;
-    void runAll();
-  }, [totalUsd]);
+    void (async () => {
+      await runAll();
+      if (!autoSaveFinal) return;
+      const state = useWorkbenchStore.getState();
+      const incomplete =
+        estimateStaleCost(terminalIds).staleCount > 0 ||
+        state.nodes.some((node) =>
+          node.data.status === "error" || node.data.status === "needs-selection" || node.data.status === "running",
+        );
+      if (incomplete) return;
+
+      setAutoSaving(true);
+      try {
+        const result = await autoSaveFinalOutputs(state.nodes as WorkbenchNode[], state.edges);
+        if (result.failures.length) {
+          const summary = `Automatic library save completed with ${result.failures.length} failure(s).`;
+          setLiveMessage(summary);
+          window.alert(`${summary}\n${result.failures.slice(0, 6).join("\n")}`);
+        } else if (result.saved > 0) {
+          setLiveMessage(`Workflow complete. Automatically saved ${result.saved} final image${result.saved === 1 ? "" : "s"} to the library.`);
+        } else if (result.skipped > 0) {
+          setLiveMessage("Workflow complete. Final outputs were already saved to the library.");
+        } else {
+          setLiveMessage("Workflow complete. No terminal image output was available to save.");
+        }
+      } finally {
+        setAutoSaving(false);
+      }
+    })();
+  }, [autoSaveFinal, terminalIds, totalUsd]);
 
   // aria-live run-status announcements (S29/AC24): announces workflow
   // start/finish/failure without depending on visual state alone.
-  const [liveMessage, setLiveMessage] = useState("");
   const wasRunning = useRef(false);
   useEffect(() => {
     if (running && !wasRunning.current) setLiveMessage("Workflow running.");
@@ -528,6 +565,17 @@ function CanvasInner({
   // node corner button already take -- compact-only, since a keyboard
   // makes it redundant on desktop.
   const selectedEdges = useMemo(() => edges.filter((edge) => edge.selected).map((edge) => ({ id: edge.id })), [edges]);
+  const toggleAutoSaveFinal = useCallback(() => {
+    const next = !autoSaveFinal;
+    setAutoSaveFinal(next);
+    writeAutoSaveFinalPreference(next);
+  }, [autoSaveFinal]);
+  const clearAllNodes = useCallback(() => {
+    if (!nodes.length || running || autoSaving) return;
+    if (!window.confirm(`Clear all ${nodes.length} node${nodes.length === 1 ? "" : "s"} and every connected wire?`)) return;
+    setToolbarMenuOpen(false);
+    void deleteElements({ nodes: nodes.map((node) => ({ id: node.id })) });
+  }, [autoSaving, deleteElements, nodes, running]);
 
   return (
     <ReactFlow
@@ -684,12 +732,32 @@ function CanvasInner({
               </button>
               <button
                 type="button"
+                className={`${styles.toolbarGhost} ${styles.autoSaveToggle}`}
+                aria-label="Automatically save final output to library"
+                aria-pressed={autoSaveFinal}
+                disabled={running || autoSaving}
+                onClick={toggleAutoSaveFinal}
+                title="Automatically save successful terminal image outputs to the six-month library after Run workflow."
+              >
+                Auto-save final {autoSaveFinal ? "On" : "Off"}
+              </button>
+              <button
+                type="button"
                 className={styles.toolbarGhost}
                 disabled={nodes.length < 2}
                 onClick={() => { setToolbarMenuOpen(false); tidy(); }}
                 title="Auto-arrange the graph left-to-right by data flow."
               >
                 Tidy
+              </button>
+              <button
+                type="button"
+                className={styles.toolbarGhost}
+                disabled={nodes.length === 0 || running || autoSaving}
+                onClick={clearAllNodes}
+                title="Remove every node and connected wire from this workbench."
+              >
+                Clear all nodes
               </button>
               <button type="button" className={styles.toolbarGhost} onClick={() => { setToolbarMenuOpen(false); setManualOpen(true); }}>
                 Templates

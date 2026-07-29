@@ -158,3 +158,71 @@ Date: 2026-07-18
 - Portrait and landscape layouts account for iPhone safe areas; the landscape Library and Generator retain their wider desktop-derived composition without horizontal overflow.
 - Local visual QA can freeze the WebGL rail deterministically with `?qa=1&progress=0.00` through `1.00`; production browsing keeps the normal continuous scroll behavior.
 - Browser verification passed at `1440 x 900`, `1280 x 800`, `1024 x 768`, `390 x 844`, and the target `430 x 932` viewport. At each size, progress `0.00`, `0.20`, `0.40`, `0.60`, `0.80`, and `1.00` rendered the V2 canvas with an exact matching QA value, fitted navigation, and no horizontal overflow.
+
+---
+
+# Visual QA — Workbench node enhancements
+
+Date: 2026-07-29
+
+## Scope
+
+Verify the new Masked Edit reference controls, separate Variations outputs,
+Image Description node, final-output auto-save toggle, and Clear All Nodes
+toolbar action without changing the generator or landing experience.
+
+## Environment
+
+- UI-only local URL: `http://127.0.0.1:3001/workbench`
+- Browser: Codex in-app Browser
+- Viewports: `1440 x 900` and `390 x 844`
+- The normal Cloudflare-backed development server could not start because its
+  remote Workers AI proxy is protected by Cloudflare Access and this
+  non-interactive environment has no Access service-token credentials. A
+  temporary, ignored Vite config stubbed only `cloudflare:workers` for
+  client-side visual QA; no generation or save API route was invoked through
+  that stub.
+
+## Checks
+
+| Check | Result |
+| --- | --- |
+| Masked Edit reference input handle | Passed; `Reference image (image)` rendered alongside the base image and prompt inputs |
+| Reference guidance field | Passed; accepted dedicated guidance text with GPT Image selected |
+| Unsupported reference engines | Passed; Workers AI disabled the guidance field and showed the explicit unsupported-engine explanation |
+| Variations separate-output toggle | Passed; enabling four candidates exposed `Variation 1` through `Variation 4` image handles |
+| Image Description node | Passed; image input, text output, vision-model selector, disabled-until-run editable description field, and focused helper copy rendered |
+| Auto-save final toolbar toggle | Passed; `aria-pressed` changed from false to true and the label changed from `AUTO-SAVE FINAL OFF` to `AUTO-SAVE FINAL ON` |
+| Clear All Nodes | Passed; confirmation removed all three QA nodes and disabled the empty-canvas action |
+| Mobile toolbar | Passed; both new controls fit inside the `390 x 844` menu without horizontal overflow |
+| Browser console | No warnings or errors observed |
+
+## Evidence captured
+
+- `workbench-enhancements-1440x900.png`
+- `workbench-enhancements-readable-1440x900-v2.png`
+- `workbench-enhancements-390x844.png`
+- `workbench-enhancements-menu-390x844.png`
+
+The screenshots are stored in the Codex visualization artifact directory for
+this task, outside the repository.
+
+## Discrepancies fixed
+
+- The reference-guidance control now communicates its engine limitation
+  instead of silently accepting an input that Workers AI or FLUX Fill would
+  ignore.
+- Variation-specific handles now participate in downstream cache signatures,
+  preventing two different variation ports from sharing a stale downstream
+  result.
+- Presentation-only variation selection and separate-output toggling no longer
+  trigger a paid re-run or duplicate an already auto-saved final image.
+
+## Remaining known deviations
+
+- A live paid GPT Image edit with two uploaded images and a mask was not sent
+  during visual QA.
+- A real automatic save request was not sent during visual QA. Request
+  collection, terminal-output selection, deduplication, and failure handling
+  are covered by the workbench regression suite.
+- No deployment occurred.

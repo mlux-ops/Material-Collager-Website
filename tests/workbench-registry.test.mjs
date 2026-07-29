@@ -24,6 +24,7 @@ const DOM_WRAPPED_KINDS = new Set([
   "imageEdit",
   "saveToLibrary",
   "referenceAnalyzer",
+  "imageDescription",
   "libraryPick",
   "resize",
   "crop",

@@ -8,6 +8,20 @@ import { estimateGenerationCost, GENERATION_QUALITIES, GENERATION_SIZES, generat
 // far better prompt adherence).
 export const MASKED_EDIT_ENGINES = ["gpt-image", "workers-ai", "flux-fill"] as const;
 
+export function maskedReferenceSupported(engine: unknown): boolean {
+  return (engine || "gpt-image") === "gpt-image";
+}
+
+export function buildMaskedReferencePrompt(basePrompt: string, instruction: string | undefined, hasReference: boolean): string {
+  if (!hasReference) return basePrompt;
+  const direction = instruction?.trim() || "Use the reference's relevant visual qualities to guide only the masked replacement.";
+  return `${basePrompt}
+
+Reference image guidance:
+The first input image is the base image being edited and the mask applies to it. The second input image is visual reference only.
+${direction}`;
+}
+
 // flux-pro-1.0-fill is flat-priced per generated image on the BFL API.
 const FLUX_FILL_USD_PER_IMAGE = 0.05;
 
@@ -15,6 +29,7 @@ export const MASKED_EDIT_PARAM_RULES = {
   engine: { type: "enum", optional: true, values: MASKED_EDIT_ENGINES },
   size: { type: "enum", optional: true, values: GENERATION_SIZES },
   quality: { type: "enum", optional: true, values: GENERATION_QUALITIES },
+  referenceInstruction: { type: "string", optional: true, maxLength: 4000 },
   // JSON-serialized MaskShape[] (rect/polygon/brush, normalized 0-1000).
   // Opaque to import validation beyond the size cap; execute() parses it
   // defensively and falls back to the maskRegion* bounding box.
@@ -43,12 +58,20 @@ export const maskedEditManifest: NodeManifest = {
     description: "Edit only a selected region; the rest is protected. Engines: gpt-image-2 (guidance), Workers AI inpainting (pixel-exact, free), or FLUX Fill (pixel-exact, best prompt-following).",
     inputs: [
       { id: "image", kind: "image", label: "Image", required: true },
+      { id: "reference", kind: "image", label: "Reference image" },
       { id: "prompt", kind: "text", label: "Prompt", required: true },
     ],
     outputs: [{ id: "image", kind: "image", label: "Image" }],
     paid: true,
   },
-  defaultParams: { engine: "gpt-image", size: "1536x1024", quality: "medium", candidates: 1, maskCacheKey: "" },
+  defaultParams: {
+    engine: "gpt-image",
+    size: "1536x1024",
+    quality: "medium",
+    candidates: 1,
+    maskCacheKey: "",
+    referenceInstruction: "",
+  },
   importSchema: {
     paramKeys: { ...MASKED_EDIT_PARAM_RULES },
     sourceBlobKeys: ["maskCacheKey"],

@@ -71,6 +71,33 @@ test("Variations: n IS part of the signature (changing candidate count invalidat
   // here (S-1: the dead, never-read param was removed).
 });
 
+test("Variations: individual source handles produce distinct downstream signatures while the legacy aggregate handle keeps its original token", () => {
+  const source = nodeFor("variations", { n: 4, separateOutputs: true });
+  source.data.status = "done";
+  source.data.runs = [{ runId: "variation-run", signature: "source", at: 1, values: [[]] }];
+  const target = nodeFor("imageDescription");
+  const context = (sourceHandle) => ({
+    incoming: new Map([[
+      target.id,
+      [{
+        id: `edge-${sourceHandle}`,
+        source: source.id,
+        sourceHandle,
+        target: target.id,
+        targetHandle: "image",
+      }],
+    ]]),
+    liveNode: (id) => id === source.id ? source : id === target.id ? target : undefined,
+    draft: false,
+  });
+
+  const aggregate = signatureFor(context("image"), target);
+  const first = signatureFor(context("variation-1"), target);
+  const second = signatureFor(context("variation-2"), target);
+  assert.notEqual(first, second);
+  assert.notEqual(aggregate, first);
+});
+
 test("saveToLibrary: savedJobId (a run artifact) is stripped by stableParams and never perturbs the signature", () => {
   const context = contextFor(false);
   const withoutJobId = nodeFor("saveToLibrary", {});
