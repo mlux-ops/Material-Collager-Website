@@ -7,11 +7,14 @@ import { readApiResponse } from "@/app/lib/api-client";
 import type { NormalizedBox } from "@/app/lib/selective-edit";
 import { getBlob, putBlob } from "../blob-cache";
 import { recordUsageCalibration } from "../cost";
+import { activeRunOf } from "../signature";
 import { useWorkbenchStore } from "../store";
 import { useModalDismiss } from "../useModalDismiss";
 import styles from "../workbench.module.css";
 import type { ExecuteContext, MaskShape, NodeOutputValue, WorkbenchNode, WorkbenchParams } from "../types";
 import { buildGenerationPayload, decodeBase64Image } from "./generation";
+import { buildMaskedReferencePrompt, maskedReferenceSupported } from "./maskedEdit.manifest";
+import { outputValuesFor, specFor } from "./manifests";
 import {
   blobFromImageValue,
   GenerationSettings,
@@ -507,7 +510,7 @@ function MaskModal({
 export const Component = memo(function MaskedEditNode({ id, data }: WorkbenchNodeProps) {
   const updateParams = useWorkbenchStore((state) => state.updateParams);
   const touchBlobs = useWorkbenchStore((state) => state.touchBlobs);
-  const inputImages = useConnectedImageCount(id, ["image"]);
+  const inputImages = useConnectedImageCount(id, ["image", "reference"]);
   const edges = useEdges();
   const nodes = useNodes<WorkbenchNode>();
   const [modalOpen, setModalOpen] = useState(false);
@@ -516,13 +519,17 @@ export const Component = memo(function MaskedEditNode({ id, data }: WorkbenchNod
     const edge = edges.find((candidate) => candidate.target === id && candidate.targetHandle === "image");
     if (!edge) return undefined;
     const source = nodes.find((candidate) => candidate.id === edge.source);
-    const run = source?.data.runs[source.data.activeRun];
-    const value = run?.values[0]?.find((entry) => entry.kind === "image");
+    const run = source ? activeRunOf(source) : undefined;
+    const fallbackPort = source ? specFor(source.data.kind).outputs[0]?.id ?? "" : "";
+    const value = source && run
+      ? outputValuesFor(source, run, edge.sourceHandle ?? fallbackPort).find((entry) => entry.kind === "image")
+      : undefined;
     return value && value.kind === "image" ? value.url : undefined;
   }, [edges, nodes, id]);
 
   const existingShapes = shapesFromParams(data.params);
   const engine = data.params.engine || "gpt-image";
+  const referenceConnected = edges.some((edge) => edge.target === id && edge.targetHandle === "reference");
 
   const applyMask = useCallback(async (shapes: MaskShape[]) => {
     setModalOpen(false);
@@ -577,6 +584,24 @@ export const Component = memo(function MaskedEditNode({ id, data }: WorkbenchNod
           <option value="flux-fill">FLUX Fill pro — exact mask (~$0.05)</option>
         </select>
       </label>
+      <label className={styles.field}>
+        <span>Reference guidance (GPT Image only)</span>
+        <textarea
+          className={`${styles.textarea} nodrag nowheel`}
+          rows={3}
+          placeholder="e.g. Match the reference's veining and satin finish, but keep the base image's scale and perspective."
+          value={data.params.referenceInstruction ?? ""}
+          disabled={!maskedReferenceSupported(engine)}
+          onChange={(event) => updateParams(id, { referenceInstruction: event.target.value })}
+        />
+      </label>
+      <p className={styles.hint}>
+        {maskedReferenceSupported(engine)
+          ? "Optional: connect Reference image. GPT Image receives it as the second image; the mask remains attached to the base image."
+          : referenceConnected
+            ? "The connected reference image cannot be used by this engine. Choose GPT Image or disconnect it before running."
+            : "Workers AI and FLUX Fill do not support a second reference image; choose GPT Image to use reference guidance."}
+      </p>
       <button type="button" className="nodrag" onClick={() => setModalOpen(true)} disabled={!inputImageUrl}>
         {existingShapes ? "Edit mask…" : "Draw mask…"}
       </button>
@@ -726,11 +751,28 @@ async function executeInpaintEngine(
 // over the original through the shape mask (feathered inward, bit-identical
 // outside).
 export async function execute(ctx: ExecuteContext): Promise<void> {
-  const payload = buildGenerationPayload(ctx.params, ctx.inputs("prompt"));
+  const basePayload = buildGenerationPayload(ctx.params, ctx.inputs("prompt"));
   const base = ctx.inputs("image");
   if (!base.length) throw new Error("Connect an input image first.");
   const baseValue = base[0];
   if (baseValue.kind !== "image") throw new Error("Connect an input image first.");
+  const references = ctx.inputs("reference");
+  if (references.length && !maskedReferenceSupported(ctx.params.engine)) {
+    throw new Error("Reference images are supported only by the GPT Image engine. Switch engines or disconnect the reference image.");
+  }
+  const referenceValue = references[0];
+  if (referenceValue && referenceValue.kind !== "image") throw new Error("Connect a photo to the Reference image input.");
+  const payload = {
+    ...basePayload,
+    prompt: buildMaskedReferencePrompt(
+      basePayload.prompt,
+      ctx.params.referenceInstruction,
+      Boolean(referenceValue),
+    ),
+  };
+  if (payload.prompt.length > 32_000) {
+    throw new Error("The prompt plus reference guidance exceeds the 32,000 character limit.");
+  }
 
   const shapes = shapesFromParams(ctx.params);
   if (!shapes) throw new Error("Draw a mask first.");
@@ -752,6 +794,9 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
   const form = new FormData();
   form.append("payload", JSON.stringify(payload));
   form.append("image[]", baseFile, "input.png");
+  if (referenceValue?.kind === "image") {
+    form.append("image[]", await blobFromImageValue(referenceValue), "reference.png");
+  }
   form.append("mask", maskFile, "mask.png");
 
   ctx.setProgress("Editing region…");

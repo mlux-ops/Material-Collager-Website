@@ -1,7 +1,7 @@
 import type { Edge } from "@xyflow/react";
 import { imageCacheKeysFromValue } from "./nodes/generation";
 import { executeMap, isExecutable } from "./nodes/index";
-import { alwaysExecuteMap, draftOverrideMap, estimateCostMap } from "./nodes/manifests";
+import { alwaysExecuteMap, draftOverrideMap, estimateCostMap, outputValuesFor } from "./nodes/manifests";
 import { activeRunOf, isPinned, signatureFor, type SignatureContext } from "./signature";
 import { downstreamOf, useWorkbenchStore } from "./store";
 import { acceptedKindsFor, specFor, type ExecuteContext, type NodeOutputValue, type WorkbenchNode } from "./types";
@@ -47,9 +47,8 @@ function inputValues(context: GraphContext, nodeId: string, portId: string): Nod
     const source = currentNode(edge.source);
     const run = activeRunOf(source);
     if (!run) continue;
-    const spec = specFor(source.data.kind);
-    const portIndex = spec.outputs.findIndex((port) => port.id === edge.sourceHandle);
-    const candidates = run.values[portIndex >= 0 ? portIndex : 0] ?? [];
+    const fallbackPort = specFor(source.data.kind).outputs[0]?.id ?? "";
+    const candidates = outputValuesFor(source, run, edge.sourceHandle ?? fallbackPort);
     if (candidates.length) values.push(candidates[0]);
   }
   return values;
@@ -76,9 +75,8 @@ function countConnectedImages(context: GraphContext, nodeId: string): number {
     const source = currentNode(edge.source);
     const run = activeRunOf(source);
     if (!run) continue;
-    const sourceSpec = specFor(source.data.kind);
-    const portIndex = sourceSpec.outputs.findIndex((port) => port.id === edge.sourceHandle);
-    const value = run.values[portIndex >= 0 ? portIndex : 0]?.[0];
+    const fallbackPort = specFor(source.data.kind).outputs[0]?.id ?? "";
+    const value = outputValuesFor(source, run, edge.sourceHandle ?? fallbackPort)[0];
     if (!value) continue;
     total += imageCacheKeysFromValue(value).length;
   }

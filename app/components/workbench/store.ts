@@ -10,6 +10,7 @@ import {
 } from "@xyflow/react";
 import { releaseBlob, releaseByPrefix } from "./blob-cache";
 import { importSchemaMap, NODE_KINDS } from "./nodes/manifests";
+import { replaceTextOutput } from "./run-output";
 import {
   acceptedKindsFor,
   defaultParams,
@@ -43,6 +44,10 @@ function runImageBlobKeys(run: NodeRun): string[] {
 
 function createNodeId() {
   return globalThis.crypto?.randomUUID?.().slice(0, 8) ?? `${Date.now()}-${Math.random()}`;
+}
+
+function createOutputEditRunId() {
+  return globalThis.crypto?.randomUUID?.().slice(0, 8) ?? `edit-${Date.now()}-${Math.random()}`;
 }
 
 export function portSpecFor(node: WorkbenchNode | undefined, handleId: string | null | undefined, direction: "in" | "out") {
@@ -162,6 +167,14 @@ type WorkbenchStore = {
   // would let deleting one break the other.
   duplicateNode: (id: string) => string | undefined;
   updateParams: (id: string, patch: Partial<WorkbenchParams>) => void;
+  // Presentation-only params change the visible node surface but not its
+  // computed output (Variations' extra-handle toggle). They persist without
+  // marking this node or its downstream branch stale.
+  updatePresentationParams: (id: string, patch: Partial<WorkbenchParams>) => void;
+  // Edits one text value in the currently browsed run. The request signature
+  // is preserved (no re-bill), while a fresh runId invalidates downstream
+  // consumers when this is the authoritative propagated run.
+  updateTextOutput: (id: string, portId: string, text: string) => void;
   setStatus: (id: string, status: NodeStatus, error?: string, progress?: string) => void;
   applyRun: (id: string, run: NodeRun) => void;
   // Reference Finder's human-in-the-loop pause (AC5): parks the node in
@@ -314,6 +327,50 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
           if (node.id === id) {
             const status = node.data.status === "done" ? ("stale" as const) : node.data.status;
             return { ...node, data: { ...node.data, params: { ...node.data.params, ...patch }, status } };
+          }
+          if (stale.has(node.id) && node.data.status === "done") {
+            return { ...node, data: { ...node.data, status: "stale" as const } };
+          }
+          return node;
+        }),
+        dirtyStamp: Date.now(),
+      };
+    });
+  },
+
+  updatePresentationParams: (id, patch) => {
+    set((state) => ({
+      nodes: state.nodes.map((node) =>
+        node.id === id
+          ? { ...node, data: { ...node.data, params: { ...node.data.params, ...patch } } }
+          : node,
+      ),
+      dirtyStamp: Date.now(),
+    }));
+  },
+
+  updateTextOutput: (id, portId, text) => {
+    set((state) => {
+      const source = state.nodes.find((node) => node.id === id);
+      if (!source) return {};
+      const outputIndex = specFor(source.data.kind).outputs.findIndex((port) => port.id === portId);
+      const runIndex = source.data.activeRun;
+      const run = source.data.runs[runIndex];
+      if (outputIndex < 0 || !run) return {};
+
+      const edited = replaceTextOutput(run, outputIndex, 0, text, createOutputEditRunId());
+      if (edited === run) return {};
+
+      const pinned = source.data.pinnedOutput;
+      const authoritativeIndex = pinned !== undefined && pinned !== null ? pinned : runIndex;
+      const propagates = authoritativeIndex === runIndex;
+      const stale = propagates ? downstreamOf(state.edges, id) : new Set<string>();
+      return {
+        nodes: state.nodes.map((node) => {
+          if (node.id === id) {
+            const runs = [...node.data.runs];
+            runs[runIndex] = edited;
+            return { ...node, data: { ...node.data, runs } };
           }
           if (stale.has(node.id) && node.data.status === "done") {
             return { ...node, data: { ...node.data, status: "stale" as const } };

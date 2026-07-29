@@ -2,7 +2,17 @@
 "use client";
 
 import type { Edge } from "@xyflow/react";
-import { Handle, NodeToolbar, Position, useEdges, useNodeId, useNodes, useReactFlow, type NodeProps } from "@xyflow/react";
+import {
+  Handle,
+  NodeToolbar,
+  Position,
+  useEdges,
+  useNodeId,
+  useNodes,
+  useReactFlow,
+  useUpdateNodeInternals,
+  type NodeProps,
+} from "@xyflow/react";
 import { memo, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { readApiResponse } from "@/app/lib/api-client";
@@ -33,7 +43,7 @@ import {
   GENERATION_SIZES,
   imageCacheKeysFromValue,
 } from "./generation";
-import { draftOverrideMap, estimateCostMap, paidMap, specFor } from "./manifests";
+import { draftOverrideMap, estimateCostMap, outputValuesFor, paidMap, specFor } from "./manifests";
 
 export type WorkbenchNodeProps = NodeProps<WorkbenchNode>;
 
@@ -66,7 +76,23 @@ const STATUS_LABEL: Record<WorkbenchNodeData["status"], string> = {
   "needs-selection": "Needs Selection",
 };
 
-function PortHandles({ spec }: { spec: NodeSpec }) {
+function PortHandles({ spec, visibleOutputIds }: { spec: NodeSpec; visibleOutputIds?: readonly string[] }) {
+  const nodeId = useNodeId();
+  const updateNodeInternals = useUpdateNodeInternals();
+  const visible = useMemo(() => visibleOutputIds ? new Set(visibleOutputIds) : undefined, [visibleOutputIds]);
+  const outputs = useMemo(
+    () => visible ? spec.outputs.filter((port) => visible.has(port.id)) : spec.outputs,
+    [spec.outputs, visible],
+  );
+  const outputKey = outputs.map((port) => port.id).join("|");
+
+  // React Flow caches handle geometry. Re-measure whenever Variations reveals
+  // or hides its optional per-candidate handles so new wires start at the
+  // actual rendered positions.
+  useEffect(() => {
+    if (nodeId) updateNodeInternals(nodeId);
+  }, [nodeId, outputKey, updateNodeInternals]);
+
   return (
     <>
       {spec.inputs.map((port, index) => (
@@ -79,7 +105,7 @@ function PortHandles({ spec }: { spec: NodeSpec }) {
           title={`${port.label} (${acceptedKindsFor(port).join(" | ")}${port.multi ? ", multiple" : ""})`}
         />
       ))}
-      {spec.outputs.map((port, index) => (
+      {outputs.map((port, index) => (
         <Handle
           key={port.id}
           id={port.id}
@@ -155,12 +181,22 @@ function NodeQuickActions() {
   );
 }
 
-export function NodeShell({ data, children, footer }: { data: WorkbenchNodeData; children: ReactNode; footer?: ReactNode }) {
+export function NodeShell({
+  data,
+  children,
+  footer,
+  visibleOutputIds,
+}: {
+  data: WorkbenchNodeData;
+  children: ReactNode;
+  footer?: ReactNode;
+  visibleOutputIds?: readonly string[];
+}) {
   const spec = specFor(data.kind);
   return (
     <div className={`${styles.node} ${data.status === "error" ? styles.nodeError : ""}`}>
       <NodeQuickActions />
-      <PortHandles spec={spec} />
+      <PortHandles spec={spec} visibleOutputIds={visibleOutputIds} />
       <NodeDeleteButton />
       <header className={styles.nodeHeader}>
         <span className={styles.nodeTitle}>{spec.title}</span>
@@ -494,9 +530,7 @@ export function useConnectedImageCount(id: string, portIds: string[]) {
       if (!source) continue;
       const run = activeRunOf(source);
       if (!run) continue;
-      const sourceSpec = specFor(source.data.kind);
-      const portIndex = sourceSpec.outputs.findIndex((port) => port.id === edge.sourceHandle);
-      const value = run.values[portIndex >= 0 ? portIndex : 0]?.[0];
+      const value = outputValuesFor(source, run, edge.sourceHandle ?? specFor(source.data.kind).outputs[0]?.id ?? "")[0];
       if (!value) continue;
       total += imageCacheKeysFromValue(value).length;
     }

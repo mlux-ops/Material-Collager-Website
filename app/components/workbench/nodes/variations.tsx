@@ -1,6 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
+import { useEdges } from "@xyflow/react";
 import { memo, useMemo, useState } from "react";
 import { readApiResponse } from "@/app/lib/api-client";
 import { putBlob } from "../blob-cache";
@@ -10,6 +11,7 @@ import { useModalDismiss } from "../useModalDismiss";
 import styles from "../workbench.module.css";
 import type { ExecuteContext, NodeOutputValue } from "../types";
 import { buildGenerationPayload, decodeBase64Image } from "./generation";
+import { activeVariationOutputIds } from "./variations.manifest";
 import {
   blobFromImageValue,
   GenerationSettings,
@@ -33,10 +35,12 @@ function candidateIndex(cacheKey: string): number {
 
 export const Component = memo(function VariationsNode({ id, data }: WorkbenchNodeProps) {
   const updateParams = useWorkbenchStore((state) => state.updateParams);
+  const updatePresentationParams = useWorkbenchStore((state) => state.updatePresentationParams);
   const applyRun = useWorkbenchStore((state) => state.applyRun);
   const setPinned = useWorkbenchStore((state) => state.setPinned);
   const inputImages = useConnectedImageCount(id, ["image"]);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const edges = useEdges();
   const { closing: lightboxClosing, requestClose: requestLightboxClose } = useModalDismiss(() => setLightboxOpen(false));
   const run = data.runs[data.activeRun];
   const candidates = useMemo(() => run?.values[0] ?? [], [run]);
@@ -53,6 +57,15 @@ export const Component = memo(function VariationsNode({ id, data }: WorkbenchNod
   // (not always index 0) propagates and downstream signatures invalidate.
   const activeValue = candidates[0];
   const selectedCacheKey = activeValue && activeValue.kind === "image" ? activeValue.cacheKey : undefined;
+  const visibleOutputIds = useMemo(() => {
+    const ids = new Set(activeVariationOutputIds(data.params));
+    // Never remove a handle that already owns a wire. Turning the toggle off
+    // hides unused handles but keeps existing branches connected and valid.
+    for (const edge of edges) {
+      if (edge.source === id && edge.sourceHandle?.startsWith("variation-")) ids.add(edge.sourceHandle);
+    }
+    return [...ids];
+  }, [data.params, edges, id]);
 
   function selectCandidate(cacheKey: string) {
     if (!run || cacheKey === selectedCacheKey) return;
@@ -71,7 +84,13 @@ export const Component = memo(function VariationsNode({ id, data }: WorkbenchNod
     const pinnedElsewhereRunId =
       !pinWasOnThisRun && pinnedIndex !== undefined && pinnedIndex !== null ? data.runs[pinnedIndex]?.runId : undefined;
 
-    applyRun(id, { runId: createSelectionRunId(), signature: run.signature, at: Date.now(), values: [reordered], usage: run.usage });
+    applyRun(id, {
+      runId: createSelectionRunId(),
+      signature: run.signature,
+      at: Date.now(),
+      values: [reordered, ...run.values.slice(1)],
+      usage: run.usage,
+    });
 
     if (pinWasOnThisRun) {
       // applyRun always prepends, so the reordered run always lands at 0.
@@ -96,7 +115,11 @@ export const Component = memo(function VariationsNode({ id, data }: WorkbenchNod
   }
 
   return (
-    <NodeShell data={data} footer={<RunFooter id={id} data={data} inputImages={inputImages} />}>
+    <NodeShell
+      data={data}
+      visibleOutputIds={visibleOutputIds}
+      footer={<RunFooter id={id} data={data} inputImages={inputImages} />}
+    >
       <GenerationSettings id={id} data={data} />
       <label className={styles.field}>
         <span>Candidates (n)</span>
@@ -108,6 +131,15 @@ export const Component = memo(function VariationsNode({ id, data }: WorkbenchNod
           value={data.params.n ?? 4}
           onChange={(event) => updateParams(id, { n: Math.min(10, Math.max(1, Number(event.target.value) || 1)) })}
         />
+      </label>
+      <label className={styles.inlineToggle}>
+        <input
+          className="nodrag"
+          type="checkbox"
+          checked={data.params.separateOutputs ?? false}
+          onChange={(event) => updatePresentationParams(id, { separateOutputs: event.target.checked })}
+        />
+        <span>Expose each variation as a separate photo output</span>
       </label>
       {activeValue && activeValue.kind === "image" && (
         <figure className={styles.preview}>

@@ -4,7 +4,17 @@
 // and DOM access at module scope; relative runtime imports carry explicit
 // .ts extensions because Node's ESM loader does no extension searching.
 
-import type { CostEstimateInput, ImportSchema, NodeKind, NodeManifest, NodeSpec, WorkbenchParams } from "../types";
+import type {
+  CostEstimateInput,
+  ImportSchema,
+  NodeKind,
+  NodeManifest,
+  NodeOutputValue,
+  NodeRun,
+  NodeSpec,
+  WorkbenchNode,
+  WorkbenchParams,
+} from "../types";
 import { accuracyReviewerManifest } from "./accuracyReviewer.manifest.ts";
 import { aiAssistantManifest } from "./aiAssistant.manifest.ts";
 import { collageBoardManifest } from "./collageBoard.manifest.ts";
@@ -13,6 +23,7 @@ import { cropManifest } from "./crop.manifest.ts";
 import { exportDownloadManifest } from "./exportDownload.manifest.ts";
 import { imageEditManifest } from "./imageEdit.manifest.ts";
 import { imageGenerateManifest } from "./imageGenerate.manifest.ts";
+import { imageDescriptionManifest } from "./imageDescription.manifest.ts";
 import { libraryPickManifest } from "./libraryPick.manifest.ts";
 import { maskedEditManifest } from "./maskedEdit.manifest.ts";
 import { noteManifest } from "./note.manifest.ts";
@@ -42,6 +53,7 @@ export const MANIFESTS: Record<NodeKind, NodeManifest> = {
   // Phase 2 node kinds.
   references: referencesManifest,
   referenceAnalyzer: referenceAnalyzerManifest,
+  imageDescription: imageDescriptionManifest,
   referenceFinder: referenceFinderManifest,
   libraryPick: libraryPickManifest,
   collageBoard: collageBoardManifest,
@@ -74,6 +86,27 @@ export function specFor(kind: NodeKind): NodeSpec {
 // Fresh copy per call so callers never share (or mutate) manifest state.
 export function defaultParams(kind: NodeKind): WorkbenchParams {
   return { ...MANIFESTS[kind].defaultParams };
+}
+
+// Resolve one declared output port from a run. The direct values array is the
+// default contract; a manifest may provide a compatibility adapter when a
+// newer output surface can be derived from an older persisted run without a
+// paid re-execution (Variations' individual candidate handles).
+export function outputValuesFor(node: WorkbenchNode, run: NodeRun, portId: string): NodeOutputValue[] {
+  const manifest = MANIFESTS[node.data.kind];
+  const portIndex = manifest.spec.outputs.findIndex((port) => port.id === portId);
+  if (portIndex < 0) return [];
+  const direct = run.values[portIndex];
+  if (direct !== undefined) return direct;
+  return manifest.resolveOutputValues?.(run, portId) ?? [];
+}
+
+export function activeOutputPortsFor(node: WorkbenchNode) {
+  const manifest = MANIFESTS[node.data.kind];
+  const activeIds = manifest.activeOutputIds?.(node.data.params);
+  if (!activeIds) return manifest.spec.outputs;
+  const allowed = new Set(activeIds);
+  return manifest.spec.outputs.filter((port) => allowed.has(port.id));
 }
 
 export const importSchemaMap: Record<NodeKind, ImportSchema> = mapManifests((manifest) => manifest.importSchema);
