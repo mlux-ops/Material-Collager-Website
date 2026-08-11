@@ -29,6 +29,18 @@ const MAX_DIMENSION = 2048;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_MASK_BYTES = 4 * 1024 * 1024;
 
+// FLUX Fill prompt-adherence bounds from the BFL schema. We deliberately
+// default below BFL's own 60: at that strength Fill renders the prompt's most
+// concept-dense noun as a literal object, so a "fill this patch with the
+// surrounding material" edit comes back as a newly invented fixture instead of
+// a surface that blends in. The client mirrors this default
+// (maskedEdit.manifest.ts); validation here is independent, like the
+// dimensions, so a hand-rolled payload can't push an out-of-range value at BFL.
+const FLUX_GUIDANCE_MIN = 1.5;
+const FLUX_GUIDANCE_MAX = 100;
+const FLUX_GUIDANCE_DEFAULT = 30;
+const FLUX_SEED_MAX = 4_294_967_295;
+
 type AiBinding = {
   run(model: string, inputs: Record<string, unknown>): Promise<ReadableStream<Uint8Array> | { image?: string }>;
 };
@@ -38,6 +50,9 @@ type InpaintPayload = {
   prompt?: string;
   width?: number;
   height?: number;
+  // flux-fill only (see FLUX_GUIDANCE_* below).
+  guidance?: number;
+  seed?: number;
 };
 
 type FluxSubmitResponse = { id?: string; polling_url?: string };
@@ -49,6 +64,23 @@ function validatedDimension(value: unknown, label: string): number {
     throw new Error(`The ${label} must be between ${MIN_DIMENSION} and ${MAX_DIMENSION} pixels.`);
   }
   return dimension - (dimension % 8);
+}
+
+// Out-of-range or non-numeric guidance falls back to the default rather than
+// erroring: it is a quality dial, not a correctness constraint.
+function validatedGuidance(value: unknown): number {
+  const guidance = Number(value);
+  if (!Number.isFinite(guidance)) return FLUX_GUIDANCE_DEFAULT;
+  return Math.min(FLUX_GUIDANCE_MAX, Math.max(FLUX_GUIDANCE_MIN, guidance));
+}
+
+// undefined = let BFL pick a fresh seed. 0 is a valid seed, so absence must be
+// distinguished from zero rather than falsy-checked.
+function validatedSeed(value: unknown): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  const seed = Math.floor(Number(value));
+  if (!Number.isFinite(seed) || seed < 0) return undefined;
+  return Math.min(FLUX_SEED_MAX, seed);
 }
 
 // btoa over a chunked binary string: String.fromCharCode(...bytes) on a whole
@@ -70,6 +102,8 @@ async function runFluxFill(
   prompt: string,
   imageBase64: string,
   maskBase64: string,
+  guidance: number,
+  seed: number | undefined,
   signal: AbortSignal,
 ): Promise<string> {
   const apiKey = process.env.BFL_API_KEY?.trim();
@@ -82,6 +116,8 @@ async function runFluxFill(
       prompt,
       image: imageBase64,
       mask: maskBase64,
+      guidance,
+      ...(seed === undefined ? {} : { seed }),
       output_format: "png",
       safety_tolerance: 2,
     }),
@@ -147,10 +183,14 @@ export async function POST(request: Request) {
       // BFL's Fill API takes base64 image+mask (same white-= repaint
       // convention as SD inpainting) and preserves the input dimensions, so
       // width/height are validation-only here.
+      const guidance = validatedGuidance(payload.guidance);
+      const seed = validatedSeed(payload.seed);
       const imageBase64 = await runFluxFill(
         prompt,
         bytesToBase64(new Uint8Array(await image.arrayBuffer())),
         bytesToBase64(new Uint8Array(await mask.arrayBuffer())),
+        guidance,
+        seed,
         request.signal,
       );
       return Response.json({
@@ -159,7 +199,7 @@ export async function POST(request: Request) {
         mimeType: "image/png",
         size: `${width}x${height}`,
         retryable: false,
-        diagnostics: { model: "flux-pro-1.0-fill", transport: "bfl-api", width, height },
+        diagnostics: { model: "flux-pro-1.0-fill", transport: "bfl-api", width, height, guidance, seed },
       });
     }
 

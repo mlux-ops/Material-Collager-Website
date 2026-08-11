@@ -194,6 +194,13 @@ export type WorkbenchParams = {
   // (pixel-exact mask, free tier), or FLUX.1 Fill [pro] (pixel-exact mask,
   // ~$0.05/image via the BFL API).
   engine?: "gpt-image" | "workers-ai" | "flux-fill";
+  // FLUX Fill tuning (flux-fill engine only). fluxGuidance is BFL's
+  // prompt-adherence dial: high values render the prompt literally, which for
+  // a material/texture fill makes the model invent an assertive object rather
+  // than blending into its surroundings. We default below BFL's own 60 --
+  // see FLUX_FILL_GUIDANCE_DEFAULT. fluxSeed left undefined = random per run.
+  fluxGuidance?: number;
+  fluxSeed?: number;
   referenceInstruction?: string;
   maskShapes?: string;
   maskCacheKey?: string;

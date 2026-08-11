@@ -6,7 +6,13 @@ import { collectFinalImageOutputs } from "../app/components/workbench/final-outp
 import { MANIFESTS, outputValuesFor } from "../app/components/workbench/nodes/manifests.ts";
 import {
   buildMaskedReferencePrompt,
+  clampFluxGuidance,
+  FLUX_FILL_GUIDANCE_DEFAULT,
+  FLUX_FILL_GUIDANCE_MAX,
+  FLUX_FILL_GUIDANCE_MIN,
+  FLUX_FILL_SEED_MAX,
   maskedReferenceSupported,
+  normalizeFluxSeed,
 } from "../app/components/workbench/nodes/maskedEdit.manifest.ts";
 import { IMAGE_DESCRIPTION_INSTRUCTION } from "../app/components/workbench/nodes/imageDescription.manifest.ts";
 import { replaceTextOutput } from "../app/components/workbench/run-output.ts";
@@ -46,6 +52,28 @@ test("Masked Edit declares a GPT-native optional reference image plus dedicated 
     buildMaskedReferencePrompt("Replace the tile.", "Match its veining, not its layout.", true),
     /Replace the tile[\s\S]*second input image[\s\S]*Match its veining, not its layout/i,
   );
+});
+
+test("Masked Edit exposes FLUX Fill guidance and seed, defaulting guidance below BFL's literal-prompt 60", () => {
+  const manifest = MANIFESTS.maskedEdit;
+
+  assert.equal(manifest.defaultParams.fluxGuidance, FLUX_FILL_GUIDANCE_DEFAULT);
+  assert.ok(FLUX_FILL_GUIDANCE_DEFAULT < 60, "the default must blend material fills rather than render prompts literally");
+  assert.equal(manifest.importSchema.paramKeys.fluxGuidance.type, "number");
+  assert.equal(manifest.importSchema.paramKeys.fluxSeed.integer, true);
+  // Unset seed means "random per run", so it must not ship a default.
+  assert.equal("fluxSeed" in manifest.defaultParams, false);
+
+  assert.equal(clampFluxGuidance(35), 35);
+  assert.equal(clampFluxGuidance(500), FLUX_FILL_GUIDANCE_MAX);
+  assert.equal(clampFluxGuidance(0), FLUX_FILL_GUIDANCE_MIN);
+  assert.equal(clampFluxGuidance(""), FLUX_FILL_GUIDANCE_DEFAULT);
+
+  assert.equal(normalizeFluxSeed(""), undefined, "a cleared seed field means random, not seed 0");
+  assert.equal(normalizeFluxSeed(undefined), undefined);
+  assert.equal(normalizeFluxSeed(-4), undefined);
+  assert.equal(normalizeFluxSeed(0), 0, "0 is a seed BFL honours and must survive normalization");
+  assert.equal(normalizeFluxSeed(1e12), FLUX_FILL_SEED_MAX);
 });
 
 test("Variations keeps an aggregate output and declares ten stable individual image outputs", () => {

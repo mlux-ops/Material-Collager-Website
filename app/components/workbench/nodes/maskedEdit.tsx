@@ -13,7 +13,16 @@ import { useModalDismiss } from "../useModalDismiss";
 import styles from "../workbench.module.css";
 import type { ExecuteContext, MaskShape, NodeOutputValue, WorkbenchNode, WorkbenchParams } from "../types";
 import { buildGenerationPayload, decodeBase64Image } from "./generation";
-import { buildMaskedReferencePrompt, maskedReferenceSupported } from "./maskedEdit.manifest";
+import {
+  buildMaskedReferencePrompt,
+  clampFluxGuidance,
+  FLUX_FILL_GUIDANCE_DEFAULT,
+  FLUX_FILL_GUIDANCE_MAX,
+  FLUX_FILL_GUIDANCE_MIN,
+  FLUX_FILL_SEED_MAX,
+  maskedReferenceSupported,
+  normalizeFluxSeed,
+} from "./maskedEdit.manifest";
 import { outputValuesFor, specFor } from "./manifests";
 import {
   blobFromImageValue,
@@ -507,6 +516,17 @@ function MaskModal({
   );
 }
 
+// Clamping guidance on every keystroke would make values above the 1.5 minimum
+// untypable: "15" passes through "1", which would snap to 1.5 and strand the
+// caret mid-edit. Accept any numeric value while typing and clamp on blur —
+// /api/workbench/inpaint clamps independently, so an out-of-range value left
+// in an unblurred field can never reach BFL.
+function typedFluxGuidance(value: string): number {
+  if (value === "") return FLUX_FILL_GUIDANCE_DEFAULT;
+  const guidance = Number(value);
+  return Number.isFinite(guidance) ? guidance : FLUX_FILL_GUIDANCE_DEFAULT;
+}
+
 export const Component = memo(function MaskedEditNode({ id, data }: WorkbenchNodeProps) {
   const updateParams = useWorkbenchStore((state) => state.updateParams);
   const touchBlobs = useWorkbenchStore((state) => state.touchBlobs);
@@ -584,6 +604,40 @@ export const Component = memo(function MaskedEditNode({ id, data }: WorkbenchNod
           <option value="flux-fill">FLUX Fill pro — exact mask (~$0.05)</option>
         </select>
       </label>
+      {engine === "flux-fill" && (
+        <>
+          <label className={styles.field}>
+            <span>Prompt adherence (guidance)</span>
+            <input
+              className="nodrag"
+              type="number"
+              min={FLUX_FILL_GUIDANCE_MIN}
+              max={FLUX_FILL_GUIDANCE_MAX}
+              step={0.5}
+              value={data.params.fluxGuidance ?? FLUX_FILL_GUIDANCE_DEFAULT}
+              onChange={(event) => updateParams(id, { fluxGuidance: typedFluxGuidance(event.target.value) })}
+              onBlur={(event) => updateParams(id, { fluxGuidance: clampFluxGuidance(event.target.value) })}
+            />
+          </label>
+          <p className={styles.hint}>
+            {`${FLUX_FILL_GUIDANCE_MIN}–${FLUX_FILL_GUIDANCE_MAX}. Low (20–35) blends a material or texture into its surroundings; high (50–60) renders the prompt literally, which is right when the region should become a specific new object. Describe what the patch should contain, never what to remove — a “remove the metal” prompt puts metal back.`}
+          </p>
+          <label className={styles.field}>
+            <span>Seed (blank = random)</span>
+            <input
+              className="nodrag"
+              type="number"
+              min={0}
+              max={FLUX_FILL_SEED_MAX}
+              step={1}
+              placeholder="random"
+              value={data.params.fluxSeed ?? ""}
+              onChange={(event) => updateParams(id, { fluxSeed: normalizeFluxSeed(event.target.value) })}
+            />
+          </label>
+          <p className={styles.hint}>Fix the seed to make a re-run reproducible, so changing the prompt or guidance is the only variable.</p>
+        </>
+      )}
       <label className={styles.field}>
         <span>Reference guidance (GPT Image only)</span>
         <textarea
@@ -730,8 +784,13 @@ async function executeInpaintEngine(
     canvasToBlob(baseCanvas),
     canvasToBlob(renderInpaintMask(shapes, width, height)),
   ]);
+  // guidance/seed are FLUX-only knobs; the Workers AI path has its own fixed
+  // guidance, and sending them there would only perturb the payload.
+  const tuning = engine === "flux-fill"
+    ? { guidance: clampFluxGuidance(ctx.params.fluxGuidance), seed: normalizeFluxSeed(ctx.params.fluxSeed) }
+    : {};
   const form = new FormData();
-  form.append("payload", JSON.stringify({ engine, prompt, width, height }));
+  form.append("payload", JSON.stringify({ engine, prompt, width, height, ...tuning }));
   form.append("image", new File([baseBlob], "input.png", { type: "image/png" }), "input.png");
   form.append("mask", new File([maskBlob], "mask.png", { type: "image/png" }), "mask.png");
 

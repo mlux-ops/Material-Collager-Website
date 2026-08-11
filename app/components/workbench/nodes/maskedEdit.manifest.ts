@@ -25,11 +25,44 @@ ${direction}`;
 // flux-pro-1.0-fill is flat-priced per generated image on the BFL API.
 const FLUX_FILL_USD_PER_IMAGE = 0.05;
 
+// FLUX Fill prompt-adherence range, per the BFL API schema. BFL's own default
+// is 60, tuned for "put this specific object here" fills: at that strength the
+// model renders the prompt's most concept-dense noun literally, so a
+// material/texture patch prompt tends to come back as a newly invented object
+// instead of a surface that disappears into its surroundings. 30 is the useful
+// default for the material work this node is mostly used for; raise it toward
+// 60 when the masked region really should become a specific new object.
+export const FLUX_FILL_GUIDANCE_MIN = 1.5;
+export const FLUX_FILL_GUIDANCE_MAX = 100;
+export const FLUX_FILL_GUIDANCE_DEFAULT = 30;
+// BFL accepts any 32-bit seed; an unset seed means "random every run".
+export const FLUX_FILL_SEED_MAX = 4_294_967_295;
+
+// A cleared input field ("") must fall back to the default, not to Number("")
+// = 0 -> the minimum, which would silently drop prompt adherence to nothing.
+export function clampFluxGuidance(value: unknown): number {
+  if (value === undefined || value === null || value === "") return FLUX_FILL_GUIDANCE_DEFAULT;
+  const guidance = Number(value);
+  if (!Number.isFinite(guidance)) return FLUX_FILL_GUIDANCE_DEFAULT;
+  return Math.min(FLUX_FILL_GUIDANCE_MAX, Math.max(FLUX_FILL_GUIDANCE_MIN, guidance));
+}
+
+// Undefined (not 0) for "no seed" — 0 is a legitimate seed BFL will honour, so
+// an empty field must not collapse into it.
+export function normalizeFluxSeed(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const seed = Math.floor(Number(value));
+  if (!Number.isFinite(seed) || seed < 0) return undefined;
+  return Math.min(FLUX_FILL_SEED_MAX, seed);
+}
+
 export const MASKED_EDIT_PARAM_RULES = {
   engine: { type: "enum", optional: true, values: MASKED_EDIT_ENGINES },
   size: { type: "enum", optional: true, values: GENERATION_SIZES },
   quality: { type: "enum", optional: true, values: GENERATION_QUALITIES },
   referenceInstruction: { type: "string", optional: true, maxLength: 4000 },
+  fluxGuidance: { type: "number", optional: true, min: FLUX_FILL_GUIDANCE_MIN, max: FLUX_FILL_GUIDANCE_MAX },
+  fluxSeed: { type: "number", optional: true, min: 0, max: FLUX_FILL_SEED_MAX, integer: true },
   // JSON-serialized MaskShape[] (rect/polygon/brush, normalized 0-1000).
   // Opaque to import validation beyond the size cap; execute() parses it
   // defensively and falls back to the maskRegion* bounding box.
@@ -71,6 +104,7 @@ export const maskedEditManifest: NodeManifest = {
     candidates: 1,
     maskCacheKey: "",
     referenceInstruction: "",
+    fluxGuidance: FLUX_FILL_GUIDANCE_DEFAULT,
   },
   importSchema: {
     paramKeys: { ...MASKED_EDIT_PARAM_RULES },
@@ -92,6 +126,8 @@ export const maskedEditManifest: NodeManifest = {
     params.engine === "workers-ai" || params.engine === "flux-fill" ? params : generationDraftOverride(params),
   // The region (maskRegionX/Y/Width/Height) drives the memoization signature
   // like every other param here — an unchanged region+prompt+size/quality is
-  // a cache hit; moving the rectangle produces a different signature.
+  // a cache hit; moving the rectangle produces a different signature. The FLUX
+  // tuning knobs (fluxGuidance/fluxSeed) are signature-relevant for the same
+  // reason: retuning guidance must produce a fresh render, not a cache hit.
   persistBlobKeys: (_nodeId, params) => (params.maskCacheKey ? [params.maskCacheKey] : []),
 };
