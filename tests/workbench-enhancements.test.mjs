@@ -15,6 +15,16 @@ import {
   normalizeFluxSeed,
 } from "../app/components/workbench/nodes/maskedEdit.manifest.ts";
 import { IMAGE_DESCRIPTION_INSTRUCTION } from "../app/components/workbench/nodes/imageDescription.manifest.ts";
+import {
+  channelCorrection,
+  clampPatchFeather,
+  featherRadiusPx,
+  PATCH_COLOR_GAIN_MAX,
+  PATCH_COLOR_GAIN_MIN,
+  PATCH_FEATHER_DEFAULT,
+  PATCH_FEATHER_MAX_PX,
+  resolvePatchFit,
+} from "../app/components/workbench/nodes/patch.manifest.ts";
 import { replaceTextOutput } from "../app/components/workbench/run-output.ts";
 
 function image(cacheKey) {
@@ -74,6 +84,71 @@ test("Masked Edit exposes FLUX Fill guidance and seed, defaulting guidance below
   assert.equal(normalizeFluxSeed(-4), undefined);
   assert.equal(normalizeFluxSeed(0), 0, "0 is a seed BFL honours and must survive normalization");
   assert.equal(normalizeFluxSeed(1e12), FLUX_FILL_SEED_MAX);
+});
+
+test("Patch declares two image inputs and stays a free, blob-owning-free client node", () => {
+  const manifest = MANIFESTS.patch;
+
+  assert.deepEqual(
+    manifest.spec.inputs.map((port) => [port.id, port.required ?? false]),
+    [["base", true], ["patch", true]],
+  );
+  assert.equal(manifest.spec.paid ?? false, false, "canvas compositing costs nothing");
+  assert.equal(manifest.paid ?? false, false);
+  // The region is re-rendered from maskShapes at execute time, so unlike
+  // Masked Edit this node caches no mask blob to persist or GC.
+  assert.deepEqual(manifest.importSchema.sourceBlobKeys, []);
+  assert.equal(manifest.defaultParams.patchColorMatch, true);
+  assert.equal(manifest.defaultParams.patchFit, "auto");
+});
+
+test("Patch auto-detects whether the edited image is a full frame or a crop of the region", () => {
+  const base = 1500 / 1000;   // 3:2 frame
+  const region = 400 / 400;   // square region inside it
+
+  // A square patch matches the region, not the frame.
+  assert.equal(resolvePatchFit("auto", 1, base, region), "region");
+  // A 3:2 patch matches the frame.
+  assert.equal(resolvePatchFit("auto", base, base, region), "aligned");
+  // An explicit choice always wins over the heuristic.
+  assert.equal(resolvePatchFit("aligned", 1, base, region), "aligned");
+  assert.equal(resolvePatchFit("region", base, base, region), "region");
+  // Degenerate inputs fall back to the safer mode rather than throwing.
+  assert.equal(resolvePatchFit("auto", 0, base, region), "aligned");
+  assert.equal(resolvePatchFit("auto", Number.NaN, base, region), "aligned");
+  // Ties go to aligned: a region covering the whole frame is ambiguous.
+  assert.equal(resolvePatchFit("auto", base, base, base), "aligned");
+});
+
+test("Patch feather is resolution-independent and capped in absolute pixels", () => {
+  assert.equal(clampPatchFeather(""), PATCH_FEATHER_DEFAULT, "a cleared field reverts to the default");
+  assert.equal(clampPatchFeather(-5), 0);
+  assert.equal(clampPatchFeather(999), 10);
+
+  // Same percentage, two resolutions -> proportional bands, so a graph re-run
+  // at a larger size keeps the same seam.
+  assert.equal(featherRadiusPx(1, 1000, 2000), 10);
+  assert.equal(featherRadiusPx(1, 2000, 4000), 20);
+  // ...until the absolute ceiling, which stops a feather becoming a smear.
+  assert.equal(featherRadiusPx(10, 40000, 40000), PATCH_FEATHER_MAX_PX);
+  assert.equal(featherRadiusPx(0, 1000, 1000), 0, "zero feather means a hard edge");
+});
+
+test("Patch colour correction maps the patch onto the base's statistics, with bounded gain", () => {
+  // Patch is uniformly 20 levels darker with identical spread -> pure offset.
+  const shifted = channelCorrection(120, 10, 100, 10);
+  assert.equal(shifted.gain, 1);
+  assert.equal(shifted.offset, 20);
+  assert.equal(shifted.gain * 100 + shifted.offset, 120, "the correction lands the patch mean on the base mean");
+
+  // A flat patch channel has no spread to rescale; only the offset is real.
+  const flat = channelCorrection(120, 10, 100, 0);
+  assert.equal(flat.gain, 1);
+  assert.equal(flat.offset, 20);
+
+  // Wild ratios clamp rather than inventing contrast.
+  assert.equal(channelCorrection(128, 80, 128, 1).gain, PATCH_COLOR_GAIN_MAX);
+  assert.equal(channelCorrection(128, 1, 128, 80).gain, PATCH_COLOR_GAIN_MIN);
 });
 
 test("Variations keeps an aggregate output and declares ten stable individual image outputs", () => {

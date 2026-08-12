@@ -28,6 +28,7 @@ const DOM_WRAPPED_KINDS = new Set([
   "libraryPick",
   "resize",
   "crop",
+  "patch",
   "exportDownload",
   "accuracyReviewer",
   "qaCorrection",

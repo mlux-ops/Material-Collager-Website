@@ -59,7 +59,11 @@ function regionFromParams(params: WorkbenchParams): NormalizedBox | undefined {
 // import schema, cost paths, and pre-shapes graphs). Old graphs carry only
 // maskRegion*, which degrades to a single rect shape — bit-identical to the
 // old behavior.
-function shapesFromParams(params: WorkbenchParams): MaskShape[] | undefined {
+// The mask geometry, the drawing modal, and the canvas helpers below are
+// exported for the Patch node (patch.tsx), which reuses them verbatim rather
+// than growing a second copy that would drift from this one. The import
+// direction is one-way: patch.tsx -> maskedEdit.tsx.
+export function shapesFromParams(params: WorkbenchParams): MaskShape[] | undefined {
   if (params.maskShapes) {
     try {
       const parsed = JSON.parse(params.maskShapes) as MaskShape[];
@@ -73,7 +77,7 @@ function shapesFromParams(params: WorkbenchParams): MaskShape[] | undefined {
   return undefined;
 }
 
-function shapesBounds(shapes: MaskShape[]): NormalizedBox {
+export function shapesBounds(shapes: MaskShape[]): NormalizedBox {
   let minX = 1000, minY = 1000, maxX = 0, maxY = 0;
   const stretch = (x: number, y: number, pad = 0) => {
     minX = Math.min(minX, x - pad);
@@ -139,7 +143,7 @@ function traceShapesInto(context: CanvasRenderingContext2D, shapes: MaskShape[],
 
 // White shapes on transparent — the alpha layer every mask/composite render
 // derives from.
-function shapesAlphaCanvas(shapes: MaskShape[], width: number, height: number): HTMLCanvasElement {
+export function shapesAlphaCanvas(shapes: MaskShape[], width: number, height: number): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -188,7 +192,7 @@ function shapesHash(json: string): string {
   return (hash >>> 0).toString(36);
 }
 
-function loadInputImage(url: string): Promise<HTMLImageElement> {
+export function loadInputImage(url: string): Promise<HTMLImageElement> {
   const image = new Image();
   image.decoding = "async";
   return new Promise((resolve, reject) => {
@@ -198,7 +202,7 @@ function loadInputImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
-function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+export function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) =>
     canvas.toBlob((value) => (value ? resolve(value) : reject(new Error("Could not build the mask."))), "image/png"),
   );
@@ -222,7 +226,7 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
 const POLYGON_CLOSE_DISTANCE = 25; // normalized units to the first vertex
 const BRUSH_MIN_STEP = 3; // normalized units between recorded stroke points
 
-function MaskModal({
+export function MaskModal({
   imageUrl,
   initialShapes,
   pixelExact,

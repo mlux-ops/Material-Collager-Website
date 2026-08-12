@@ -28,6 +28,7 @@ export type NodeKind =
   | "aiAssistant"
   | "resize"
   | "crop"
+  | "patch"
   | "exportDownload";
 
 export type NodeStatus = "idle" | "running" | "done" | "error" | "stale" | "needs-selection";
@@ -208,6 +209,13 @@ export type WorkbenchParams = {
   maskRegionY?: number;
   maskRegionWidth?: number;
   maskRegionHeight?: number;
+  // patch — reuses the maskShapes/maskRegion* geometry above as the region to
+  // graft into. patchFit says how the edited image maps onto the original
+  // (full frame vs a crop of the region alone); patchFeather is a percentage of
+  // the short edge so the seam is resolution-independent.
+  patchFit?: "auto" | "aligned" | "region";
+  patchFeather?: number;
+  patchColorMatch?: boolean;
   // accuracyReviewer / qaCorrection
   selectedItemIds?: string[];
   // aiAssistant

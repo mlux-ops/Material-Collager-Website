@@ -16,6 +16,7 @@ import { Component as ImageGenerateComponent, execute as imageGenerateExecute } 
 import { Component as LibraryPickComponent, execute as libraryPickExecute } from "./libraryPick";
 import { Component as MaskedEditComponent, execute as maskedEditExecute } from "./maskedEdit";
 import { Component as NoteComponent } from "./note";
+import { Component as PatchComponent, execute as patchExecute } from "./patch";
 import { Component as PhotoComponent } from "./photo";
 import { Component as PromptBuilderComponent } from "./promptBuilder";
 import { Component as QaCorrectionComponent, execute as qaCorrectionExecute } from "./qaCorrection";
@@ -54,6 +55,7 @@ export const NODE_TYPES = {
   aiAssistant: AiAssistantComponent,
   resize: ResizeComponent,
   crop: CropComponent,
+  patch: PatchComponent,
   exportDownload: ExportDownloadComponent,
 };
 
@@ -68,6 +70,7 @@ const DOM_EXECUTES: Partial<Record<NodeKind, NodeExecute>> = {
   libraryPick: libraryPickExecute,
   resize: resizeExecute,
   crop: cropExecute,
+  patch: patchExecute,
   exportDownload: exportDownloadExecute,
   accuracyReviewer: accuracyReviewerExecute,
   qaCorrection: qaCorrectionExecute,

@@ -27,6 +27,7 @@ import { imageDescriptionManifest } from "./imageDescription.manifest.ts";
 import { libraryPickManifest } from "./libraryPick.manifest.ts";
 import { maskedEditManifest } from "./maskedEdit.manifest.ts";
 import { noteManifest } from "./note.manifest.ts";
+import { patchManifest } from "./patch.manifest.ts";
 import { photoManifest } from "./photo.manifest.ts";
 import { promptBuilderManifest } from "./promptBuilder.manifest.ts";
 import { qaCorrectionManifest } from "./qaCorrection.manifest.ts";
@@ -66,6 +67,7 @@ export const MANIFESTS: Record<NodeKind, NodeManifest> = {
   aiAssistant: aiAssistantManifest,
   resize: resizeManifest,
   crop: cropManifest,
+  patch: patchManifest,
   exportDownload: exportDownloadManifest,
 };
 
