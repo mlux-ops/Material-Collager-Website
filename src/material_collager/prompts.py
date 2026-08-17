@@ -66,6 +66,22 @@ def build_generation_prompt(request: CollageRequest) -> str:
         labels.append(item.to_prompt_label(next_index))
         next_index += len(item.image_paths)
 
+    object_count = len(request.items)
+    total_images = sum(len(item.image_paths) for item in request.items)
+    supporting = total_images - object_count
+    ids = ", ".join(f"`{item.id}`" for item in request.items)
+    object_count_lines = [
+        f"Object count: the finished collage contains exactly {object_count} referenced "
+        f"object{'' if object_count == 1 else 's'}, one per item id: {ids}."
+    ]
+    if supporting:
+        object_count_lines.append(
+            f"{supporting} of the {total_images} uploaded images "
+            f"{'is a supporting view' if supporting == 1 else 'are supporting views'} that add no object "
+            f"of their own. Count the objects before finishing; if the count exceeds {object_count}, a "
+            "supporting view was rendered as its own object and must be removed."
+        )
+
     prompt_parts = [
         "Create one finished high-end interior design material collage board.",
         TYPE_PROMPTS[request.collage_type],
@@ -73,12 +89,15 @@ def build_generation_prompt(request: CollageRequest) -> str:
         METAL_FINISH_RULES,
         "Reference image mapping. The image model can see these actual uploaded image files; use them directly as visual references:",
         "\n".join(labels),
+        " ".join(object_count_lines),
         "Reference handling rules:",
         "- Preserve each referenced item's exact visible material, finish tone, proportions, geometry, texture, grain, veining, and physical style.",
         "- Do not invent alternate products when a reference image is provided.",
         "- Do not rely on the item labels as visual descriptions; the uploaded images are the visual source of truth.",
         "- Use metadata only to clarify item role, brand, finish name, and placement priority.",
-        "- If multiple images belong to one item, treat them as alternate views of the same item unless notes say otherwise.",
+        "- A supporting view is another photograph of the SAME physical item shown in that item's primary view: the same faucet, the same tile, the same slab, at a different angle, crop, distance, or lighting. It is a guide for constructing that one object, never a second object.",
+        "- Build each item as one object and read all of its views into it: take identity, color, and finish from the primary view, and use every supporting view to resolve geometry, hidden faces, component count, edge profile, thickness, and pattern scale. Where they disagree, the primary view decides.",
+        "- Never place a supporting view on the canvas as its own element: no duplicate, mirrored twin, alternate colorway, inset, exploded part, detail vignette, or spare swatch beside the object it describes.",
         "Output requirements:",
         f"- Orientation: {request.resolved_orientation()}.",
         f"- Canvas size target: {request.resolved_size()}.",

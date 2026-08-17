@@ -230,13 +230,20 @@ async function reviewEconomyResult(apiKey: string, payload: CollageRequestInput,
   let next = 1;
   const map = items.map((item) => {
     const count = referenceCount(item);
-    const range = count === 1 ? `reference ${next}` : `references ${next}-${next + count - 1}`;
+    const start = next;
+    const end = next + count - 1;
+    const range = count === 1 ? `reference ${start}` : `references ${start}-${end}`;
     next += count;
-    return `${range} -> ${item.id}: ${item.role}`;
+    // Same primary/supporting split the generation prompt is given, so a stray
+    // object built from a supporting view reads here as a duplicate.
+    const views = count > 1
+      ? ` (primary identity view: reference ${start}; supporting view${count === 2 ? "" : "s"} of this same physical item: ${start + 1 === end ? `reference ${end}` : `references ${start + 1}-${end}`})`
+      : "";
+    return `${range} -> ${item.id}: ${item.role}${views}`;
   }).join("\n");
   const content: Array<Record<string, unknown>> = [{
     type: "input_text",
-    text: `Review the generated material collage against every original product reference.\n${map}\nScore product identity, geometry, finish, color, material texture, completeness, duplicates, and editorial polish. Return every item ID exactly once. Pass only at 90 or above.`,
+    text: `Review the generated material collage against every original product reference.\n${map}\nThe collage holds exactly ${items.length} referenced object${items.length === 1 ? "" : "s"}, one per item ID - count them. Where several references map to one item ID they are views of a single physical item, so any second object, duplicate, alternate colorway, inset, detail vignette, or spare swatch matching one of that item's views is a defect.\nScore product identity, geometry, finish, color, material texture, completeness, duplicates, and editorial polish. Return every item ID exactly once. Pass only at 90 or above.`,
   }, { type: "input_image", image_url: `data:image/png;base64,${imageBase64}`, detail: "original" }];
   for (const fileId of referenceIds) content.push({ type: "input_image", file_id: fileId, detail: "original" });
   const response = await readOpenAIResponse<{ output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }> }>(await fetch("https://api.openai.com/v1/responses", {

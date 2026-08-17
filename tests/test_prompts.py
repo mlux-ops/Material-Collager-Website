@@ -32,6 +32,35 @@ class PromptTests(unittest.TestCase):
         self.assertIn("uploaded images are the visual source of truth", prompt)
         self.assertNotIn("analyze the reference", prompt.lower())
 
+    def test_supporting_views_are_labeled_and_counted_as_one_object(self):
+        request = CollageRequest.from_dict(
+            {
+                "collage_type": "bathroom_fixture_collage",
+                "items": [
+                    {
+                        "id": "faucet",
+                        "role": "vanity faucet",
+                        "image_paths": ["faucet.png", "faucet-side.png", "faucet-detail.png"],
+                    },
+                    {
+                        "id": "tile",
+                        "role": "main bathroom tile",
+                        "image_paths": ["tile.png"],
+                    },
+                ],
+            }
+        )
+
+        prompt = build_generation_prompt(request)
+
+        self.assertIn("primary identity view: Image 1", prompt)
+        self.assertIn("supporting views of this same physical item: Images 2-3", prompt)
+        self.assertIn("exactly 2 referenced objects, one per item id: `faucet`, `tile`", prompt)
+        self.assertIn("2 of the 4 uploaded images are supporting views", prompt)
+        self.assertIn("never a second object", prompt)
+        # The single-image item must not pick up a split it does not have.
+        self.assertIn("- Image 4: item `tile` (main bathroom tile)", prompt)
+
     def test_appliance_prompt_excludes_greenery(self):
         request = CollageRequest.from_dict(
             {

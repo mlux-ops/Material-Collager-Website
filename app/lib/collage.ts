@@ -269,6 +269,10 @@ export function resolvedSize(request: CollageRequestInput) {
   return "2048x1360";
 }
 
+function supportingRange(start: number, end: number) {
+  return start === end ? `Image ${start}` : `Images ${start}-${end}`;
+}
+
 export function buildGenerationPrompt(request: CollageRequestInput) {
   const items = activeItems(request);
   if (request.qaSelection?.itemIds.length) {
@@ -276,12 +280,14 @@ export function buildGenerationPrompt(request: CollageRequestInput) {
   }
   const labels: string[] = [];
   let nextIndex = request.layoutReference ? 2 : 1;
+  let supportingTotal = 0;
   for (const item of items) {
     const count = referenceCount(item);
     const start = nextIndex;
     const end = nextIndex + count - 1;
     const imageRange = start === end ? `Image ${start}` : `Images ${start}-${end}`;
     nextIndex += count;
+    supportingTotal += count - 1;
     const details = [
       `role: ${item.role}`,
       item.brand ? `brand: ${item.brand}` : null,
@@ -289,6 +295,11 @@ export function buildGenerationPrompt(request: CollageRequestInput) {
       item.finish ? `finish name: ${item.finish}` : null,
       item.notes ? `specific instruction: ${item.notes}` : null,
     ].filter(Boolean);
+    // Spell out which image is the identity view and which are supporting
+    // views of that same unit. A bare "Images 4-6 -> faucet" range reads as
+    // three things to place; the model then renders the extra views as extra
+    // objects, which is the failure this split exists to prevent.
+    if (count > 1) details.push(`primary identity view: Image ${start}`, `supporting views of this same physical item: ${supportingRange(start + 1, end)}`);
     labels.push(`${imageRange} -> item \"${item.id}\" (${details.join("; ")})`);
   }
 
@@ -314,10 +325,20 @@ export function buildGenerationPrompt(request: CollageRequestInput) {
       "Preserve the approved draft composition as closely as possible, but use Images 2 onward as the sole visual truth for product identity, geometry, finish, material, color, and detail. Never copy a draft error over an original reference.",
     ] : []),
     labels.join("\n"),
+    "OBJECT COUNT",
+    [
+      `The finished collage contains exactly ${items.length} referenced object${items.length === 1 ? "" : "s"}, one per item ID: ${items.map((item) => `\"${item.id}\"`).join(", ")}.`,
+      supportingTotal
+        ? `${supportingTotal} of the ${totalReferenceCount(request)} uploaded product images ${supportingTotal === 1 ? "is a supporting view" : "are supporting views"} that add no object of their own. Count the objects on the canvas before finishing; if the count exceeds ${items.length}, a supporting view was rendered as its own object and must be removed.`
+        : "",
+    ].filter(Boolean).join(" "),
     ...(qaCorrection ? ["QA CORRECTION PASS", qaCorrection] : []),
     "REFERENCE FIDELITY - NON-NEGOTIABLE",
-    `- Include every mapped item exactly once as a distinct collage element. Multiple images mapped to one item are alternate views of that same item, not extra objects.
-- For a multi-image item, use the first image as the primary identity view and use every remaining view to resolve geometry, finish, and details.
+    `- Include every mapped item exactly once as a distinct collage element. The item IDs are the complete object list; nothing outside them earns a place on the canvas.
+- A supporting view is another photograph of the SAME physical item shown in that item's primary view: the same faucet, the same tile, the same slab, at a different angle, crop, distance, or lighting. It is a guide for constructing that one object, never a second object.
+- Build each item as one object and read all of its views into it: take identity, color, and finish from the primary view, and use every supporting view to resolve geometry, hidden faces, component count, edge profile, thickness, pattern scale, and any detail the primary view leaves ambiguous. Where they disagree, the primary view decides.
+- Never place a supporting view on the canvas as its own element: no duplicate, mirrored twin, rotated second copy, alternate colorway, alternate size, inset, exploded part, detail vignette, corner swatch, or spare fragment beside the object it describes.
+- If two objects on the canvas would trace back to one item ID, that is a defect: keep the one built from the primary view and remove the other.
 - Preserve recognizable product identity, silhouette, component count, proportions, edge profile, hardware geometry, finish temperature, sheen, grain direction, veining, pattern scale, texture, and color.
 - Remove source backgrounds cleanly, but do not redesign, simplify, mirror, recolor, or substitute the referenced item.
 - Metadata clarifies identity and role. If metadata and a visible reference appear to conflict, preserve the visible reference and do not invent a compromise.
@@ -355,6 +376,7 @@ function buildSelectiveCorrectionPrompt(request: CollageRequestInput, items: Col
       item.finish ? `finish name: ${item.finish}` : null,
       item.notes ? `specific instruction: ${item.notes}` : null,
     ].filter(Boolean);
+    if (count > 1) details.push(`primary identity view: Image ${start}`, `supporting views of this same physical item: ${supportingRange(start + 1, end)}`);
     labels.push(`${imageRange} -> correction references for item \"${item.id}\" (${details.join("; ")})`);
   }
 
@@ -375,6 +397,7 @@ function buildSelectiveCorrectionPrompt(request: CollageRequestInput, items: Col
     "SURGICAL EDIT RULES",
     `- The transparent mask regions are the only editable areas. Do not move, redraw, recolor, relight, sharpen, or restyle anything outside them.
 - Replace each selected item's faulty rendering with a faithful rendering based on its mapped correction references.
+- Every reference mapped to one item shows that one physical item from a different angle or crop. Rebuild the single existing object from them; never add a second object, duplicate, inset, or swatch inside the mask because an item has more than one view.
 - Preserve each selected item's existing position, footprint, orientation, scale, and overlap relationship unless a QA finding explicitly identifies one of those as wrong.
 - Match the surrounding contact shadows and pure white background at every repaired edge. Do not leave halos, seams, cut lines, duplicated edges, or rectangular patches.
 - Do not add or remove any unselected object. Do not regenerate the overall arrangement.`,

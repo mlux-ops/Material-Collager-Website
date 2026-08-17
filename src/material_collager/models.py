@@ -120,6 +120,17 @@ class CollageItem:
             details.append(f"finish: {self.finish}")
         if self.notes:
             details.append(f"notes: {self.notes}")
+        # Name the identity view and the supporting views explicitly. A bare
+        # image range reads as several things to place, and the extra views come
+        # back as extra objects in the collage.
+        if end_index > start_index:
+            supporting = (
+                f"Image {end_index}"
+                if start_index + 1 == end_index
+                else f"Images {start_index + 1}-{end_index}"
+            )
+            details.append(f"primary identity view: Image {start_index}")
+            details.append(f"supporting views of this same physical item: {supporting}")
 
         return f"- {image_range}: item `{self.id}` ({'; '.join(details)})"
 

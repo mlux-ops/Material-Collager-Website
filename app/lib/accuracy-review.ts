@@ -77,8 +77,19 @@ export async function reviewGeneratedImage(request: AccuracyReviewRequest): Prom
     const end = nextReference + count - 1;
     nextReference += count;
     const range = start === end ? `reference ${start}` : `references ${start}-${end}`;
-    return `${range} -> ${item.id}: ${item.role}`;
+    // Name the primary/supporting split the generator was given, so a stray
+    // object built from a supporting view reads as a duplicate here instead of
+    // looking like a legitimately requested second element.
+    const views = count > 1
+      ? ` (primary identity view: reference ${start}; supporting view${count === 2 ? "" : "s"} of this same physical item: ${start + 1 === end ? `reference ${end}` : `references ${start + 1}-${end}`})`
+      : "";
+    return `${range} -> ${item.id}: ${item.role}${views}`;
   }).join("\n");
+  // A masked repair reviews a subset of a canvas that still carries the whole
+  // board, so the object count only makes sense on a full review.
+  const objectCount = selectedIds.size
+    ? ""
+    : ` There are exactly ${expectedItems.length} referenced object${expectedItems.length === 1 ? "" : "s"} on the canvas, one per item ID - count them.`;
   const content: Array<Record<string, unknown>> = [
     {
       type: "input_text",
@@ -89,10 +100,11 @@ The first image is the generated ${artifact}. Every following image is an origin
 ${itemMap}
 
 Evaluate:
-1. Every requested item is present exactly once and no unrequested material, fixture, appliance, or placeholder was added.
-2. Each item preserves recognizable identity, geometry, finish, color, texture, grain, veining, pattern scale, and defining details from its references.
-3. The ${artifact} is photorealistic, cleanly isolated, pure white, professionally lit, and editorially composed.
-4. No item is badly warped, duplicated, mislabeled, recolored, hidden, or replaced by a generic substitute.
+1. Every requested item is present exactly once and no unrequested material, fixture, appliance, or placeholder was added.${objectCount}
+2. No object was built from a supporting view. Where several references map to one item ID they are views of a single physical item, so any second object, duplicate, mirrored twin, alternate colorway, inset, detail vignette, or spare swatch that matches one of that item's views is a defect: fail that item, and name the view it came from.
+3. Each item preserves recognizable identity, geometry, finish, color, texture, grain, veining, pattern scale, and defining details from its references.
+4. The ${artifact} is photorealistic, cleanly isolated, pure white, professionally lit, and editorially composed.
+5. No item is badly warped, duplicated, mislabeled, recolored, hidden, or replaced by a generic substitute.
 
 ${selectedIds.size
   ? `This is an intermediate masked repair. Score only these selected items: ${Array.from(selectedIds).join(", ")}. Unselected pixels will be restored exactly after this review, so do not penalize drift in unselected items. Still locate every item.`

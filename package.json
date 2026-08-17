@@ -13,7 +13,7 @@
     "test:scene-lab": "node --experimental-strip-types --test tests/scene-lab.test.mjs",
     "test:access": "node --experimental-strip-types --test tests/access-jwt.test.mjs",
     "test:workbench-export-import": "node --experimental-strip-types --test tests/workbench-export-import.test.mjs",
-    "test:collage": "node --experimental-strip-types --test tests/collage-orientation.test.mjs",
+    "test:collage": "node --experimental-strip-types --test tests/collage-*.test.mjs",
     "test:workbench": "node --experimental-strip-types --test --test-isolation=none tests/workbench-*.test.mjs",
     "db:generate": "drizzle-kit generate",
     "test:release-readiness": "node --test tests/release-readiness.test.mjs",

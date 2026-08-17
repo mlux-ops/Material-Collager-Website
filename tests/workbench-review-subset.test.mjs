@@ -216,9 +216,85 @@ test("N-11: reviewGeneratedImage itself has no issue with a large board (>16 ref
   // range ("references 1-2"), not a single reference -- matching the same
   // range-numbering semantics the earlier tests in this file already pin.
   assert.ok(promptText.includes("references 1-2 -> d: item d"), promptText);
-  assert.ok(!promptText.includes("item a") && !promptText.includes("item b") && !promptText.includes("item c"));
+  // Only the reviewed subset may be mapped. Check the map lines themselves
+  // rather than the whole prompt: the standing criteria are prose about items
+  // in general, so a substring scan for "item a" trips over ordinary wording.
+  const mapLines = promptText.split("\n").filter((line) => / -> \w+: /.test(line));
+  assert.equal(mapLines.length, 1, promptText);
+  assert.ok(mapLines[0].startsWith("references 1-2 -> d: item d"), mapLines[0]);
   // The schema's item count still reflects the FULL board (4), independent
   // of the reviewed subset (1) -- unaffected by N-11 (that's issue-1's
   // contract, re-confirmed here on a bigger board than the earlier tests use).
   assert.equal(capturedBody.text.format.schema.properties.items.minItems, 4);
+});
+
+// Supporting views (image 2..n in one item slot) were being rendered as extra
+// objects in the collage. The generator prompt now names the primary/supporting
+// split and states an exact object count; QA has to police the same contract,
+// otherwise a stray object built from a supporting view scores as a legitimate
+// element and the repair loop never removes it.
+test("a full review maps each item's primary and supporting views and states the board's exact object count", async () => {
+  let capturedBody;
+  const boardItems = [
+    { id: "wall_tile", role: "wall tile", referenceCount: 3 },
+    { id: "faucet", role: "hardware", referenceCount: 2 },
+    { id: "countertop", role: "countertop stone", referenceCount: 1 },
+  ];
+
+  await withMockedFetch(
+    async (_url, init) => {
+      capturedBody = JSON.parse(init.body);
+      return mockSuccessResponse(boardItems);
+    },
+    () =>
+      reviewGeneratedImage({
+        apiKey: NOT_A_REAL_API_KEY,
+        imageBase64: "AA==",
+        items: boardItems,
+        selectedItemIds: [],
+        references: [{ blob: pngBlob() }, { blob: pngBlob() }, { blob: pngBlob() }, { blob: pngBlob() }, { blob: pngBlob() }, { blob: pngBlob() }],
+        domain: "material collage",
+      }),
+  );
+
+  const promptText = capturedBody.input[0].content[0].text;
+  assert.ok(
+    promptText.includes("references 1-3 -> wall_tile: wall tile (primary identity view: reference 1; supporting views of this same physical item: references 2-3)"),
+    promptText,
+  );
+  // One supporting view stays singular, and a single-reference item gets no split.
+  assert.ok(promptText.includes("supporting view of this same physical item: reference 5"), promptText);
+  assert.ok(promptText.includes("reference 6 -> countertop: countertop stone\n"), promptText);
+  assert.ok(promptText.includes("exactly 3 referenced objects on the canvas, one per item ID"), promptText);
+  assert.ok(promptText.includes("No object was built from a supporting view."), promptText);
+});
+
+test("a masked repair omits the object count, since the canvas it reviews still carries the whole board", async () => {
+  let capturedBody;
+  const boardItems = [
+    { id: "wall_tile", role: "wall tile", referenceCount: 3 },
+    { id: "faucet", role: "hardware", referenceCount: 2 },
+  ];
+
+  await withMockedFetch(
+    async (_url, init) => {
+      capturedBody = JSON.parse(init.body);
+      return mockSuccessResponse(boardItems);
+    },
+    () =>
+      reviewGeneratedImage({
+        apiKey: NOT_A_REAL_API_KEY,
+        imageBase64: "AA==",
+        items: boardItems,
+        selectedItemIds: ["faucet"],
+        references: [{ blob: pngBlob() }, { blob: pngBlob() }],
+        domain: "material collage",
+      }),
+  );
+
+  const promptText = capturedBody.input[0].content[0].text;
+  assert.doesNotMatch(promptText, /referenced object/);
+  // The supporting-view rule still applies to the item being repaired.
+  assert.ok(promptText.includes("references 1-2 -> faucet: hardware (primary identity view: reference 1"), promptText);
+  assert.ok(promptText.includes("No object was built from a supporting view."), promptText);
 });

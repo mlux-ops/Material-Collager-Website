@@ -82,6 +82,8 @@ def _build_qa_prompt(request: CollageRequest) -> str:
         "- Background is pure white.",
         "- There is no visible text, label, annotation, or watermark.",
         "- There are no unrequested items such as toilets, tubs, sink basins, extra fixtures, or extra appliances.",
+        f"- The collage holds exactly {len(request.items)} referenced objects, one per requested item id. Count them.",
+        "- No object was built from a supporting view. Where several references map to one item they are views of a single physical item, so a second object, duplicate, alternate colorway, inset, or spare swatch matching one of that item's views is a defect.",
         "- Appliance collages have no greenery or towel styling.",
         "Requested items:",
     ]
