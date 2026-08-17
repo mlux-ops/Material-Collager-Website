@@ -211,10 +211,6 @@ export function validateCollageRequest(request: CollageRequestInput) {
   if (request.heroItemId && !ids.has(request.heroItemId)) {
     throw new Error("Choose a hero item that is still in the board.");
   }
-
-  if (request.collageType !== "bathroom_fixture_collage" && resolvedOrientation(request) === "square") {
-    throw new Error("Square format is only available for bathroom fixture collages.");
-  }
 }
 
 export function referenceCount(item: CollageItemInput) {

@@ -17,6 +17,7 @@ import {
   QUALITIES,
   STYLING_OPTIONS,
   labelFor,
+  resolvedOrientation,
   resolvedSize,
   slugify,
   validateCollageRequest,
@@ -166,6 +167,18 @@ type GenerationJob = {
   error: string | null;
   createdAt: number;
 };
+
+// The final render accepts the same orientations as the draft; "default" is a
+// board-level shorthand that is already resolved by the time a draft exists.
+type FinalFormat = Exclude<Orientation, "default">;
+
+const FINAL_FORMATS: FinalFormat[] = ["landscape", "portrait", "square"];
+
+// Read the label off resolvedSize's "final" branch so the switch can never
+// advertise a canvas different from the one the request asks for.
+function finalSizeFor(format: FinalFormat, collageType: CollageType) {
+  return resolvedSize({ collageType, orientation: format, quality: "high", outputResolution: "final", items: [] });
+}
 
 type ResultState = {
   dataUrl: string;
@@ -476,7 +489,7 @@ export default function Home() {
     if (next?.dataUrl.startsWith("blob:")) resultUrlRef.current = next.dataUrl;
     setResult(next);
   };
-  const [finalFormat, setFinalFormat] = useState<"landscape" | "square">("landscape");
+  const [finalFormat, setFinalFormat] = useState<FinalFormat>("landscape");
   const [jobs, setJobs] = useState<GenerationJob[]>([]);
   const [qaRedoSelection, setQaRedoSelection] = useState<Record<string, boolean>>({});
   const hasLoadedDraft = useRef(false);
@@ -1162,7 +1175,7 @@ export default function Home() {
       setDiagnostics(response.diagnostics ?? null);
       // Only assert the max resolution when the server did not fall back; a
       // notice means it downgraded, so show that instead of a false size.
-      const finalSizeLabel = finalFormat === "square" ? "2048x2048" : "2560x1440";
+      const finalSizeLabel = finalSizeFor(finalFormat, collageType);
       setPanelText(`Final ${finalFormat} render complete${response.notice ? "" : ` at ${finalSizeLabel}`}. Full-quality product references were used.${response.notice ? `\n\n${response.notice}` : ""}`);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
@@ -1321,6 +1334,10 @@ export default function Home() {
       });
       setQaRedoSelection(Object.fromEntries((qa?.items ?? []).map((item) => [item.id, !item.passed && Boolean(item.box)])));
       setPromptPreview(response.prompt || "");
+      // Start the final-render switch on the shape the approved draft was
+      // actually composed in, so finalizing a portrait draft doesn't silently
+      // re-crop it to landscape.
+      if (renderPreset === "draft") setFinalFormat(resolvedOrientation(payload));
       setPanelText(`${renderPreset === "draft" ? "Draft ready. Review the composition, then choose an immediate or Economy final render below." : response.summary || "Collage generated."}${qaRedo ? "\n\nOnly the checked QA regions were regenerated; protected pixels were restored from the previous collage." : ""}${response.notice ? `\n\n${response.notice}` : ""}`);
       setDiagnostics(response.diagnostics ?? null);
       await saveDraft(false);
@@ -1803,12 +1820,20 @@ export default function Home() {
                   <span className="quality-lock">Maximum quality</span>
                 </div>
                 <div className="format-switch" role="group" aria-label="Final image format">
-                  <button type="button" className={finalFormat === "landscape" ? "selected" : ""} onClick={() => setFinalFormat("landscape")}>
-                    <strong>Landscape</strong><span>2560 x 1440</span>
-                  </button>
-                  <button type="button" className={finalFormat === "square" ? "selected" : ""} onClick={() => setFinalFormat("square")}>
-                    <strong>Square</strong><span>2048 x 2048</span>
-                  </button>
+                  {FINAL_FORMATS.map((format) => {
+                    const [width, height] = finalSizeFor(format, collageType).split("x");
+                    return (
+                      <button
+                        key={format}
+                        type="button"
+                        aria-pressed={finalFormat === format}
+                        className={finalFormat === format ? "selected" : ""}
+                        onClick={() => setFinalFormat(format)}
+                      >
+                        <strong>{labelFor(format)}</strong><span>{width} x {height}</span>
+                      </button>
+                    );
+                  })}
                 </div>
                 <div className="final-actions">
                   <button type="button" className="final-now-button" onClick={() => void finalizeDraft("immediate")} disabled={isWorking} title="Starts the maximum-quality final render immediately and runs the accuracy review.">
