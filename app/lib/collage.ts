@@ -212,9 +212,6 @@ export function validateCollageRequest(request: CollageRequestInput) {
     throw new Error("Choose a hero item that is still in the board.");
   }
 
-  if (request.collageType === "bathroom_tile_collage" && resolvedOrientation(request) !== "portrait") {
-    throw new Error("Bathroom tile collages use portrait orientation.");
-  }
   if (request.collageType !== "bathroom_fixture_collage" && resolvedOrientation(request) === "square") {
     throw new Error("Square format is only available for bathroom fixture collages.");
   }

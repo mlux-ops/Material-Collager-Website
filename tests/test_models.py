@@ -24,6 +24,25 @@ class CollageRequestTests(unittest.TestCase):
         self.assertEqual(request.resolved_size(), "1024x1536")
         request.validate(check_paths=False)
 
+    def test_bathroom_tile_accepts_landscape_override(self):
+        request = CollageRequest.from_dict(
+            {
+                "collage_type": "bathroom_tile_collage",
+                "orientation": "landscape",
+                "items": [
+                    {
+                        "id": "wall",
+                        "role": "wall tile",
+                        "image_paths": ["wall.png"],
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(request.resolved_orientation(), "landscape")
+        self.assertEqual(request.resolved_size(), "1536x1024")
+        request.validate(check_paths=False)
+
     def test_rejects_square_for_non_fixture_collage(self):
         request = CollageRequest.from_dict(
             {

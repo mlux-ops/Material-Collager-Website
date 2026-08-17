@@ -230,8 +230,6 @@ class CollageRequest:
                 raise ValidationError(f"Item `{item.id}` must include at least one image path.")
         if self.auto_retry < 0:
             raise ValidationError("auto_retry must be 0 or greater.")
-        if self.collage_type == "bathroom_tile_collage" and self.resolved_orientation() != "portrait":
-            raise ValidationError("bathroom_tile_collage must use portrait orientation.")
         if self.collage_type != "bathroom_fixture_collage" and self.resolved_orientation() == "square":
             raise ValidationError("Only bathroom_fixture_collage supports square orientation.")
         if check_roles:
