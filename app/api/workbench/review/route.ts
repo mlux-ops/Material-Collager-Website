@@ -5,6 +5,7 @@ import {
   type AccuracyReviewReference,
 } from "@/app/lib/accuracy-review";
 import { MAX_REFERENCE_IMAGES } from "@/app/lib/collage";
+import { base64ToBytes } from "@/app/lib/base64";
 import { errorResponse, resolveOpenAIKey } from "@/app/lib/openai-server";
 
 export const runtime = "edge";
@@ -163,10 +164,5 @@ function validBase64(value: string | undefined, label: string) {
 }
 
 function decodeBase64(base64: string, mimeType: string) {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return new Blob([bytes], { type: mimeType });
+  return new Blob([base64ToBytes(base64)], { type: mimeType });
 }

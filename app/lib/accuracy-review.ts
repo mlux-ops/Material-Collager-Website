@@ -4,6 +4,7 @@
 // generator's /api/generate route; the domain string only swaps the prompt's
 // subject noun so interior/exterior render callers can reuse the same review.
 import { readOpenAIResponse } from "./openai-server.ts";
+import { blobToDataUrl } from "./base64.ts";
 
 type OpenAIResponseOutput = {
   output_text?: string;
@@ -125,7 +126,7 @@ For every item ID, return an item verdict and a tight bounding box [x, y, width,
     if (reference.fileId) {
       content.push({ type: "input_image", file_id: reference.fileId, detail: "original" });
     } else {
-      content.push({ type: "input_image", image_url: await blobDataUrl(reference.blob), detail: "original" });
+      content.push({ type: "input_image", image_url: await blobToDataUrl(reference.blob), detail: "original" });
     }
   }
 
@@ -242,16 +243,6 @@ export function normalizeQaBox(value: unknown): [number, number, number, number]
   const height = Math.min(rawHeight, 1000 - y);
   if (width < 5 || height < 5) return undefined;
   return [x, y, width, height];
-}
-
-async function blobDataUrl(blob: Blob) {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
-  }
-  return `data:${blob.type || "image/png"};base64,${btoa(binary)}`;
 }
 
 function extractOutputText(response: OpenAIResponseOutput) {

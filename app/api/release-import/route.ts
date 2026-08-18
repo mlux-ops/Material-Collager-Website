@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 
 import rightsManifest from "@/docs/release-collage-rights.json";
 import { ensureJobStorage, publicJob, runtimeStorage, type JobRow } from "@/app/lib/generation-jobs";
+import { base64ToBytes } from "@/app/lib/base64";
 import { errorResponse } from "@/app/lib/openai-server";
 
 export const runtime = "edge";
@@ -241,7 +242,7 @@ function integerField(value: unknown) {
 }
 
 function base64Bytes(value: string) {
-  return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
+  return base64ToBytes(value);
 }
 
 function isPng(value: Uint8Array) {

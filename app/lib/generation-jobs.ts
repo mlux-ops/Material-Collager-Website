@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { base64ToBytes } from "./base64.ts";
 
 export type RenderKind = "draft" | "studio" | "final" | "repair";
 
@@ -266,7 +267,7 @@ function outputTitle(filename: string, collageType?: string) {
 }
 
 function base64Bytes(value: string) {
-  return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
+  return base64ToBytes(value);
 }
 
 function parseJson(value: string | null) {

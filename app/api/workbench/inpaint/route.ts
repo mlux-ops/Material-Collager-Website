@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 
 import { errorResponse } from "@/app/lib/openai-server";
+import { bytesToBase64 } from "@/app/lib/base64";
 
 export const runtime = "edge";
 
@@ -81,17 +82,6 @@ function validatedSeed(value: unknown): number | undefined {
   const seed = Math.floor(Number(value));
   if (!Number.isFinite(seed) || seed < 0) return undefined;
   return Math.min(FLUX_SEED_MAX, seed);
-}
-
-// btoa over a chunked binary string: String.fromCharCode(...bytes) on a whole
-// megabyte-scale image would blow the argument limit.
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
-  }
-  return btoa(binary);
 }
 
 // Submit to BFL and poll until the render is ready, then pull the image from

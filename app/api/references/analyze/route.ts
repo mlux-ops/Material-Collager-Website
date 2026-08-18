@@ -1,4 +1,5 @@
 import { errorResponse, readOpenAIResponse, resolveOpenAIKey } from "@/app/lib/openai-server";
+import { blobToDataUrl } from "@/app/lib/base64";
 
 export const runtime = "edge";
 
@@ -79,12 +80,7 @@ Confidence is an integer 0-100. Do not invent an exact brand, model, SKU, collec
 }
 
 async function fileDataUrl(file: File) {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  let binary = "";
-  for (let index = 0; index < bytes.length; index += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
-  }
-  return `data:${file.type};base64,${btoa(binary)}`;
+  return blobToDataUrl(file, file.type);
 }
 
 function extractOutputText(response: ResponsesOutput) {

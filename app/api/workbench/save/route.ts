@@ -1,4 +1,5 @@
 import { persistGenerationOutput } from "@/app/lib/generation-jobs";
+import { bytesToBase64 } from "@/app/lib/base64";
 import { errorResponse } from "@/app/lib/openai-server";
 
 export const runtime = "edge";
@@ -43,12 +44,7 @@ export async function POST(request: Request) {
 }
 
 function base64FromBytes(bytes: Uint8Array) {
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
-  }
-  return btoa(binary);
+  return bytesToBase64(bytes);
 }
 
 function safeFilename(value?: string) {

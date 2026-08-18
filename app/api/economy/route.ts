@@ -1,4 +1,5 @@
 import { activeItems, buildGenerationPrompt, referenceCount, resolvedSize, validateCollageRequest, type CollageRequestInput } from "@/app/lib/collage";
+import { base64ToBytes } from "@/app/lib/base64";
 import { cleanupExpiredJobs, ensureJobStorage, publicJob, RETENTION_MS, runtimeStorage, type JobRow } from "@/app/lib/generation-jobs";
 import { errorResponse, readOpenAIResponse, resolveOpenAIKey } from "@/app/lib/openai-server";
 
@@ -202,7 +203,7 @@ async function refreshJob(row: JobRow) {
       await failJob(result.response?.body?.error?.message || result.error?.message || "The Economy render completed without an image.");
       return;
     }
-    const bytes = Uint8Array.from(atob(imageBase64), (character) => character.charCodeAt(0));
+    const bytes = base64ToBytes(imageBase64);
     const outputKey = `generation-outputs/${row.id}.png`;
     const bucket = runtimeStorage().OUTPUTS;
     if (!bucket) throw new Error("Generated-output storage is not configured.");
