@@ -34,6 +34,7 @@ import {
   type StylingOption,
 } from "@/app/lib/collage";
 import { ApiResponseError, readApiResponse } from "@/app/lib/api-client";
+import { nextItemId, resolveItemId as resolvedItemId, withUniqueItemIds } from "@/app/lib/item-ids";
 import {
   DIRECT_REQUEST_REFERENCE_BUDGET,
   base64ImageToObjectUrl,
@@ -245,10 +246,6 @@ function FieldLabel({ text, help }: { text: string; help: string }) {
       </span>
     </span>
   );
-}
-
-function resolvedItemId(item: UiItem, index: number) {
-  return item.id || slugify(item.role || `item_${index + 1}`);
 }
 
 function openDraftDatabase(): Promise<IDBDatabase> {
@@ -729,7 +726,7 @@ export default function Home() {
     setItems((current) => [
       ...current,
       {
-        id: `item_${current.length + 1}`,
+        id: nextItemId(current),
         role: "",
         brand: "",
         name: "",
@@ -933,7 +930,10 @@ export default function Home() {
           })),
       };
     });
-    setItems(nextItems);
+    // A draft saved before IDs were allocated safely can carry a duplicate, and
+    // the ID is persisted, so the board would keep failing validation across
+    // reloads. Rename the later claim on restore instead.
+    setItems(withUniqueItemIds(nextItems));
     setCollageType(draft.collageType);
     setOrientation(draft.orientation);
     setQuality(draft.quality);
