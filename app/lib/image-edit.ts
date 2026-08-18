@@ -33,6 +33,11 @@ export type ImageEditRequest = {
   // Number of candidates to generate in one call (1-10). Input tokens are
   // charged once per request, so n>1 beats n separate calls.
   n?: number;
+  // Wall-clock ceiling for one attempt. Undefined uses IMAGE_EDIT_TIMEOUT_MS;
+  // NULL disables the timer entirely, for long user-initiated work that must
+  // be allowed to finish rather than be killed mid-render. The caller's
+  // AbortSignal is still honoured either way, so cancellation is unaffected.
+  timeoutMs?: number | null;
 };
 
 export type AttemptDiagnostic = {
@@ -72,6 +77,10 @@ export class DiagnosedGenerationError extends Error {
 
 const IMAGE_RETRY_DELAYS_MS = [1500];
 
+// Default wall-clock ceiling for ONE upstream attempt. A caller can override
+// it per request, including disabling it outright — see ImageEditRequest.
+export const IMAGE_EDIT_TIMEOUT_MS = 300_000;
+
 export async function createImageEdit(
   apiKey: string,
   body: ImageEditRequest,
@@ -105,9 +114,13 @@ export async function createImageEdit(
         body: form,
         // E1 cancellation threading: combine the caller's AbortSignal (aborted
         // when the client fetch to /api/workbench/edit is cancelled) with the
-        // 300s hard timeout, so BOTH a client cancel and the timeout abort
-        // this upstream OpenAI call.
-        signal: combineAbortSignals(callerSignal, 300_000),
+        // per-attempt timeout, so BOTH a client cancel and the timeout abort
+        // this upstream OpenAI call. A null body.timeoutMs drops only the
+        // timer — the caller's cancel still lands.
+        signal: combineAbortSignals(
+          callerSignal,
+          body.timeoutMs === null ? undefined : body.timeoutMs ?? IMAGE_EDIT_TIMEOUT_MS,
+        ),
       });
       const data = await readOpenAIResponse<OpenAIImageResponse>(response);
       diagnostics.push({ stage: "image_edit", outcome: "succeeded", attempt: attempt + 1, durationMs: Date.now() - startedAt, size: body.size });

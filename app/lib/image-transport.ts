@@ -5,6 +5,24 @@
 
 export const DIRECT_REQUEST_REFERENCE_BUDGET = 700 * 1024;
 
+// The immediate Final render sends the approved draft plus every product
+// reference in ONE multipart body. The edge runtime rejects request bodies
+// over 32 MB (next.config.ts raises serverActions.bodySizeLimit to "32mb",
+// which vinext applies to route handlers too), so that whole payload has to
+// be budgeted client-side — sending untouched originals 413s once a board of
+// camera-native photos clears the ceiling. 28 MB leaves headroom for the JSON
+// `payload` field and the multipart part headers.
+//
+// This budget exists to stop the 413, NOT to save bytes: Final's whole point
+// is reference fidelity, so it is set as close to the ceiling as is safe.
+export const FINAL_REQUEST_BODY_BUDGET = 28 * 1024 * 1024;
+
+// The approved draft carries the composition the final render must follow, so
+// it gets a guaranteed slice of the body budget before the product references
+// divide up what is left. A 2560x1440 PNG draft is ~8 MB; 6 MB keeps it
+// visually lossless while leaving the references the bulk of the body.
+export const FINAL_LAYOUT_REFERENCE_BUDGET = 6 * 1024 * 1024;
+
 export function fileFingerprint(file: File) {
   return `${file.name}:${file.size}:${file.lastModified}:${file.type}`;
 }

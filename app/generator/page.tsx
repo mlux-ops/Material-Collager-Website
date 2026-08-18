@@ -36,6 +36,8 @@ import {
 import { ApiResponseError, readApiResponse } from "@/app/lib/api-client";
 import {
   DIRECT_REQUEST_REFERENCE_BUDGET,
+  FINAL_LAYOUT_REFERENCE_BUDGET,
+  FINAL_REQUEST_BODY_BUDGET,
   base64ImageToObjectUrl,
   dataUrlFile,
   fileFingerprint,
@@ -1102,6 +1104,7 @@ export default function Home() {
     setIsWorking(true);
     setOverallProgress(0);
     setReferenceProgress({});
+    let transportFilesForReport: File[] | undefined;
     try {
       const layoutFile = await dataUrlFile(result.dataUrl, "approved-draft.png");
 
@@ -1136,7 +1139,7 @@ export default function Home() {
         return;
       }
 
-      // Immediate Final sends the approved draft plus full-quality references
+      // Immediate Final sends the approved draft plus the product references
       // directly as multipart, exactly like the Studio render, so it never
       // touches the OpenAI Uploads API (which returns 500 in this hosting
       // environment). The draft is sent first so the server treats it as the
@@ -1151,12 +1154,40 @@ export default function Home() {
         renderKind: "final",
       };
       validateCollageRequest(payload);
-      setWorkingStage("Rendering final at maximum quality");
       const productFiles = items.flatMap((item) => item.references.map((reference) => reference.file));
+      // The originals cannot go up untouched. The approved draft PNG alone is
+      // several MB, and the edge runtime rejects the whole body past 32 MB
+      // with a 413 BEFORE the route runs — which surfaced to the user as "a
+      // reference chunk was rejected by the host" with no server diagnostics
+      // at all. So budget the body here: the draft keeps a reserved slice and
+      // the references divide what is left. The budget sits just under the
+      // ceiling, so references stay near-original — this guards the 413, it
+      // does not trade away the fidelity Final exists for.
+      setWorkingStage("Optimizing references for the final render");
+      const layoutTransport = await optimizeReferenceForTransport(layoutFile, FINAL_LAYOUT_REFERENCE_BUDGET);
+      const referenceBudget = Math.max(
+        DIRECT_REQUEST_REFERENCE_BUDGET,
+        FINAL_REQUEST_BODY_BUDGET - layoutTransport.size,
+      );
+      const transportFiles = await optimizeReferencesForTransport(productFiles, referenceBudget);
+      transportFilesForReport = transportFiles;
+      // The floor above, and compressReferenceForTransport's best-effort
+      // contract (it returns its smallest attempt if it cannot reach the
+      // target), both mean the assembled body can in principle still exceed
+      // the ceiling. Measure it rather than assume: a checked failure naming
+      // the real number and the Economy alternative beats the host's opaque
+      // 413, which is what sent this bug to the wrong stage in the first place.
+      const bodyBytes = layoutTransport.size + transportFiles.reduce((sum, file) => sum + file.size, 0);
+      if (bodyBytes > FINAL_REQUEST_BODY_BUDGET) {
+        throw new Error(
+          `The final render payload is ${formatBytes(bodyBytes)} after optimization, over the ${formatBytes(FINAL_REQUEST_BODY_BUDGET)} this host accepts in one request. Remove a supporting view, or use the Economy final render, which uploads each reference separately at full quality.`,
+        );
+      }
+      setWorkingStage("Rendering final at maximum quality");
       const form = new FormData();
       form.append("payload", JSON.stringify(payload));
-      form.append("image[]", layoutFile, layoutFile.name);
-      for (const file of productFiles) form.append("image[]", file, file.name);
+      form.append("image[]", layoutTransport, layoutTransport.name);
+      for (const file of transportFiles) form.append("image[]", file, file.name);
       setOverallProgress(100);
       const response = await fetch("/api/generate", { method: "POST", signal: controller.signal, body: form })
         .then((value) => readApiResponse<GenerateResponse>(value));
@@ -1185,6 +1216,38 @@ export default function Home() {
         // failing stage instead of stale data from the previous draft render.
         if (error instanceof ApiResponseError && error.payload.diagnostics) {
           setDiagnostics(error.payload.diagnostics as GenerationDiagnostics);
+        } else {
+          // A host-level rejection (a 413 on an oversized body) never reaches
+          // the route, so there are no server diagnostics to show. Without
+          // this branch the panel kept displaying the last SUCCESSFUL draft,
+          // which reads as "the model succeeded" on a render that never left
+          // the browser.
+          const failurePayload = error instanceof ApiResponseError ? error.payload : {};
+          const sent = transportFilesForReport
+            ?? items.flatMap((item) => item.references.map((reference) => reference.file));
+          setDiagnostics({
+            model: "gpt-image-2",
+            transport: "multipart",
+            quality: "high",
+            referenceCount: sent.length,
+            totalReferenceBytes: sent.reduce((sum, file) => sum + file.size, 0),
+            largestReferenceBytes: Math.max(...sent.map((file) => file.size), 0),
+            references: sent.map((file) => ({
+              filename: file.name,
+              bytes: file.size,
+              mimeType: file.type || "unknown",
+            })),
+            attempts: [{
+              stage: "image_edit",
+              outcome: "failed",
+              attempt: 1,
+              durationMs: 0,
+              status: typeof failurePayload.status === "number" ? failurePayload.status : undefined,
+              code: typeof failurePayload.code === "string" ? failurePayload.code : undefined,
+              requestId: typeof failurePayload.requestId === "string" ? failurePayload.requestId : undefined,
+              error: `Final render: ${error instanceof Error ? error.message : "Unknown error."}`,
+            }],
+          });
         }
         setPanelText(`Final rendering failed: ${error instanceof Error ? error.message : "Unknown error."}`);
       }

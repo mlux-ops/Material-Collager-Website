@@ -3,7 +3,7 @@
 // per-item verdict with normalized bounding boxes. Extracted verbatim from the
 // generator's /api/generate route; the domain string only swaps the prompt's
 // subject noun so interior/exterior render callers can reuse the same review.
-import { readOpenAIResponse } from "./openai-server.ts";
+import { combineAbortSignals, readOpenAIResponse } from "./openai-server.ts";
 
 type OpenAIResponseOutput = {
   output_text?: string;
@@ -58,9 +58,15 @@ export type AccuracyReviewRequest = {
   // Ordered reference images matching the reference-map numbering.
   references: AccuracyReviewReference[];
   domain: AccuracyReviewDomain;
-  // Optional caller signal, combined with the built-in 180s timeout.
+  // Optional caller signal, combined with the timeout below.
   signal?: AbortSignal;
+  // Wall-clock ceiling for the review call. Undefined uses
+  // ACCURACY_REVIEW_TIMEOUT_MS; NULL disables the timer entirely, for long
+  // user-initiated work that must be allowed to finish.
+  timeoutMs?: number | null;
 };
+
+export const ACCURACY_REVIEW_TIMEOUT_MS = 180_000;
 
 export async function reviewGeneratedImage(request: AccuracyReviewRequest): Promise<QaReview> {
   const { apiKey, imageBase64, references, domain, signal } = request;
@@ -129,14 +135,15 @@ For every item ID, return an item verdict and a tight bounding box [x, y, width,
     }
   }
 
-  const timeout = AbortSignal.timeout(180_000);
+  const timeoutMs = request.timeoutMs === null ? undefined : request.timeoutMs ?? ACCURACY_REVIEW_TIMEOUT_MS;
+  const reviewSignal = combineAbortSignals(signal, timeoutMs);
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    signal: reviewSignal,
     body: JSON.stringify({
       model: process.env.MATERIAL_COLLAGER_QA_MODEL || "gpt-5.6",
       reasoning: { effort: "low" },
