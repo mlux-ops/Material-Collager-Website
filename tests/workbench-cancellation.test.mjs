@@ -2,12 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createImageEdit, createImageGeneration } from "../app/lib/image-edit.ts";
-import { reviewGeneratedImage } from "../app/lib/accuracy-review.ts";
 import { combineAbortSignals } from "../app/lib/openai-server.ts";
 
 // E1 cancellation threading: mock global fetch and assert that a caller abort
 // propagates into the upstream OpenAI fetch's signal for every paid path —
-// edit, generation, review, and (via combineAbortSignals directly) assist.
+// edit, generation, and (via combineAbortSignals directly) assist.
 
 // Not a real credential — a placeholder string these mocked-fetch tests pass
 // through as the apiKey parameter; no network call is ever actually made.
@@ -115,41 +114,6 @@ test("createImageGeneration (generation path): the caller's AbortSignal is threa
     async () => createImageGeneration(NOT_A_REAL_API_KEY, { prompt: "p", size: "1024x1024", quality: "medium" }, [], callerController.signal),
   );
   callerController.abort();
-  await assert.rejects(runPromise);
-  assert.equal(observedSignal.aborted, true);
-});
-
-test("reviewGeneratedImage (accuracy-review path): the caller's AbortSignal is threaded into the upstream fetch to api.openai.com/v1/responses", async () => {
-  const callerController = new AbortController();
-  let observedSignal;
-  // reviewGeneratedImage awaits an async blob-to-data-URL conversion before
-  // it ever calls fetch, so the caller abort below can legitimately land
-  // BEFORE fetch is invoked — the mock must reject immediately for an
-  // already-aborted signal, not only listen for a future 'abort' event.
-  const runPromise = withMockedFetch(
-    async (_url, init) => {
-      observedSignal = init.signal;
-      if (init.signal.aborted) throw new DOMException("aborted", "AbortError");
-      return new Promise((_resolve, reject) => {
-        init.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
-      });
-    },
-    async () => reviewGeneratedImage({
-      apiKey: NOT_A_REAL_API_KEY,
-      imageBase64: "AA==",
-      items: [{ id: "a", role: "wood", referenceCount: 1 }],
-      selectedItemIds: [],
-      references: [{ blob: pngBlob() }],
-      domain: "material collage",
-      signal: callerController.signal,
-    }),
-  );
-  callerController.abort();
-  // reviewGeneratedImage only wraps response PARSING in its try/catch (the
-  // fetch call itself is outside it), so an aborted upstream fetch rejects
-  // the whole call rather than resolving to a { reviewFailed: true } report.
-  // The point of this test is that the abort reaches the upstream fetch at
-  // all, so assert on the observed signal, not on how the rejection surfaces.
   await assert.rejects(runPromise);
   assert.equal(observedSignal.aborted, true);
 });

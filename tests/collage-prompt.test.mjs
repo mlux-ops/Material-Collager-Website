@@ -74,13 +74,3 @@ test("the fidelity rules forbid rendering a supporting view as its own element",
   assert.match(prompt, /two objects on the canvas would trace back to one item ID/);
   assert.match(prompt, /Where they disagree, the primary view decides/);
 });
-
-test("a masked correction pass carries the same one-object-per-item rule", () => {
-  const prompt = buildGenerationPrompt(request({
-    qaSelection: { itemIds: ["faucet"], baseWidth: 2048, baseHeight: 1360 },
-  }));
-
-  assert.match(prompt, /correction references for item "faucet"/);
-  assert.match(prompt, /primary identity view: Image 2/);
-  assert.match(prompt, /never add a second object, duplicate, inset, or swatch inside the mask/);
-});

@@ -29,7 +29,7 @@ function contextFor(draft) {
 }
 
 test("a paid node WITH a draftOverride produces a DIFFERENT signature draft-on vs draft-off (proves draft-off forces a rerun)", () => {
-  for (const kind of ["imageEdit", "imageGenerate", "upscaler", "variations", "relight", "collageBoard", "qaCorrection"]) {
+  for (const kind of ["imageEdit", "imageGenerate", "upscaler", "variations", "relight", "collageBoard"]) {
     const node = nodeFor(kind);
     const draftOn = signatureFor(contextFor(true), node);
     const draftOff = signatureFor(contextFor(false), node);
@@ -38,7 +38,7 @@ test("a paid node WITH a draftOverride produces a DIFFERENT signature draft-on v
 });
 
 test("a paid node WITHOUT a draftOverride is BYTE-IDENTICAL draft-on vs draft-off (the toggle must never over-invalidate/re-bill it)", () => {
-  for (const kind of ["accuracyReviewer", "referenceAnalyzer", "referenceFinder", "aiAssistant"]) {
+  for (const kind of ["referenceAnalyzer", "referenceFinder", "aiAssistant"]) {
     const node = nodeFor(kind);
     const draftOn = signatureFor(contextFor(true), node);
     const draftOff = signatureFor(contextFor(false), node);
@@ -119,7 +119,7 @@ test("draft mode's size half: the Upscaler's large default (2560x1440) shrinks t
 });
 
 test("draft mode's size half applies to every draftOverride-declaring generation-shaped node, including the largest offered Upscaler target (3840x2160)", () => {
-  for (const kind of ["imageEdit", "imageGenerate", "upscaler", "variations", "relight", "qaCorrection"]) {
+  for (const kind of ["imageEdit", "imageGenerate", "upscaler", "variations", "relight"]) {
     const draft = draftOverrideMap[kind]({ size: "3840x2160", quality: "high" });
     assert.notEqual(draft.size, "3840x2160", `${kind}: draft mode must shrink the size, not leave it unchanged`);
     assert.equal(validateEditSize(draft.size), null, `${kind}: the draft size must still be valid`);

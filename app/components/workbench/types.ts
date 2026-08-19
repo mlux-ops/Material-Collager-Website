@@ -1,7 +1,7 @@
 import type { Node } from "@xyflow/react";
 
 // Data kinds carried by connections, color-coded on ports and edges.
-export type PortKind = "image" | "text" | "references" | "report" | "mask";
+export type PortKind = "image" | "text" | "references" | "mask";
 
 export type NodeKind =
   | "photo"
@@ -23,8 +23,6 @@ export type NodeKind =
   | "variations"
   | "maskedEdit"
   | "upscaler"
-  | "accuracyReviewer"
-  | "qaCorrection"
   | "aiAssistant"
   | "resize"
   | "crop"
@@ -106,30 +104,10 @@ export type PendingReferenceSelection = {
   signature: string; // the signature captured for this node at pause time
 };
 
-export type ReportItemResult = {
-  id: string;
-  passed: boolean;
-  score: number;
-  findings: string[];
-  // Normalized [x, y, width, height] (0-1000) bounding box for this item, when
-  // the reviewer could locate it. Drives the QA Correction node's mask via
-  // app/lib/selective-edit.ts; absent means the item could not be located.
-  box?: [number, number, number, number];
-};
-
-export type ReportResult = {
-  passed: boolean;
-  score: number;
-  findings: string[];
-  recommendation: string;
-  items: ReportItemResult[];
-};
-
 export type NodeOutputValue =
   | { kind: "image"; url: string; cacheKey: string }
   | { kind: "text"; text: string }
   | { kind: "references"; items: ReferenceItem[]; order: string[] } // order: item ids
-  | { kind: "report"; result: ReportResult }
   | { kind: "mask"; cacheKey: string };
 
 export type NodeRun = {
@@ -216,8 +194,6 @@ export type WorkbenchParams = {
   patchFit?: "auto" | "aligned" | "region";
   patchFeather?: number;
   patchColorMatch?: boolean;
-  // accuracyReviewer / qaCorrection
-  selectedItemIds?: string[];
   // aiAssistant
   instruction?: string;
   model?: string;
@@ -281,7 +257,7 @@ export type ImportParamRule =
   | { type: "number"; optional?: boolean; min?: number; max?: number; integer?: boolean }
   | { type: "boolean"; optional?: boolean }
   | { type: "enum"; optional?: boolean; values: readonly string[] }
-  // A plain string[] field (e.g. accuracyReviewer's selectedItemIds, S-5):
+  // A plain string[] field (S-5):
   // non-string/oversized entries are dropped, the list is capped at
   // maxItems -- the generic, kind-agnostic sibling of referenceItemList for
   // fields that carry no nested images/blob keys to remap.

@@ -4,7 +4,6 @@
 
 import type { NodeExecute, NodeKind } from "../types";
 import { MANIFESTS, NODE_KINDS } from "./manifests";
-import { Component as AccuracyReviewerComponent, execute as accuracyReviewerExecute } from "./accuracyReviewer";
 import { Component as AiAssistantComponent, execute as aiAssistantExecute } from "./aiAssistant";
 import { Component as CollageBoardComponent, execute as collageBoardExecute } from "./collageBoard";
 import { Component as CompareComponent } from "./compare";
@@ -19,7 +18,6 @@ import { Component as NoteComponent } from "./note";
 import { Component as PatchComponent, execute as patchExecute } from "./patch";
 import { Component as PhotoComponent } from "./photo";
 import { Component as PromptBuilderComponent } from "./promptBuilder";
-import { Component as QaCorrectionComponent, execute as qaCorrectionExecute } from "./qaCorrection";
 import { Component as ReferenceAnalyzerComponent, execute as referenceAnalyzerExecute } from "./referenceAnalyzer";
 import { Component as ReferenceFinderComponent } from "./referenceFinder";
 import { Component as ReferencesComponent } from "./references";
@@ -50,8 +48,6 @@ export const NODE_TYPES = {
   variations: VariationsComponent,
   maskedEdit: MaskedEditComponent,
   upscaler: UpscalerComponent,
-  accuracyReviewer: AccuracyReviewerComponent,
-  qaCorrection: QaCorrectionComponent,
   aiAssistant: AiAssistantComponent,
   resize: ResizeComponent,
   crop: CropComponent,
@@ -72,8 +68,6 @@ const DOM_EXECUTES: Partial<Record<NodeKind, NodeExecute>> = {
   crop: cropExecute,
   patch: patchExecute,
   exportDownload: exportDownloadExecute,
-  accuracyReviewer: accuracyReviewerExecute,
-  qaCorrection: qaCorrectionExecute,
   aiAssistant: aiAssistantExecute,
   collageBoard: collageBoardExecute,
   relight: relightExecute,

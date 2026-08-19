@@ -15,7 +15,6 @@ import type {
   WorkbenchNode,
   WorkbenchParams,
 } from "../types";
-import { accuracyReviewerManifest } from "./accuracyReviewer.manifest.ts";
 import { aiAssistantManifest } from "./aiAssistant.manifest.ts";
 import { collageBoardManifest } from "./collageBoard.manifest.ts";
 import { compareManifest } from "./compare.manifest.ts";
@@ -30,7 +29,6 @@ import { noteManifest } from "./note.manifest.ts";
 import { patchManifest } from "./patch.manifest.ts";
 import { photoManifest } from "./photo.manifest.ts";
 import { promptBuilderManifest } from "./promptBuilder.manifest.ts";
-import { qaCorrectionManifest } from "./qaCorrection.manifest.ts";
 import { referenceAnalyzerManifest } from "./referenceAnalyzer.manifest.ts";
 import { referenceFinderManifest } from "./referenceFinder.manifest.ts";
 import { referencesManifest } from "./references.manifest.ts";
@@ -62,8 +60,6 @@ export const MANIFESTS: Record<NodeKind, NodeManifest> = {
   variations: variationsManifest,
   maskedEdit: maskedEditManifest,
   upscaler: upscalerManifest,
-  accuracyReviewer: accuracyReviewerManifest,
-  qaCorrection: qaCorrectionManifest,
   aiAssistant: aiAssistantManifest,
   resize: resizeManifest,
   crop: cropManifest,

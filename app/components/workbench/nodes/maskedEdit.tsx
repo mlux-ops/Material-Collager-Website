@@ -4,7 +4,6 @@ import { useEdges, useNodes } from "@xyflow/react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { readApiResponse } from "@/app/lib/api-client";
-import type { NormalizedBox } from "@/app/lib/selective-edit";
 import { getBlob, putBlob } from "../blob-cache";
 import { recordUsageCalibration } from "../cost";
 import { activeRunOf } from "../signature";
@@ -36,10 +35,12 @@ import {
 
 // ---------------------------------------------------------------------------
 // Mask geometry. All coordinates are normalized 0-1000 against the image's
-// width (x) and height (y) — the same convention as NormalizedBox — so the
-// same shapes render identically onto the preview overlay, the full-res
-// OpenAI mask, each engine's working-size inpaint mask, and the compositor.
+// width (x) and height (y), so the same shapes render identically onto the
+// preview overlay, the full-res OpenAI mask, each engine's working-size
+// inpaint mask, and the compositor.
 // ---------------------------------------------------------------------------
+
+type NormalizedBox = [number, number, number, number];
 
 type MaskTool = "rect" | "brush" | "polygon";
 
