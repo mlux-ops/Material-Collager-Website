@@ -3,17 +3,11 @@ import {
   activeItems,
   buildGenerationPrompt,
   buildSummary,
-  referenceCount,
   resolvedOrientation,
   resolvedSize,
   type CollageRequestInput,
   validateCollageRequest,
 } from "@/app/lib/collage";
-import {
-  missingQaItem,
-  reviewGeneratedImage,
-  type QaReview,
-} from "@/app/lib/accuracy-review";
 import {
   OpenAIRequestError,
   errorResponse,
@@ -111,7 +105,6 @@ export async function POST(request: Request) {
     } else {
       throw new Error("One or more reference images were missing from the generation request.");
     }
-    const productReferences = payload.layoutReference && !selectiveEdit ? preparedReferences.slice(1) : preparedReferences;
     diagnostics.totalReferenceBytes = preparedReferences.reduce((sum, reference) => sum + reference.blob.size, 0);
     diagnostics.largestReferenceBytes = Math.max(...preparedReferences.map((reference) => reference.blob.size), 0);
     diagnostics.references = preparedReferences.map((reference) => ({
@@ -217,19 +210,13 @@ export async function POST(request: Request) {
       throw new Error("OpenAI did not return image data.");
     }
 
-    const reviewed = payload.runQa
-      ? await reviewGeneratedImage({
-        apiKey,
-        imageBase64,
-        items: items.map((item) => ({ id: item.id, role: item.role, referenceCount: referenceCount(item) })),
-        selectedItemIds: Array.from(selectedIds),
-        references: productReferences,
-        domain: "material collage",
-      })
-      : null;
-    const qa = reviewed && selectiveEdit
-      ? mergeProtectedQa(reviewed, payload, selectedIds)
-      : reviewed;
+    // Accuracy review is disabled here: the vision+reasoning call could run
+    // far longer than a normal request and block this response even though
+    // the image itself had already generated successfully, making a
+    // completed edit look like it "never finished". Use the standalone
+    // Accuracy Reviewer workbench node (a separate, cancellable, opt-in step)
+    // if you want a review.
+    const qa = null;
     const renderKind: RenderKind = payload.renderKind
       ?? (payload.outputResolution === "final" ? "final" : selectiveEdit ? "repair" : "studio");
     let stored: Awaited<ReturnType<typeof persistGenerationOutput>> | null = null;
@@ -318,29 +305,6 @@ async function retrieveReferences(
 
 function validEditDimension(value: number) {
   return Number.isInteger(value) && value >= 256 && value <= 3840 && value % 16 === 0;
-}
-
-function mergeProtectedQa(review: QaReview, payload: CollageRequestInput, selectedIds: Set<string>): QaReview {
-  const previousById = new Map((payload.qaFeedback?.items ?? []).map((item) => [item.id, item]));
-  const reviewedById = new Map(review.items.map((item) => [item.id, item]));
-  const items = activeItems(payload).map((item) => {
-    const reviewed = reviewedById.get(item.id);
-    const previous = previousById.get(item.id);
-    if (selectedIds.has(item.id)) return reviewed ?? previous ?? missingQaItem(item.id);
-    return previous ?? reviewed ?? missingQaItem(item.id);
-  });
-  const protectedFailure = items.some((item) => !selectedIds.has(item.id) && !item.passed);
-  const score = protectedFailure
-    ? Math.min(review.score, Math.max(0, Math.min(100, Number(payload.qaFeedback?.score) || 0)))
-    : review.score;
-  const findings = items.filter((item) => !item.passed && item.finding).map((item) => `${item.id}: ${item.finding}`);
-  return {
-    ...review,
-    passed: review.passed && score >= 90 && items.every((item) => item.passed),
-    score,
-    findings: findings.length ? findings : review.findings,
-    items,
-  };
 }
 
 function standardSizeFor(payload: CollageRequestInput) {

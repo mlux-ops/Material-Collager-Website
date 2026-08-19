@@ -1,4 +1,4 @@
-import { activeItems, buildGenerationPrompt, referenceCount, resolvedSize, validateCollageRequest, type CollageRequestInput } from "@/app/lib/collage";
+import { activeItems, buildGenerationPrompt, resolvedSize, validateCollageRequest, type CollageRequestInput } from "@/app/lib/collage";
 import { cleanupExpiredJobs, ensureJobStorage, publicJob, RETENTION_MS, runtimeStorage, type JobRow } from "@/app/lib/generation-jobs";
 import { errorResponse, readOpenAIResponse, resolveOpenAIKey } from "@/app/lib/openai-server";
 
@@ -23,7 +23,6 @@ export async function POST(request: Request) {
       apiKey: "",
       quality: "high",
       outputResolution: "final",
-      runQa: true,
       renderKind: "final",
     };
     validateCollageRequest(payload);
@@ -207,66 +206,17 @@ async function refreshJob(row: JobRow) {
     const bucket = runtimeStorage().OUTPUTS;
     if (!bucket) throw new Error("Generated-output storage is not configured.");
     await bucket.put(outputKey, bytes, { httpMetadata: { contentType: "image/png" } });
-    const payload = JSON.parse(row.payload_json) as CollageRequestInput;
-    const referenceIds = JSON.parse(row.reference_ids_json) as string[];
-    let qa: Record<string, unknown> | null = null;
-    try {
-      qa = await reviewEconomyResult(apiKey, payload, imageBase64, referenceIds);
-    } catch (error) {
-      qa = { reviewFailed: true, passed: false, score: 0, findings: [], recommendation: error instanceof Error ? error.message : "Accuracy review failed.", items: [] };
-    }
+    // Accuracy review is disabled here (see /api/generate for why): it added
+    // an extra vision+reasoning call after every batch finished, with no way
+    // to cancel it, and could stall a job that had otherwise completed.
     await DB.prepare("UPDATE generation_jobs SET status = 'completed', output_key = ?, usage_json = ?, qa_json = ?, updated_at = ? WHERE id = ?")
-      .bind(outputKey, JSON.stringify(result.response?.body?.usage ?? {}), JSON.stringify(qa), Date.now(), row.id).run();
+      .bind(outputKey, JSON.stringify(result.response?.body?.usage ?? {}), null, Date.now(), row.id).run();
   } catch {
     // Leave the row in 'finalizing'; the stale-claim window retries it, bounded
     // by the finalize_attempts cap above, so a transient failure recovers while
     // a permanent one eventually surfaces as a failed history item.
     return;
   }
-}
-
-async function reviewEconomyResult(apiKey: string, payload: CollageRequestInput, imageBase64: string, referenceIds: string[]) {
-  const items = activeItems(payload);
-  let next = 1;
-  const map = items.map((item) => {
-    const count = referenceCount(item);
-    const range = count === 1 ? `reference ${next}` : `references ${next}-${next + count - 1}`;
-    next += count;
-    return `${range} -> ${item.id}: ${item.role}`;
-  }).join("\n");
-  const content: Array<Record<string, unknown>> = [{
-    type: "input_text",
-    text: `Review the generated material collage against every original product reference.\n${map}\nScore product identity, geometry, finish, color, material texture, completeness, duplicates, and editorial polish. Return every item ID exactly once. Pass only at 90 or above.`,
-  }, { type: "input_image", image_url: `data:image/png;base64,${imageBase64}`, detail: "original" }];
-  for (const fileId of referenceIds) content.push({ type: "input_image", file_id: fileId, detail: "original" });
-  const response = await readOpenAIResponse<{ output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }> }>(await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    signal: AbortSignal.timeout(180_000),
-    body: JSON.stringify({
-      model: process.env.MATERIAL_COLLAGER_QA_MODEL || "gpt-5.6-terra",
-      reasoning: { effort: "low" },
-      text: { format: { type: "json_schema", name: "collage_accuracy_review", strict: true, schema: qaSchema() } },
-      input: [{ role: "user", content }],
-    }),
-  }));
-  const text = response.output_text || response.output?.flatMap((entry) => entry.content ?? []).map((entry) => entry.text || "").join("");
-  if (!text) throw new Error("Accuracy review returned no result.");
-  return JSON.parse(text) as Record<string, unknown>;
-}
-
-function qaSchema() {
-  return {
-    type: "object", additionalProperties: false,
-    properties: {
-      passed: { type: "boolean" }, score: { type: "integer", minimum: 0, maximum: 100 },
-      findings: { type: "array", items: { type: "string" } }, recommendation: { type: "string" },
-      items: { type: "array", items: { type: "object", additionalProperties: false, properties: {
-        id: { type: "string" }, passed: { type: "boolean" }, finding: { type: "string" },
-        box: { type: "array", items: { type: "integer", minimum: 0, maximum: 1000 }, minItems: 4, maxItems: 4 },
-      }, required: ["id", "passed", "finding", "box"] } },
-    }, required: ["passed", "score", "findings", "recommendation", "items"],
-  };
 }
 
 function baseEstimate(payload: CollageRequestInput) {

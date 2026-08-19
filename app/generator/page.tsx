@@ -126,7 +126,6 @@ type SavedDraft = {
   lighting?: LightingOption;
   heroItemId?: string;
   outputFilename: string;
-  runQa: boolean;
   items: DraftItem[];
   savedAt: number;
 };
@@ -454,7 +453,6 @@ export default function Home() {
   const [heroItemId, setHeroItemId] = useState("");
   const [outputFilename, setOutputFilename] = useState("material-collage.png");
   const apiKey = "";
-  const [runQa, setRunQa] = useState(true);
   const [items, setItems] = useState<UiItem[]>(() => presetItems("bathroom_fixture_collage"));
   const [panelText, setPanelText] = useState("Board ready.");
   const [diagnostics, setDiagnostics] = useState<GenerationDiagnostics | null>(null);
@@ -570,7 +568,6 @@ export default function Home() {
     lighting,
     heroItemId,
     outputFilename,
-    runQa,
     items,
   ]);
 
@@ -865,7 +862,6 @@ export default function Home() {
       lighting,
       heroItemId,
       outputFilename,
-      runQa,
       savedAt: Date.now(),
       items: items.map((item) => ({
         id: item.id,
@@ -931,7 +927,6 @@ export default function Home() {
     setLighting(draft.lighting ?? "soft_daylight");
     setHeroItemId(draft.heroItemId ?? "");
     setOutputFilename(draft.outputFilename);
-    setRunQa(draft.runQa ?? true);
     commitResult(null);
     setPromptPreview("");
   }
@@ -990,7 +985,6 @@ export default function Home() {
       heroItemId: heroItemId || undefined,
       outputFilename,
       apiKey: includeApiKey ? apiKey : "",
-      runQa: qaFeedback ? true : runQa,
       qaFeedback: qaFeedback ? {
         score: qaFeedback.score,
         findings: qaFeedback.findings,
@@ -1105,7 +1099,6 @@ export default function Home() {
           orientation: finalFormat,
           quality: "high",
           outputResolution: "final",
-          runQa: true,
           layoutReference: true,
           layoutReferenceFileId: layoutFileId,
           renderKind: "final",
@@ -1133,7 +1126,6 @@ export default function Home() {
         orientation: finalFormat,
         quality: "high",
         outputResolution: "final",
-        runQa: true,
         layoutReference: true,
         renderKind: "final",
       };
@@ -1240,7 +1232,7 @@ export default function Home() {
       }
       const renderPayload = (payload: CollageRequestInput): CollageRequestInput => ({
         ...payload,
-        ...(renderPreset === "draft" ? { quality: "low" as const, outputResolution: "standard" as const, runQa: false } : {}),
+        ...(renderPreset === "draft" ? { quality: "low" as const, outputResolution: "standard" as const } : {}),
         renderKind: renderPreset === "draft" ? "draft" : qaRedo ? "repair" : "studio",
         libraryJobId: qaRedo ? result?.jobId : undefined,
       });
@@ -1250,7 +1242,7 @@ export default function Home() {
         item.references.map((reference) => ({ itemKey: item.uiKey, itemId: resolvedItemId(item, index), reference })),
       );
       setOverallProgress(100);
-      setWorkingStage(qaRedo ? "Repairing selected items" : runQa ? "Composing and reviewing collage" : "Composing collage");
+      setWorkingStage(qaRedo ? "Repairing selected items" : "Composing collage");
       const payload = renderPayload(makePayload(true, undefined, qaFeedback, selectiveAssets?.selection));
       const form = new FormData();
       form.append("payload", JSON.stringify(payload));
@@ -1270,7 +1262,7 @@ export default function Home() {
       );
       transportFilesForReport = transportFiles;
       for (const file of transportFiles) form.append("image[]", file, file.name);
-      setWorkingStage(qaRedo ? "Repairing selected items" : runQa ? "Composing and reviewing collage" : "Composing collage");
+      setWorkingStage(qaRedo ? "Repairing selected items" : "Composing collage");
       const response = await fetch(diagnosticMode ? `/api/generate?diagnostic=isolation&count=${diagnosticCount}` : "/api/generate", {
         method: "POST",
         signal: controller.signal,
@@ -1513,10 +1505,6 @@ export default function Home() {
               <label>
                 <span>Output file name</span>
                 <input value={outputFilename} onChange={(event) => setOutputFilename(event.target.value)} />
-              </label>
-              <label className="toggle-field wide-field">
-                <input checked={runQa} onChange={(event) => setRunQa(event.target.checked)} type="checkbox" />
-                <span>Run accuracy review after generation</span>
               </label>
             </div>
             <div className="drawer-actions">

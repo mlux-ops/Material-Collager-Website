@@ -68,7 +68,6 @@ export type CollageRequestInput = {
   heroItemId?: string;
   outputFilename?: string;
   apiKey?: string;
-  runQa?: boolean;
   qaFeedback?: QaFeedbackInput;
   qaSelection?: QaSelectionInput;
   layoutReference?: boolean;
