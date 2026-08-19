@@ -17,6 +17,7 @@ import {
   QUALITIES,
   STYLING_OPTIONS,
   labelFor,
+  resolvedOrientation,
   resolvedSize,
   slugify,
   validateCollageRequest,
@@ -35,6 +36,8 @@ import {
 import { ApiResponseError, readApiResponse } from "@/app/lib/api-client";
 import {
   DIRECT_REQUEST_REFERENCE_BUDGET,
+  FINAL_LAYOUT_REFERENCE_BUDGET,
+  FINAL_REQUEST_BODY_BUDGET,
   base64ImageToObjectUrl,
   dataUrlFile,
   fileFingerprint,
@@ -165,6 +168,18 @@ type GenerationJob = {
   error: string | null;
   createdAt: number;
 };
+
+// The final render accepts the same orientations as the draft; "default" is a
+// board-level shorthand that is already resolved by the time a draft exists.
+type FinalFormat = Exclude<Orientation, "default">;
+
+const FINAL_FORMATS: FinalFormat[] = ["landscape", "portrait", "square"];
+
+// Read the label off resolvedSize's "final" branch so the switch can never
+// advertise a canvas different from the one the request asks for.
+function finalSizeFor(format: FinalFormat, collageType: CollageType) {
+  return resolvedSize({ collageType, orientation: format, quality: "high", outputResolution: "final", items: [] });
+}
 
 type ResultState = {
   dataUrl: string;
@@ -474,7 +489,7 @@ export default function Home() {
     if (next?.dataUrl.startsWith("blob:")) resultUrlRef.current = next.dataUrl;
     setResult(next);
   };
-  const [finalFormat, setFinalFormat] = useState<"landscape" | "square">("landscape");
+  const [finalFormat, setFinalFormat] = useState<FinalFormat>("landscape");
   const [jobs, setJobs] = useState<GenerationJob[]>([]);
   const [qaRedoSelection, setQaRedoSelection] = useState<Record<string, boolean>>({});
   const hasLoadedDraft = useRef(false);
@@ -1083,6 +1098,7 @@ export default function Home() {
     setIsWorking(true);
     setOverallProgress(0);
     setReferenceProgress({});
+    let transportFilesForReport: File[] | undefined;
     try {
       const layoutFile = await dataUrlFile(result.dataUrl, "approved-draft.png");
 
@@ -1116,7 +1132,7 @@ export default function Home() {
         return;
       }
 
-      // Immediate Final sends the approved draft plus full-quality references
+      // Immediate Final sends the approved draft plus the product references
       // directly as multipart, exactly like the Studio render, so it never
       // touches the OpenAI Uploads API (which returns 500 in this hosting
       // environment). The draft is sent first so the server treats it as the
@@ -1130,12 +1146,40 @@ export default function Home() {
         renderKind: "final",
       };
       validateCollageRequest(payload);
-      setWorkingStage("Rendering final at maximum quality");
       const productFiles = items.flatMap((item) => item.references.map((reference) => reference.file));
+      // The originals cannot go up untouched. The approved draft PNG alone is
+      // several MB, and the edge runtime rejects the whole body past 32 MB
+      // with a 413 BEFORE the route runs — which surfaced to the user as "a
+      // reference chunk was rejected by the host" with no server diagnostics
+      // at all. So budget the body here: the draft keeps a reserved slice and
+      // the references divide what is left. The budget sits just under the
+      // ceiling, so references stay near-original — this guards the 413, it
+      // does not trade away the fidelity Final exists for.
+      setWorkingStage("Optimizing references for the final render");
+      const layoutTransport = await optimizeReferenceForTransport(layoutFile, FINAL_LAYOUT_REFERENCE_BUDGET);
+      const referenceBudget = Math.max(
+        DIRECT_REQUEST_REFERENCE_BUDGET,
+        FINAL_REQUEST_BODY_BUDGET - layoutTransport.size,
+      );
+      const transportFiles = await optimizeReferencesForTransport(productFiles, referenceBudget);
+      transportFilesForReport = transportFiles;
+      // The floor above, and compressReferenceForTransport's best-effort
+      // contract (it returns its smallest attempt if it cannot reach the
+      // target), both mean the assembled body can in principle still exceed
+      // the ceiling. Measure it rather than assume: a checked failure naming
+      // the real number and the Economy alternative beats the host's opaque
+      // 413, which is what sent this bug to the wrong stage in the first place.
+      const bodyBytes = layoutTransport.size + transportFiles.reduce((sum, file) => sum + file.size, 0);
+      if (bodyBytes > FINAL_REQUEST_BODY_BUDGET) {
+        throw new Error(
+          `The final render payload is ${formatBytes(bodyBytes)} after optimization, over the ${formatBytes(FINAL_REQUEST_BODY_BUDGET)} this host accepts in one request. Remove a supporting view, or use the Economy final render, which uploads each reference separately at full quality.`,
+        );
+      }
+      setWorkingStage("Rendering final at maximum quality");
       const form = new FormData();
       form.append("payload", JSON.stringify(payload));
-      form.append("image[]", layoutFile, layoutFile.name);
-      for (const file of productFiles) form.append("image[]", file, file.name);
+      form.append("image[]", layoutTransport, layoutTransport.name);
+      for (const file of transportFiles) form.append("image[]", file, file.name);
       setOverallProgress(100);
       const response = await fetch("/api/generate", { method: "POST", signal: controller.signal, body: form })
         .then((value) => readApiResponse<GenerateResponse>(value));
@@ -1154,7 +1198,7 @@ export default function Home() {
       setDiagnostics(response.diagnostics ?? null);
       // Only assert the max resolution when the server did not fall back; a
       // notice means it downgraded, so show that instead of a false size.
-      const finalSizeLabel = finalFormat === "square" ? "2048x2048" : "2560x1440";
+      const finalSizeLabel = finalSizeFor(finalFormat, collageType);
       setPanelText(`Final ${finalFormat} render complete${response.notice ? "" : ` at ${finalSizeLabel}`}. Full-quality product references were used.${response.notice ? `\n\n${response.notice}` : ""}`);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
@@ -1164,6 +1208,38 @@ export default function Home() {
         // failing stage instead of stale data from the previous draft render.
         if (error instanceof ApiResponseError && error.payload.diagnostics) {
           setDiagnostics(error.payload.diagnostics as GenerationDiagnostics);
+        } else {
+          // A host-level rejection (a 413 on an oversized body) never reaches
+          // the route, so there are no server diagnostics to show. Without
+          // this branch the panel kept displaying the last SUCCESSFUL draft,
+          // which reads as "the model succeeded" on a render that never left
+          // the browser.
+          const failurePayload = error instanceof ApiResponseError ? error.payload : {};
+          const sent = transportFilesForReport
+            ?? items.flatMap((item) => item.references.map((reference) => reference.file));
+          setDiagnostics({
+            model: "gpt-image-2",
+            transport: "multipart",
+            quality: "high",
+            referenceCount: sent.length,
+            totalReferenceBytes: sent.reduce((sum, file) => sum + file.size, 0),
+            largestReferenceBytes: Math.max(...sent.map((file) => file.size), 0),
+            references: sent.map((file) => ({
+              filename: file.name,
+              bytes: file.size,
+              mimeType: file.type || "unknown",
+            })),
+            attempts: [{
+              stage: "image_edit",
+              outcome: "failed",
+              attempt: 1,
+              durationMs: 0,
+              status: typeof failurePayload.status === "number" ? failurePayload.status : undefined,
+              code: typeof failurePayload.code === "string" ? failurePayload.code : undefined,
+              requestId: typeof failurePayload.requestId === "string" ? failurePayload.requestId : undefined,
+              error: `Final render: ${error instanceof Error ? error.message : "Unknown error."}`,
+            }],
+          });
         }
         setPanelText(`Final rendering failed: ${error instanceof Error ? error.message : "Unknown error."}`);
       }
@@ -1313,6 +1389,10 @@ export default function Home() {
       });
       setQaRedoSelection(Object.fromEntries((qa?.items ?? []).map((item) => [item.id, !item.passed && Boolean(item.box)])));
       setPromptPreview(response.prompt || "");
+      // Start the final-render switch on the shape the approved draft was
+      // actually composed in, so finalizing a portrait draft doesn't silently
+      // re-crop it to landscape.
+      if (renderPreset === "draft") setFinalFormat(resolvedOrientation(payload));
       setPanelText(`${renderPreset === "draft" ? "Draft ready. Review the composition, then choose an immediate or Economy final render below." : response.summary || "Collage generated."}${qaRedo ? "\n\nOnly the checked QA regions were regenerated; protected pixels were restored from the previous collage." : ""}${response.notice ? `\n\n${response.notice}` : ""}`);
       setDiagnostics(response.diagnostics ?? null);
       await saveDraft(false);
@@ -1791,12 +1871,20 @@ export default function Home() {
                   <span className="quality-lock">Maximum quality</span>
                 </div>
                 <div className="format-switch" role="group" aria-label="Final image format">
-                  <button type="button" className={finalFormat === "landscape" ? "selected" : ""} onClick={() => setFinalFormat("landscape")}>
-                    <strong>Landscape</strong><span>2560 x 1440</span>
-                  </button>
-                  <button type="button" className={finalFormat === "square" ? "selected" : ""} onClick={() => setFinalFormat("square")}>
-                    <strong>Square</strong><span>2048 x 2048</span>
-                  </button>
+                  {FINAL_FORMATS.map((format) => {
+                    const [width, height] = finalSizeFor(format, collageType).split("x");
+                    return (
+                      <button
+                        key={format}
+                        type="button"
+                        aria-pressed={finalFormat === format}
+                        className={finalFormat === format ? "selected" : ""}
+                        onClick={() => setFinalFormat(format)}
+                      >
+                        <strong>{labelFor(format)}</strong><span>{width} x {height}</span>
+                      </button>
+                    );
+                  })}
                 </div>
                 <div className="final-actions">
                   <button type="button" className="final-now-button" onClick={() => void finalizeDraft("immediate")} disabled={isWorking} title="Starts the maximum-quality final render immediately and runs the accuracy review.">

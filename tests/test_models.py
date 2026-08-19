@@ -1,7 +1,13 @@
 import unittest
 from pathlib import Path
 
-from material_collager.models import CollageRequest, ValidationError
+from material_collager.models import (
+    COLLAGE_TYPES,
+    DEFAULT_SIZE_BY_ORIENTATION,
+    ORIENTATIONS,
+    CollageRequest,
+    ValidationError,
+)
 from test_helpers import workspace_tmp_dir
 
 
@@ -24,23 +30,30 @@ class CollageRequestTests(unittest.TestCase):
         self.assertEqual(request.resolved_size(), "1024x1536")
         request.validate(check_paths=False)
 
-    def test_rejects_square_for_non_fixture_collage(self):
-        request = CollageRequest.from_dict(
-            {
-                "collage_type": "appliance_collage",
-                "orientation": "square",
-                "items": [
-                    {
-                        "id": "fridge",
-                        "role": "appliance refrigerator",
-                        "image_paths": ["fridge.png"],
-                    }
-                ],
-            }
-        )
+    def test_every_orientation_is_valid_for_every_collage_type(self):
+        for collage_type in sorted(COLLAGE_TYPES):
+            for orientation in sorted(ORIENTATIONS):
+                with self.subTest(collage_type=collage_type, orientation=orientation):
+                    request = CollageRequest.from_dict(
+                        {
+                            "collage_type": collage_type,
+                            "orientation": orientation,
+                            "items": [
+                                {
+                                    "id": "sample",
+                                    "role": "wall tile",
+                                    "image_paths": ["sample.png"],
+                                }
+                            ],
+                        }
+                    )
 
-        with self.assertRaises(ValidationError):
-            request.validate(check_paths=False)
+                    self.assertEqual(request.resolved_orientation(), orientation)
+                    self.assertEqual(
+                        request.resolved_size(),
+                        DEFAULT_SIZE_BY_ORIENTATION[orientation],
+                    )
+                    request.validate(check_paths=False)
 
     def test_path_validation_accepts_existing_image_file(self):
         with workspace_tmp_dir() as tmp_path:

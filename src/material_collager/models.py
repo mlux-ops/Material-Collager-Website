@@ -120,6 +120,17 @@ class CollageItem:
             details.append(f"finish: {self.finish}")
         if self.notes:
             details.append(f"notes: {self.notes}")
+        # Name the identity view and the supporting views explicitly. A bare
+        # image range reads as several things to place, and the extra views come
+        # back as extra objects in the collage.
+        if end_index > start_index:
+            supporting = (
+                f"Image {end_index}"
+                if start_index + 1 == end_index
+                else f"Images {start_index + 1}-{end_index}"
+            )
+            details.append(f"primary identity view: Image {start_index}")
+            details.append(f"supporting views of this same physical item: {supporting}")
 
         return f"- {image_range}: item `{self.id}` ({'; '.join(details)})"
 
@@ -230,10 +241,6 @@ class CollageRequest:
                 raise ValidationError(f"Item `{item.id}` must include at least one image path.")
         if self.auto_retry < 0:
             raise ValidationError("auto_retry must be 0 or greater.")
-        if self.collage_type == "bathroom_tile_collage" and self.resolved_orientation() != "portrait":
-            raise ValidationError("bathroom_tile_collage must use portrait orientation.")
-        if self.collage_type != "bathroom_fixture_collage" and self.resolved_orientation() == "square":
-            raise ValidationError("Only bathroom_fixture_collage supports square orientation.")
         if check_roles:
             self.validate_required_roles()
         if check_paths:

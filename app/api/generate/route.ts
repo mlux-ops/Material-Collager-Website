@@ -151,6 +151,12 @@ export async function POST(request: Request) {
       quality: payload.quality,
       background: "opaque",
       output_format: "png",
+      // The masked "Re-create checked items" repair runs without a wall-clock
+      // ceiling. It is explicitly user-initiated on a board they are already
+      // iterating on, and a repair that takes longer than the old 300s cap is
+      // better finished than aborted — the abort discarded the work and
+      // charged for it anyway.
+      timeoutMs: selectiveEdit ? null : undefined,
     };
     if (diagnosticMode) {
       const counts = [requestedDiagnosticCount];
