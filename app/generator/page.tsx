@@ -1161,12 +1161,10 @@ export default function Home() {
       commitResult({
         dataUrl,
         filename: response.filename || outputFilename,
-        qa: response.qa ?? null,
         kind: "final",
         jobId: response.jobId,
         libraryVisible: response.libraryVisible ?? true,
       });
-      setQaRedoSelection(Object.fromEntries((response.qa?.items ?? []).map((item) => [item.id, !item.passed && Boolean(item.box)])));
       setPromptPreview(response.prompt || "");
       setDiagnostics(response.diagnostics ?? null);
       // Only assert the max resolution when the server did not fall back; a
@@ -1871,7 +1869,6 @@ export default function Home() {
                         <a href={`/api/economy/output/${job.id}`} download={job.filename}>Open PNG</a>
                       )}
                       {job.estimatedUsd !== null && <small>Est. ${job.estimatedUsd.toFixed(2)} + reference input</small>}
-                      {job.qa && <small>Accuracy review: {job.qa.reviewFailed ? "unavailable" : `${job.qa.score}/100`}</small>}
                       {job.error && <p>{job.error}</p>}
                     </article>
                   ))}
