@@ -23,6 +23,14 @@ export const FINAL_REQUEST_BODY_BUDGET = 28 * 1024 * 1024;
 // visually lossless while leaving the references the bulk of the body.
 export const FINAL_LAYOUT_REFERENCE_BUDGET = 6 * 1024 * 1024;
 
+// A user-uploaded layout master (a previous collage supplying composition
+// only) gets its own slice on Studio/draft renders, so a large upload cannot
+// squeeze the product references inside DIRECT_REQUEST_REFERENCE_BUDGET. It
+// carries arrangement rather than product detail, so it needs far less
+// fidelity than a reference — placement, scale, and overlap survive heavy
+// compression.
+export const LAYOUT_MASTER_TRANSPORT_BUDGET = 400 * 1024;
+
 export function fileFingerprint(file: File) {
   return `${file.name}:${file.size}:${file.lastModified}:${file.type}`;
 }
