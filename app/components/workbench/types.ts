@@ -236,7 +236,6 @@ export const PORT_COLORS: Record<PortKind, string> = {
   image: "#8b5cf6",
   text: "#2563eb",
   references: "#f59e0b", // amber
-  report: "#16a34a", // green
   mask: "#7c3aed", // violet, darker than image so the two stay tellable apart
 };
 
