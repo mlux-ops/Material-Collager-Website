@@ -30,8 +30,6 @@ const DOM_WRAPPED_KINDS = new Set([
   "crop",
   "patch",
   "exportDownload",
-  "accuracyReviewer",
-  "qaCorrection",
   "aiAssistant",
   "collageBoard",
   "relight",
@@ -120,11 +118,9 @@ test("Reference Finder's required 'query' port declares a satisfiedByParams pred
   assert.equal(port.satisfiedByParams({ matchQuery: "brushed brass pull" }), true, "a non-empty override satisfies the port with no connection needed");
 });
 
-test("Variations' 'prompt' port and Accuracy Reviewer's 'references' port are required:true, matching what their execute() unconditionally throws without one (C2/C3)", () => {
+test("Variations' 'prompt' port is required:true, matching what its execute() unconditionally throws without one (C2)", () => {
   const variationsPrompt = MANIFESTS.variations.spec.inputs.find((port) => port.id === "prompt");
   assert.ok(variationsPrompt.required, "Variations' prompt is required at execute() time and must be surfaced pre-run too");
-  const reviewerReferences = MANIFESTS.accuracyReviewer.spec.inputs.find((port) => port.id === "references");
-  assert.ok(reviewerReferences.required, "Accuracy Reviewer's references is required at execute() time and must be surfaced pre-run too");
 });
 
 test("importSchemaMap and stableParamsMap/draftOverrideMap are only populated where the manifest actually declares them", () => {

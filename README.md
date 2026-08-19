@@ -42,12 +42,6 @@ If no server key is configured, the UI also accepts a per-request API key in
 the password field. That key is sent only with the generation request and is
 not stored by the app.
 
-Optional:
-
-```text
-MATERIAL_COLLAGER_QA_MODEL=gpt-5.6
-```
-
 ## App Workflow
 
 - Choose a collage type.

@@ -8,8 +8,8 @@ export const runtime = "edge";
 // engines. Unlike /api/workbench/edit (gpt-image-2, mask-as-guidance), both
 // backends here repaint ONLY white mask pixels and reproduce everything else
 // from the input. The client still composites the result over the
-// full-resolution original (app/lib/selective-edit.ts), so protected pixels
-// stay bit-identical.
+// full-resolution original (maskedEdit.tsx), so protected pixels stay
+// bit-identical.
 //
 // - "workers-ai" (default): SD 1.5 inpainting via the AI binding. Free on the
 //   Workers AI tier; strong at removal/context fill, weak prompt adherence.

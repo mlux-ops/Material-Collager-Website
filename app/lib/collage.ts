@@ -38,24 +38,6 @@ export type CollageItemInput = {
   required?: boolean;
 };
 
-export type QaFeedbackInput = {
-  score: number;
-  findings: string[];
-  recommendation?: string;
-  items?: Array<{
-    id: string;
-    passed: boolean;
-    finding: string;
-    box?: [number, number, number, number];
-  }>;
-};
-
-export type QaSelectionInput = {
-  itemIds: string[];
-  baseWidth: number;
-  baseHeight: number;
-};
-
 export type CollageRequestInput = {
   collageType: CollageType;
   orientation: Orientation;
@@ -68,13 +50,9 @@ export type CollageRequestInput = {
   heroItemId?: string;
   outputFilename?: string;
   apiKey?: string;
-  runQa?: boolean;
-  qaFeedback?: QaFeedbackInput;
-  qaSelection?: QaSelectionInput;
   layoutReference?: boolean;
   layoutReferenceFileId?: string;
-  renderKind?: "draft" | "studio" | "final" | "repair";
-  libraryJobId?: string;
+  renderKind?: "draft" | "studio" | "final";
   items: CollageItemInput[];
 };
 
@@ -275,9 +253,6 @@ function supportingRange(start: number, end: number) {
 
 export function buildGenerationPrompt(request: CollageRequestInput) {
   const items = activeItems(request);
-  if (request.qaSelection?.itemIds.length) {
-    return buildSelectiveCorrectionPrompt(request, items);
-  }
   const labels: string[] = [];
   let nextIndex = request.layoutReference ? 2 : 1;
   let supportingTotal = 0;
@@ -306,7 +281,6 @@ export function buildGenerationPrompt(request: CollageRequestInput) {
   const hero = request.heroItemId
     ? `Make item \"${request.heroItemId}\" the visual anchor. It may be largest, but it must remain faithful to its reference.`
     : "Choose the most visually substantial referenced item as the anchor without diminishing any other requested item.";
-  const qaCorrection = buildQaCorrection(request.qaFeedback);
 
   return [
     "GOAL",
@@ -332,7 +306,6 @@ export function buildGenerationPrompt(request: CollageRequestInput) {
         ? `${supportingTotal} of the ${totalReferenceCount(request)} uploaded product images ${supportingTotal === 1 ? "is a supporting view" : "are supporting views"} that add no object of their own. Count the objects on the canvas before finishing; if the count exceeds ${items.length}, a supporting view was rendered as its own object and must be removed.`
         : "",
     ].filter(Boolean).join(" "),
-    ...(qaCorrection ? ["QA CORRECTION PASS", qaCorrection] : []),
     "REFERENCE FIDELITY - NON-NEGOTIABLE",
     `- Include every mapped item exactly once as a distinct collage element. The item IDs are the complete object list; nothing outside them earns a place on the canvas.
 - A supporting view is another photograph of the SAME physical item shown in that item's primary view: the same faucet, the same tile, the same slab, at a different angle, crop, distance, or lighting. It is a guide for constructing that one object, never a second object.
@@ -354,81 +327,6 @@ export function buildGenerationPrompt(request: CollageRequestInput) {
     "OUTPUT",
     `Orientation: ${resolvedOrientation(request)}. Canvas: ${resolvedSize(request)}. Deliver one complete collage, not a contact sheet, presentation page, or set of alternatives.`,
   ].join("\n\n");
-}
-
-function buildSelectiveCorrectionPrompt(request: CollageRequestInput, items: CollageItemInput[]) {
-  const selectedIds = new Set(request.qaSelection?.itemIds ?? []);
-  const selectedItems = items.filter((item) => selectedIds.has(item.id));
-  const protectedItems = items.filter((item) => !selectedIds.has(item.id));
-  const labels: string[] = ["Image 1 -> the current collage canvas to edit in place"];
-  let nextIndex = 2;
-
-  for (const item of selectedItems) {
-    const count = referenceCount(item);
-    const start = nextIndex;
-    const end = nextIndex + count - 1;
-    const imageRange = start === end ? `Image ${start}` : `Images ${start}-${end}`;
-    nextIndex += count;
-    const details = [
-      `role: ${item.role}`,
-      item.brand ? `brand: ${item.brand}` : null,
-      item.name ? `product: ${item.name}` : null,
-      item.finish ? `finish name: ${item.finish}` : null,
-      item.notes ? `specific instruction: ${item.notes}` : null,
-    ].filter(Boolean);
-    if (count > 1) details.push(`primary identity view: Image ${start}`, `supporting views of this same physical item: ${supportingRange(start + 1, end)}`);
-    labels.push(`${imageRange} -> correction references for item \"${item.id}\" (${details.join("; ")})`);
-  }
-
-  const qaCorrection = buildQaCorrection(request.qaFeedback, selectedIds);
-  return [
-    "GOAL",
-    "Perform a surgical correction of Image 1, the existing finished material collage. This is an edit, not a new composition.",
-    TYPE_PROMPTS[request.collageType],
-    "EDIT SCOPE",
-    `Re-render only these selected items inside the transparent mask regions: ${selectedItems.map((item) => `\"${item.id}\"`).join(", ")}.`,
-    protectedItems.length
-      ? `Pixel-protect every other item and its surrounding composition: ${protectedItems.map((item) => `\"${item.id}\"`).join(", ")}.`
-      : "No item is marked as protected in this pass.",
-    "Keep the canvas dimensions, camera, layout, scale, lighting, shadows, white background, and all pixels outside the editable mask visually unchanged.",
-    "REFERENCE MAP",
-    labels.join("\n"),
-    ...(qaCorrection ? ["QA CORRECTIONS", qaCorrection] : []),
-    "SURGICAL EDIT RULES",
-    `- The transparent mask regions are the only editable areas. Do not move, redraw, recolor, relight, sharpen, or restyle anything outside them.
-- Replace each selected item's faulty rendering with a faithful rendering based on its mapped correction references.
-- Every reference mapped to one item shows that one physical item from a different angle or crop. Rebuild the single existing object from them; never add a second object, duplicate, inset, or swatch inside the mask because an item has more than one view.
-- Preserve each selected item's existing position, footprint, orientation, scale, and overlap relationship unless a QA finding explicitly identifies one of those as wrong.
-- Match the surrounding contact shadows and pure white background at every repaired edge. Do not leave halos, seams, cut lines, duplicated edges, or rectangular patches.
-- Do not add or remove any unselected object. Do not regenerate the overall arrangement.`,
-    "OUTPUT",
-    `Return the corrected collage at exactly ${request.qaSelection?.baseWidth}x${request.qaSelection?.baseHeight}. Deliver one complete image with no text, labels, frame, or explanation.`,
-  ].join("\n\n");
-}
-
-function buildQaCorrection(feedback?: QaFeedbackInput, selectedIds?: Set<string>) {
-  if (!feedback) return "";
-  const itemFindings = selectedIds && feedback.items?.length
-    ? feedback.items
-      .filter((item) => selectedIds.has(item.id) && item.finding)
-      .map((item) => `${item.id}: ${item.finding}`)
-    : [];
-  const findings = (itemFindings.length ? itemFindings : feedback.findings ?? [])
-    .map((finding) => String(finding).trim().slice(0, 400))
-    .filter(Boolean)
-    .slice(0, 10);
-  const recommendation = String(feedback.recommendation || "").trim().slice(0, 600);
-  if (!findings.length && !recommendation) return "";
-
-  const score = Math.max(0, Math.min(100, Math.round(Number(feedback.score) || 0)));
-  return [
-    selectedIds
-      ? `This masked correction pass is informed by a ${score}/100 QA review. Correct the selected items in place using their original references.`
-      : `This is a fresh re-creation informed by a ${score}/100 QA review of the previous collage. Regenerate from the original references and correct every issue below; do not use the previous collage as a visual reference.`,
-    ...findings.map((finding, index) => `${index + 1}. ${finding}`),
-    recommendation ? `Art-director recommendation: ${recommendation}` : "",
-    "Preserve every element that was already accurate. Resolve these corrections without introducing new objects, substitutions, duplicates, labels, or styling exceptions.",
-  ].filter(Boolean).join("\n");
 }
 
 export function buildSummary(request: CollageRequestInput) {

@@ -30,7 +30,6 @@ import {
   type Orientation,
   type OutputResolution,
   type Quality,
-  type QaSelectionInput,
   type StylingOption,
 } from "@/app/lib/collage";
 import { ApiResponseError, readApiResponse } from "@/app/lib/api-client";
@@ -45,14 +44,6 @@ import {
   optimizeReferenceForTransport,
   optimizeReferencesForTransport,
 } from "@/app/lib/image-transport";
-import {
-  compositeSelectiveEdit,
-  createSelectiveEditAssets,
-  type NormalizedBox,
-  type QaRedoRequest,
-  type QaResult,
-  type SelectiveEditAssets,
-} from "@/app/lib/selective-edit";
 
 type ReferenceUploadCache = {
   fileId: string;
@@ -129,7 +120,6 @@ type SavedDraft = {
   lighting?: LightingOption;
   heroItemId?: string;
   outputFilename: string;
-  runQa: boolean;
   items: DraftItem[];
   savedAt: number;
 };
@@ -144,10 +134,9 @@ type GenerateResponse = {
   mimeType?: string;
   filename?: string;
   notice?: string;
-  qa?: QaResult | null;
   jobId?: string;
   libraryVisible?: boolean;
-  renderKind?: "draft" | "studio" | "final" | "repair";
+  renderKind?: "draft" | "studio" | "final";
   diagnostics?: GenerationDiagnostics;
   diagnosticComplete?: boolean;
   isolationResults?: Array<{ referenceCount: number; outcome: "succeeded" | "failed"; requestId?: string; error?: string }>;
@@ -159,13 +148,12 @@ type GenerationJob = {
   status: string;
   filename: string;
   format: string;
-  renderKind: "draft" | "studio" | "final" | "repair";
+  renderKind: "draft" | "studio" | "final";
   collageType: string;
   libraryVisible: boolean;
   title: string;
   estimatedUsd: number | null;
   usage: Record<string, unknown> | null;
-  qa: QaResult | null;
   error: string | null;
   createdAt: number;
 };
@@ -185,7 +173,6 @@ function finalSizeFor(format: FinalFormat, collageType: CollageType) {
 type ResultState = {
   dataUrl: string;
   filename: string;
-  qa: QaResult | null;
   kind: "draft" | "studio" | "final";
   jobId?: string;
   libraryVisible: boolean;
@@ -213,7 +200,6 @@ type GenerationDiagnostics = {
 };
 
 const REFERENCE_CHUNK_BYTES = 4 * 1024 * 1024;
-const SELECTIVE_EDIT_REFERENCE_BUDGET = 250 * 1024;
 const DRAFT_DB_NAME = "material-collager-drafts";
 const DRAFT_STORE_NAME = "drafts";
 const CURRENT_DRAFT_KEY = "current";
@@ -469,7 +455,6 @@ export default function Home() {
   const [heroItemId, setHeroItemId] = useState("");
   const [outputFilename, setOutputFilename] = useState("material-collage.png");
   const apiKey = "";
-  const [runQa, setRunQa] = useState(true);
   const [items, setItems] = useState<UiItem[]>(() => presetItems("bathroom_fixture_collage"));
   const [panelText, setPanelText] = useState("Board ready.");
   const [diagnostics, setDiagnostics] = useState<GenerationDiagnostics | null>(null);
@@ -493,7 +478,6 @@ export default function Home() {
   };
   const [finalFormat, setFinalFormat] = useState<FinalFormat>("landscape");
   const [jobs, setJobs] = useState<GenerationJob[]>([]);
-  const [qaRedoSelection, setQaRedoSelection] = useState<Record<string, boolean>>({});
   const hasLoadedDraft = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   // Token per item so a slower analyze response for a superseded reference
@@ -512,10 +496,6 @@ export default function Home() {
   );
   const hasFiles = totalReferences > 0;
   const heroOptions = useMemo(() => items.filter((item) => item.references.length > 0), [items]);
-  const selectedQaItemIds = (result?.qa?.items ?? [])
-    .filter((item) => qaRedoSelection[item.id])
-    .map((item) => item.id);
-  const selectedQaRegions = (result?.qa?.items ?? []).filter((item) => qaRedoSelection[item.id] && item.box);
   const [previewWidth, previewHeight] = resolvedSize({ collageType, orientation, quality, outputResolution, items: [] })
     .split("x")
     .map(Number);
@@ -585,7 +565,6 @@ export default function Home() {
     lighting,
     heroItemId,
     outputFilename,
-    runQa,
     items,
   ]);
 
@@ -880,7 +859,6 @@ export default function Home() {
       lighting,
       heroItemId,
       outputFilename,
-      runQa,
       savedAt: Date.now(),
       items: items.map((item) => ({
         id: item.id,
@@ -946,7 +924,6 @@ export default function Home() {
     setLighting(draft.lighting ?? "soft_daylight");
     setHeroItemId(draft.heroItemId ?? "");
     setOutputFilename(draft.outputFilename);
-    setRunQa(draft.runQa ?? true);
     commitResult(null);
     setPromptPreview("");
   }
@@ -990,8 +967,6 @@ export default function Home() {
   function makePayload(
     includeApiKey: boolean,
     fileIdsByReference?: Map<string, string>,
-    qaFeedback?: QaResult,
-    qaSelection?: QaSelectionInput,
   ): CollageRequestInput {
     return {
       collageType,
@@ -1005,14 +980,6 @@ export default function Home() {
       heroItemId: heroItemId || undefined,
       outputFilename,
       apiKey: includeApiKey ? apiKey : "",
-      runQa: qaFeedback ? true : runQa,
-      qaFeedback: qaFeedback ? {
-        score: qaFeedback.score,
-        findings: qaFeedback.findings,
-        recommendation: qaFeedback.recommendation,
-        items: qaFeedback.items,
-      } : undefined,
-      qaSelection,
       items: items.map((item, index) => ({
         id: resolvedItemId(item, index),
         role: item.role,
@@ -1121,7 +1088,6 @@ export default function Home() {
           orientation: finalFormat,
           quality: "high",
           outputResolution: "final",
-          runQa: true,
           layoutReference: true,
           layoutReferenceFileId: layoutFileId,
           renderKind: "final",
@@ -1149,7 +1115,6 @@ export default function Home() {
         orientation: finalFormat,
         quality: "high",
         outputResolution: "final",
-        runQa: true,
         layoutReference: true,
         renderKind: "final",
       };
@@ -1289,64 +1254,41 @@ export default function Home() {
     }
   }
 
-  async function generate(diagnosticMode = false, diagnosticCount = 1, qaRedo?: QaRedoRequest, renderPreset?: "draft") {
-    const qaFeedback = qaRedo?.feedback;
+  async function generate(diagnosticMode = false, diagnosticCount = 1, renderPreset?: "draft") {
     const controller = new AbortController();
     abortRef.current = controller;
     setIsWorking(true);
-    if (!qaRedo) {
-      commitResult(null);
-      setQaRedoSelection({});
-    }
+    commitResult(null);
     setPromptPreview("");
     setOverallProgress(0);
-    setWorkingStage(qaRedo ? "Preparing selective QA mask" : renderPreset === "draft" ? "Preparing quick draft" : "Checking references");
+    setWorkingStage(renderPreset === "draft" ? "Preparing quick draft" : "Checking references");
     let transportFilesForReport: File[] | null = null;
-    let selectiveAssets: SelectiveEditAssets | undefined;
-    const selectiveReferenceCount = qaRedo ? items.reduce((count, item, index) => (
-      qaRedo.itemIds.includes(resolvedItemId(item, index)) ? count + item.references.length : count
-    ), 0) : 0;
 
     try {
-      if (qaRedo) {
-        if (selectiveReferenceCount > 15) {
-          throw new Error("The selected items use more than 15 correction views. Uncheck an item or remove one supporting view.");
-        }
-        selectiveAssets = await createSelectiveEditAssets(qaRedo);
-      }
       const renderPayload = (payload: CollageRequestInput): CollageRequestInput => ({
         ...payload,
-        ...(renderPreset === "draft" ? { quality: "low" as const, outputResolution: "standard" as const, runQa: false } : {}),
-        renderKind: renderPreset === "draft" ? "draft" : qaRedo ? "repair" : "studio",
-        libraryJobId: qaRedo ? result?.jobId : undefined,
+        ...(renderPreset === "draft" ? { quality: "low" as const, outputResolution: "standard" as const } : {}),
+        renderKind: renderPreset === "draft" ? "draft" : "studio",
       });
-      const validationPayload = renderPayload(makePayload(false, undefined, qaFeedback, selectiveAssets?.selection));
+      const validationPayload = renderPayload(makePayload(false));
       validateCollageRequest(validationPayload);
       const references = items.flatMap((item, index) =>
         item.references.map((reference) => ({ itemKey: item.uiKey, itemId: resolvedItemId(item, index), reference })),
       );
       setOverallProgress(100);
-      setWorkingStage(qaRedo ? "Repairing selected items" : runQa ? "Composing and reviewing collage" : "Composing collage");
-      const payload = renderPayload(makePayload(true, undefined, qaFeedback, selectiveAssets?.selection));
+      setWorkingStage("Composing collage");
+      const payload = renderPayload(makePayload(true));
       const form = new FormData();
       form.append("payload", JSON.stringify(payload));
-      if (selectiveAssets) {
-        form.append("baseImage", selectiveAssets.baseFile, selectiveAssets.baseFile.name);
-        form.append("mask", selectiveAssets.maskFile, selectiveAssets.maskFile.name);
-      }
-      const referencesToSend = diagnosticMode
-        ? references.slice(0, diagnosticCount)
-        : qaRedo
-          ? references.filter((entry) => qaRedo.itemIds.includes(entry.itemId))
-          : references;
+      const referencesToSend = diagnosticMode ? references.slice(0, diagnosticCount) : references;
       setWorkingStage("Optimizing references for direct generation");
       const transportFiles = await optimizeReferencesForTransport(
         referencesToSend.map((entry) => entry.reference.file),
-        qaRedo ? SELECTIVE_EDIT_REFERENCE_BUDGET : DIRECT_REQUEST_REFERENCE_BUDGET,
+        DIRECT_REQUEST_REFERENCE_BUDGET,
       );
       transportFilesForReport = transportFiles;
       for (const file of transportFiles) form.append("image[]", file, file.name);
-      setWorkingStage(qaRedo ? "Repairing selected items" : runQa ? "Composing and reviewing collage" : "Composing collage");
+      setWorkingStage("Composing collage");
       const response = await fetch(diagnosticMode ? `/api/generate?diagnostic=isolation&count=${diagnosticCount}` : "/api/generate", {
         method: "POST",
         signal: controller.signal,
@@ -1359,7 +1301,6 @@ export default function Home() {
           commitResult({
             dataUrl: base64ImageToObjectUrl(response.imageBase64, response.mimeType || "image/png"),
             filename: response.filename || "isolation-test.png",
-            qa: null,
             kind: "studio",
             libraryVisible: false,
           });
@@ -1373,35 +1314,20 @@ export default function Home() {
       }
 
       if (!response.imageBase64) throw new Error("Generation completed without an image.");
-      const generatedUrl = base64ImageToObjectUrl(response.imageBase64, response.mimeType || "image/png");
-      let dataUrl = generatedUrl;
-      if (qaRedo && selectiveAssets) {
-        setWorkingStage("Mending protected edges");
-        dataUrl = await compositeSelectiveEdit(
-          qaRedo.sourceDataUrl,
-          generatedUrl,
-          selectiveAssets.boxes,
-          selectiveAssets.protectedBoxes,
-        );
-        // The pre-composite render was only an input to the merge.
-        URL.revokeObjectURL(generatedUrl);
-      }
-      const qa = response.qa ?? null;
+      const dataUrl = base64ImageToObjectUrl(response.imageBase64, response.mimeType || "image/png");
       commitResult({
         dataUrl,
         filename: response.filename || outputFilename || "material-collage.png",
-        qa,
-        kind: renderPreset === "draft" ? "draft" : qaRedo ? (result?.kind || "studio") : "studio",
+        kind: renderPreset === "draft" ? "draft" : "studio",
         jobId: response.jobId,
         libraryVisible: response.libraryVisible ?? false,
       });
-      setQaRedoSelection(Object.fromEntries((qa?.items ?? []).map((item) => [item.id, !item.passed && Boolean(item.box)])));
       setPromptPreview(response.prompt || "");
       // Start the final-render switch on the shape the approved draft was
       // actually composed in, so finalizing a portrait draft doesn't silently
       // re-crop it to landscape.
       if (renderPreset === "draft") setFinalFormat(resolvedOrientation(payload));
-      setPanelText(`${renderPreset === "draft" ? "Draft ready. Review the composition, then choose an immediate or Economy final render below." : response.summary || "Collage generated."}${qaRedo ? "\n\nOnly the checked QA regions were regenerated; protected pixels were restored from the previous collage." : ""}${response.notice ? `\n\n${response.notice}` : ""}`);
+      setPanelText(`${renderPreset === "draft" ? "Draft ready. Review the composition, then choose an immediate or Economy final render below." : response.summary || "Collage generated."}${response.notice ? `\n\n${response.notice}` : ""}`);
       setDiagnostics(response.diagnostics ?? null);
       await saveDraft(false);
     } catch (error) {
@@ -1417,7 +1343,7 @@ export default function Home() {
             transport: "multipart",
             quality: diagnosticMode ? "low" : quality,
             referenceCount: transportFilesForReport?.length
-              ?? (diagnosticMode ? Math.min(diagnosticCount, totalReferences) : qaRedo ? selectiveReferenceCount : totalReferences),
+              ?? (diagnosticMode ? Math.min(diagnosticCount, totalReferences) : totalReferences),
             totalReferenceBytes: transportFilesForReport?.reduce((sum, file) => sum + file.size, 0) ?? totalReferenceBytes,
             largestReferenceBytes: Math.max(
               ...(transportFilesForReport?.map((file) => file.size)
@@ -1593,10 +1519,6 @@ export default function Home() {
               <label>
                 <span>Output file name</span>
                 <input value={outputFilename} onChange={(event) => setOutputFilename(event.target.value)} />
-              </label>
-              <label className="toggle-field wide-field">
-                <input checked={runQa} onChange={(event) => setRunQa(event.target.checked)} type="checkbox" />
-                <span>Run accuracy review after generation</span>
               </label>
             </div>
             <div className="drawer-actions">
@@ -1824,20 +1746,6 @@ export default function Home() {
               ) : (
                 <img src="/sample-collage.png" alt="Sample material collage" />
               )}
-              {result && !isWorking && selectedQaRegions.map((item) => {
-                const [x, y, width, height] = item.box as NormalizedBox;
-                const itemIndex = items.findIndex((candidate, index) => resolvedItemId(candidate, index) === item.id);
-                return (
-                  <span
-                    className="qa-region-outline"
-                    key={item.id}
-                    style={{ left: `${x / 10}%`, top: `${y / 10}%`, width: `${width / 10}%`, height: `${height / 10}%` }}
-                    aria-hidden="true"
-                  >
-                    {itemIndex >= 0 ? String(itemIndex + 1).padStart(2, "0") : "QA"}
-                  </span>
-                );
-              })}
             </div>
 
             {isWorking && (
@@ -1854,11 +1762,11 @@ export default function Home() {
               {isWorking ? (
                 <button type="button" className="cancel-button" onClick={cancelWork}>Cancel</button>
               ) : (
-                <button type="button" className="primary-button" onClick={() => void generate(false)} disabled={!hasFiles} title="Renders immediately using the selected quality, resolution, styling, and accuracy-review settings.">
+                <button type="button" className="primary-button" onClick={() => void generate(false)} disabled={!hasFiles} title="Renders immediately using the selected quality, resolution, and styling settings.">
                   Current Settings
                 </button>
               )}
-              <button type="button" className="draft-button" onClick={() => void generate(false, 1, undefined, "draft")} disabled={isWorking || !hasFiles} title="Creates a low-cost preview for composition and placement. It does not run the accuracy review.">
+              <button type="button" className="draft-button" onClick={() => void generate(false, 1, "draft")} disabled={isWorking || !hasFiles} title="Creates a low-cost preview for composition and placement.">
                 Quick Draft
               </button>
               <button type="button" className="secondary-button" onClick={dryRun} disabled={isWorking}>
@@ -1899,7 +1807,7 @@ export default function Home() {
                   })}
                 </div>
                 <div className="final-actions">
-                  <button type="button" className="final-now-button" onClick={() => void finalizeDraft("immediate")} disabled={isWorking} title="Starts the maximum-quality final render immediately and runs the accuracy review.">
+                  <button type="button" className="final-now-button" onClick={() => void finalizeDraft("immediate")} disabled={isWorking} title="Starts the maximum-quality final render immediately.">
                     Final Render Now
                     <small>{finalFormat === "square" ? "Est. $0.21" : "Est. $0.17"} + references</small>
                   </button>
@@ -1911,15 +1819,6 @@ export default function Home() {
               </section>
             )}
 
-            {result && !result.qa && (
-              <section className="accuracy-placeholder">
-                <div><span>Accuracy review</span><strong>Not run</strong></div>
-                <p>{result.kind === "draft"
-                  ? "Quick drafts skip image accuracy analysis to save cost. Final render now and Economy final render both review the finished image."
-                  : "This image was created without the accuracy review. Turn it on in Settings before the next generation."}</p>
-              </section>
-            )}
-
             {!isWorking && (
               <details className="output-tools">
                 <summary>Troubleshooting</summary>
@@ -1927,54 +1826,6 @@ export default function Home() {
                   Test one reference
                 </button>
               </details>
-            )}
-
-            {result?.qa && (
-              <section className={`qa-result ${result.qa.passed ? "passed" : "review"}`}>
-                <div>
-                  <span>Accuracy review</span>
-                  <strong>{result.qa.score}/100</strong>
-                </div>
-                {result.qa.findings.length > 0 && (
-                  <ul>{result.qa.findings.map((finding) => <li key={finding}>{finding}</li>)}</ul>
-                )}
-                {result.qa.recommendation && <p>{result.qa.recommendation}</p>}
-                {!result.qa.reviewFailed && result.qa.items?.length > 0 && (
-                  <fieldset className="qa-item-selector">
-                    <legend>Items to re-render</legend>
-                    {items.map((item, index) => ({ item, index })).filter(({ item }) => item.references.length > 0).map(({ item, index }) => {
-                      const id = resolvedItemId(item, index);
-                      const itemReview = result.qa?.items.find((entry) => entry.id === id);
-                      return (
-                        <label className={qaRedoSelection[id] ? "selected" : ""} key={id} title={itemReview?.finding || ""}>
-                          <input
-                            type="checkbox"
-                            checked={Boolean(qaRedoSelection[id])}
-                            disabled={isWorking || !itemReview?.box}
-                            onChange={(event) => setQaRedoSelection((current) => ({ ...current, [id]: event.target.checked }))}
-                          />
-                          <span><strong>{String(index + 1).padStart(2, "0")}</strong>{item.role}</span>
-                          <small>{itemReview?.box ? itemReview.passed ? "QA passed" : "QA flagged" : "Not located"}</small>
-                        </label>
-                      );
-                    })}
-                  </fieldset>
-                )}
-                {!result.qa.reviewFailed && result.qa.items?.length > 0 && (
-                  <button
-                    type="button"
-                    className="qa-recreate-button"
-                    onClick={() => void generate(false, 1, {
-                      feedback: result.qa as QaResult,
-                      itemIds: selectedQaItemIds,
-                      sourceDataUrl: result.dataUrl,
-                    })}
-                    disabled={isWorking || selectedQaItemIds.length === 0}
-                  >
-                    {isWorking ? "Repairing checked items..." : "Re-create checked items"}
-                  </button>
-                )}
-              </section>
             )}
 
             <div className="activity-log" aria-live="polite">{panelText}</div>

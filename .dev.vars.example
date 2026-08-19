@@ -3,6 +3,3 @@
 # Cloudflare Workers reads production secrets.
 
 OPENAI_API_KEY=sk-...
-
-# Optional overrides — see README.md "Runtime Environment".
-# MATERIAL_COLLAGER_QA_MODEL=gpt-5.6

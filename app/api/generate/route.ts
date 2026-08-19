@@ -3,17 +3,11 @@ import {
   activeItems,
   buildGenerationPrompt,
   buildSummary,
-  referenceCount,
   resolvedOrientation,
   resolvedSize,
   type CollageRequestInput,
   validateCollageRequest,
 } from "@/app/lib/collage";
-import {
-  missingQaItem,
-  reviewGeneratedImage,
-  type QaReview,
-} from "@/app/lib/accuracy-review";
 import {
   OpenAIRequestError,
   errorResponse,
@@ -52,28 +46,16 @@ export async function POST(request: Request) {
       if (!file.type.startsWith("image/")) throw new Error(`Reference ${file.name || "image"} is not an image file.`);
       if (file.size >= MAX_REFERENCE_FILE_BYTES) throw new Error(`Reference ${file.name || "image"} must be under 50 MB.`);
     }
-    const selectedIds = new Set(payload.qaSelection?.itemIds ?? []);
-    const selectiveEdit = selectedIds.size > 0;
     const boardReferenceCount = items.reduce(
       (total, item) => total + Math.max(item.imageNames?.length ?? 0, item.imageFileIds?.length ?? 0),
-      0,
-    );
-    const selectedReferenceCount = items.reduce(
-      (total, item) => selectedIds.has(item.id)
-        ? total + Math.max(item.imageNames?.length ?? 0, item.imageFileIds?.length ?? 0)
-        : total,
       0,
     );
     const requestedDiagnosticCount = Math.max(
       1,
       Math.min(boardReferenceCount, Number(new URL(request.url).searchParams.get("count") || 1)),
     );
-    const expectedProductReferences = diagnosticMode
-      ? requestedDiagnosticCount
-      : selectiveEdit
-        ? selectedReferenceCount
-        : boardReferenceCount;
-    const expectedReferences = expectedProductReferences + (!diagnosticMode && !selectiveEdit && payload.layoutReference ? 1 : 0);
+    const expectedProductReferences = diagnosticMode ? requestedDiagnosticCount : boardReferenceCount;
+    const expectedReferences = expectedProductReferences + (!diagnosticMode && payload.layoutReference ? 1 : 0);
 
     const apiKey = resolveOpenAIKey(payload.apiKey);
     const prompt = buildGenerationPrompt(payload);
@@ -100,7 +82,7 @@ export async function POST(request: Request) {
         throw new Error("One or more reference images were missing from the direct generation request.");
       }
       preparedReferences = directFiles.map((file) => ({ blob: file, filename: safeReferenceFilename(file.name) }));
-    } else if (!diagnosticMode && !selectiveEdit && remoteProductReferences.length === boardReferenceCount) {
+    } else if (!diagnosticMode && remoteProductReferences.length === boardReferenceCount) {
       const remoteReferences = payload.layoutReference && payload.layoutReferenceFileId
         ? [{ fileId: payload.layoutReferenceFileId, filename: "approved-draft.png" }, ...remoteProductReferences]
         : remoteProductReferences;
@@ -111,7 +93,6 @@ export async function POST(request: Request) {
     } else {
       throw new Error("One or more reference images were missing from the generation request.");
     }
-    const productReferences = payload.layoutReference && !selectiveEdit ? preparedReferences.slice(1) : preparedReferences;
     diagnostics.totalReferenceBytes = preparedReferences.reduce((sum, reference) => sum + reference.blob.size, 0);
     diagnostics.largestReferenceBytes = Math.max(...preparedReferences.map((reference) => reference.blob.size), 0);
     diagnostics.references = preparedReferences.map((reference) => ({
@@ -119,51 +100,16 @@ export async function POST(request: Request) {
       bytes: reference.blob.size,
       mimeType: reference.blob.type,
     }));
-    let generationReferences = preparedReferences;
-    let editMask: PreparedReference | undefined;
-    let requestedSize = resolvedSize(payload);
-
-    if (selectiveEdit) {
-      const baseImage = incoming.get("baseImage");
-      const mask = incoming.get("mask");
-      if (!(baseImage instanceof File) || !baseImage.type.startsWith("image/")) {
-        throw new Error("The current collage was missing from the selective QA edit.");
-      }
-      if (!(mask instanceof File) || mask.type !== "image/png" || mask.size >= 4 * 1024 * 1024) {
-        throw new Error("The selective QA mask must be a PNG under 4 MB.");
-      }
-      const width = Number(payload.qaSelection?.baseWidth);
-      const height = Number(payload.qaSelection?.baseHeight);
-      if (!validEditDimension(width) || !validEditDimension(height) || width / height < 1 / 3 || width / height > 3) {
-        throw new Error("The selective QA edit has unsupported canvas dimensions.");
-      }
-      if (!preparedReferences.length) throw new Error("Select at least one referenced item to re-render.");
-      generationReferences = [
-        { blob: baseImage, filename: baseImage.type === "image/jpeg" ? "current-collage.jpg" : "current-collage.png" },
-        ...preparedReferences,
-      ];
-      if (generationReferences.length > 16) {
-        throw new Error("This correction selects too many supporting views. Uncheck an item or remove one supporting view.");
-      }
-      editMask = { blob: mask, filename: "qa-edit-mask.png" };
-      requestedSize = `${width}x${height}`;
-    }
+    const requestedSize = resolvedSize(payload);
 
     const imageRequest: ImageEditRequest = {
       model: "gpt-image-2",
       prompt,
-      references: generationReferences,
-      mask: editMask,
+      references: preparedReferences,
       size: requestedSize,
       quality: payload.quality,
       background: "opaque",
       output_format: "png",
-      // The masked "Re-create checked items" repair runs without a wall-clock
-      // ceiling. It is explicitly user-initiated on a board they are already
-      // iterating on, and a repair that takes longer than the old 300s cap is
-      // better finished than aborted — the abort discarded the work and
-      // charged for it anyway.
-      timeoutMs: selectiveEdit ? null : undefined,
     };
     if (diagnosticMode) {
       const counts = [requestedDiagnosticCount];
@@ -209,11 +155,10 @@ export async function POST(request: Request) {
       imageResult = await createImageEdit(apiKey, imageRequest, diagnostics.attempts);
     } catch (error) {
       const standardSize = standardSizeFor(payload);
-      // Selective (masked) edits must keep exact canvas dimensions, so they
-      // cannot fall back. Every other render — including Final — downgrades to
-      // a model-supported size rather than surfacing the failure, since the
-      // requested 2K/Final sizes are not always accepted by the image model.
-      if (selectiveEdit || !isRetryableImageError(error) || standardSize === requestedSize) throw error;
+      // Every render — including Final — downgrades to a model-supported size
+      // rather than surfacing the failure, since the requested 2K/Final sizes
+      // are not always accepted by the image model.
+      if (!isRetryableImageError(error) || standardSize === requestedSize) throw error;
       usedStandardFallback = true;
       imageResult = await createImageEdit(apiKey, { ...imageRequest, size: standardSize }, diagnostics.attempts);
     }
@@ -223,24 +168,8 @@ export async function POST(request: Request) {
       throw new Error("OpenAI did not return image data.");
     }
 
-    const reviewed = payload.runQa
-      ? await reviewGeneratedImage({
-        apiKey,
-        imageBase64,
-        items: items.map((item) => ({ id: item.id, role: item.role, referenceCount: referenceCount(item) })),
-        selectedItemIds: Array.from(selectedIds),
-        references: productReferences,
-        domain: "material collage",
-        // Same reasoning as the edit call above: on a repair, the review is
-        // not allowed to time out and take a completed image down with it.
-        timeoutMs: selectiveEdit ? null : undefined,
-      })
-      : null;
-    const qa = reviewed && selectiveEdit
-      ? mergeProtectedQa(reviewed, payload, selectedIds)
-      : reviewed;
     const renderKind: RenderKind = payload.renderKind
-      ?? (payload.outputResolution === "final" ? "final" : selectiveEdit ? "repair" : "studio");
+      ?? (payload.outputResolution === "final" ? "final" : "studio");
     let stored: Awaited<ReturnType<typeof persistGenerationOutput>> | null = null;
     let storageNotice = "";
     try {
@@ -251,10 +180,9 @@ export async function POST(request: Request) {
         prompt,
         payload: payload as unknown as Record<string, unknown>,
         usage: imageJson.usage,
-        qa: qa as unknown as Record<string, unknown> | null,
+        qa: null,
         renderKind,
         collageType: payload.collageType,
-        replaceJobId: selectiveEdit ? payload.libraryJobId : undefined,
       });
     } catch (storageError) {
       storageNotice = `The collage was generated, but could not be added to the six-month history: ${storageError instanceof Error ? storageError.message : "storage unavailable"}`;
@@ -267,8 +195,6 @@ export async function POST(request: Request) {
       imageBase64,
       mimeType: "image/png",
       filename: safeOutputFilename(payload.outputFilename),
-      qa,
-      selectiveEdit,
       usage: imageJson.usage,
       jobId: stored?.id,
       libraryVisible: stored?.libraryVisible ?? false,
@@ -323,33 +249,6 @@ async function retrieveReferences(
       fileId: reference.fileId,
     };
   }));
-}
-
-function validEditDimension(value: number) {
-  return Number.isInteger(value) && value >= 256 && value <= 3840 && value % 16 === 0;
-}
-
-function mergeProtectedQa(review: QaReview, payload: CollageRequestInput, selectedIds: Set<string>): QaReview {
-  const previousById = new Map((payload.qaFeedback?.items ?? []).map((item) => [item.id, item]));
-  const reviewedById = new Map(review.items.map((item) => [item.id, item]));
-  const items = activeItems(payload).map((item) => {
-    const reviewed = reviewedById.get(item.id);
-    const previous = previousById.get(item.id);
-    if (selectedIds.has(item.id)) return reviewed ?? previous ?? missingQaItem(item.id);
-    return previous ?? reviewed ?? missingQaItem(item.id);
-  });
-  const protectedFailure = items.some((item) => !selectedIds.has(item.id) && !item.passed);
-  const score = protectedFailure
-    ? Math.min(review.score, Math.max(0, Math.min(100, Number(payload.qaFeedback?.score) || 0)))
-    : review.score;
-  const findings = items.filter((item) => !item.passed && item.finding).map((item) => `${item.id}: ${item.finding}`);
-  return {
-    ...review,
-    passed: review.passed && score >= 90 && items.every((item) => item.passed),
-    score,
-    findings: findings.length ? findings : review.findings,
-    items,
-  };
 }
 
 function standardSizeFor(payload: CollageRequestInput) {

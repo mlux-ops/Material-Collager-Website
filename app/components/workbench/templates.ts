@@ -3,8 +3,8 @@
 // blank option. Each preset clones a small pre-positioned, pre-wired graph
 // with placeholder Photo/References nodes -- WorkbenchApp.tsx hands the
 // result to the store and calls fitView(). The collage preset reproduces the
-// /generator pipeline (References -> Collage Board -> Accuracy Reviewer ->
-// QA Correction) as the migration path onto the workbench.
+// /generator pipeline (References -> Collage Board) as the migration path
+// onto the workbench.
 
 import type { Edge } from "@xyflow/react";
 import { ITEM_PRESETS, type CollageType } from "@/app/lib/collage";
@@ -81,22 +81,15 @@ function interiorEditTemplate(): TemplateGraph {
   const prompt = makeNode("promptBuilder", { x: 0, y: 240 }, { domain: "interior" });
   const references = makeNode("references", { x: 0, y: 500 }, { referenceItems: placeholderReferenceItems("kitchen_material_palette") });
   const edit = makeNode("imageEdit", { x: 360, y: 140 });
-  const reviewer = makeNode("accuracyReviewer", { x: 720, y: 20 }, { domain: "interior" });
-  const correction = makeNode("qaCorrection", { x: 720, y: 300 });
-  const download = makeNode("exportDownload", { x: 1080, y: 300 });
+  const download = makeNode("exportDownload", { x: 720, y: 140 });
 
   return {
-    nodes: [photo, prompt, references, edit, reviewer, correction, download],
+    nodes: [photo, prompt, references, edit, download],
     edges: [
       makeEdge(photo, "image", edit, "image"),
       makeEdge(prompt, "text", edit, "prompt"),
       makeEdge(references, "references", edit, "references"),
-      makeEdge(edit, "image", reviewer, "image"),
-      makeEdge(references, "references", reviewer, "references"),
-      makeEdge(reviewer, "report", correction, "report"),
-      makeEdge(edit, "image", correction, "image"),
-      makeEdge(references, "references", correction, "references"),
-      makeEdge(correction, "image", download, "image"),
+      makeEdge(edit, "image", download, "image"),
     ],
   };
 }
@@ -121,20 +114,13 @@ function exteriorEditTemplate(): TemplateGraph {
 function collageTemplate(): TemplateGraph {
   const references = makeNode("references", { x: 0, y: 0 }, { referenceItems: placeholderReferenceItems("kitchen_material_palette") });
   const board = makeNode("collageBoard", { x: 360, y: 60 });
-  const reviewer = makeNode("accuracyReviewer", { x: 720, y: -60 }, { domain: "collage" });
-  const correction = makeNode("qaCorrection", { x: 720, y: 220 });
-  const download = makeNode("exportDownload", { x: 1080, y: 220 });
+  const download = makeNode("exportDownload", { x: 720, y: 60 });
 
   return {
-    nodes: [references, board, reviewer, correction, download],
+    nodes: [references, board, download],
     edges: [
       makeEdge(references, "references", board, "items"),
-      makeEdge(board, "image", reviewer, "image"),
-      makeEdge(references, "references", reviewer, "references"),
-      makeEdge(reviewer, "report", correction, "report"),
-      makeEdge(board, "image", correction, "image"),
-      makeEdge(references, "references", correction, "references"),
-      makeEdge(correction, "image", download, "image"),
+      makeEdge(board, "image", download, "image"),
     ],
   };
 }
