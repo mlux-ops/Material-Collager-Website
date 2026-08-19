@@ -1874,6 +1874,123 @@ body {
   color: #9a402f;
 }
 
+/* Layout reference: an uploaded collage that supplies composition only. Shares
+   the finalize panel's card treatment so the two "this overrides your
+   settings" blocks read as the same class of control. */
+.layout-master {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin-top: 10px;
+  padding: 10px;
+}
+
+.layout-master-heading {
+  align-items: center;
+  display: grid;
+  gap: 7px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.layout-master-heading > div > span {
+  color: var(--warm);
+  display: block;
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.layout-master-heading strong {
+  display: block;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+/* Both the empty drop target and the Replace control are file inputs styled as
+   buttons, so the native input is hidden in each. */
+.layout-master-drop input[type="file"],
+.layout-master-replace input[type="file"] {
+  display: none;
+}
+
+.layout-master-drop {
+  align-items: center;
+  border: 1px dashed #c9b7ab;
+  border-radius: 6px;
+  cursor: pointer;
+  display: grid;
+  gap: 3px;
+  justify-items: center;
+  margin-top: 9px;
+  padding: 14px 10px;
+  text-align: center;
+}
+
+.layout-master-drop:hover {
+  background: #fdf8f5;
+  border-color: var(--warm);
+}
+
+.layout-master-drop span {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.layout-master-drop small,
+.layout-master-detail small {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.layout-master-active {
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 72px minmax(0, 1fr);
+  margin-top: 9px;
+}
+
+.layout-master-active img {
+  aspect-ratio: 1;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  height: auto;
+  object-fit: cover;
+  width: 100%;
+}
+
+.layout-master-detail {
+  display: grid;
+  gap: 5px;
+}
+
+.layout-master-detail p {
+  font-size: 10px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layout-master-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.layout-master-replace {
+  background: #f8faf8;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 5px 9px;
+}
+
+.layout-master-replace:hover {
+  border-color: var(--warm);
+}
+
 .finalize-panel {
   background: #fff;
   border: 1px solid #d9c8bd;

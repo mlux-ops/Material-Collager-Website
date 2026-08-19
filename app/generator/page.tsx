@@ -37,6 +37,7 @@ import {
   DIRECT_REQUEST_REFERENCE_BUDGET,
   FINAL_LAYOUT_REFERENCE_BUDGET,
   FINAL_REQUEST_BODY_BUDGET,
+  LAYOUT_MASTER_TRANSPORT_BUDGET,
   base64ImageToObjectUrl,
   dataUrlFile,
   fileFingerprint,
@@ -93,13 +94,22 @@ type UiItem = Omit<CollageItemInput, "imageKeys" | "imageNames" | "imageFileIds"
 
 type DraftReference = Omit<UiReference, "preview">;
 
+// The uploaded layout master, held in memory with its own object-URL preview.
+type LayoutMasterState = { uiKey: string; name: string; file: File; preview: string };
+
 // Persisted draft references keep only a pointer (fileKey) to the blob, which
 // is stored under its own IndexedDB key. This lets a metadata-only change
 // (editing a note, toggling a setting) rewrite the small record without
 // re-serializing every full-quality reference image.
 type PersistedReference = Omit<DraftReference, "file"> & { fileKey: string };
 type PersistedItem = Omit<DraftItem, "references" | "files"> & { references: PersistedReference[] };
-type StoredDraft = Omit<SavedDraft, "items"> & { format: "split"; items: PersistedItem[] };
+type StoredDraft = Omit<SavedDraft, "items" | "layoutMaster"> & {
+  format: "split";
+  items: PersistedItem[];
+  // The layout master's blob lives under its own key like any reference blob,
+  // so a metadata-only save does not rewrite it.
+  layoutMaster?: { uiKey: string; name: string; fileKey: string };
+};
 
 type DraftItem = Omit<CollageItemInput, "imageKeys" | "imageNames" | "imageFileIds"> & {
   uiKey?: string;
@@ -120,6 +130,9 @@ type SavedDraft = {
   lighting?: LightingOption;
   heroItemId?: string;
   outputFilename: string;
+  // A previous collage the user supplied as the definitive layout. Absent on
+  // boards that use the art-direction composition/spacing settings instead.
+  layoutMaster?: { uiKey: string; name: string; file: File };
   items: DraftItem[];
   savedAt: number;
 };
@@ -269,6 +282,9 @@ async function readSavedDraft() {
           blobRequests.push({ fileKey: reference.fileKey, request: store.get(blobKey(reference.fileKey)) });
         }
       }
+      if (record.layoutMaster) {
+        blobRequests.push({ fileKey: record.layoutMaster.fileKey, request: store.get(blobKey(record.layoutMaster.fileKey)) });
+      }
     };
     transaction.oncomplete = () => {
       db.close();
@@ -288,7 +304,14 @@ async function readSavedDraft() {
           .filter((reference) => blobs.has(reference.fileKey))
           .map(({ fileKey, ...reference }) => ({ ...reference, file: blobs.get(fileKey)! })),
       }));
-      resolve({ ...stored, items } as unknown as SavedDraft);
+      // A layout master whose blob went missing is dropped rather than
+      // restored half-formed; the board then falls back to its composition
+      // and spacing settings.
+      const layoutBlob = stored.layoutMaster ? blobs.get(stored.layoutMaster.fileKey) : undefined;
+      const layoutMaster = stored.layoutMaster && layoutBlob
+        ? { uiKey: stored.layoutMaster.uiKey, name: stored.layoutMaster.name, file: layoutBlob }
+        : undefined;
+      resolve({ ...stored, items, layoutMaster } as unknown as SavedDraft);
     };
     transaction.onerror = () => {
       db.close();
@@ -300,9 +323,18 @@ async function readSavedDraft() {
 async function writeSavedDraft(draft: SavedDraft) {
   const db = await openDraftDatabase();
   const blobsByKey = new Map<string, File>();
+  const { layoutMaster, ...draftWithoutLayout } = draft;
+  let storedLayoutMaster: StoredDraft["layoutMaster"];
+  if (layoutMaster) {
+    // Namespaced so a layout master and a reference can never collide on key.
+    const fileKey = `layout-${layoutMaster.uiKey}`;
+    blobsByKey.set(fileKey, layoutMaster.file);
+    storedLayoutMaster = { uiKey: layoutMaster.uiKey, name: layoutMaster.name, fileKey };
+  }
   const stored: StoredDraft = {
-    ...draft,
+    ...draftWithoutLayout,
     format: "split",
+    layoutMaster: storedLayoutMaster,
     items: draft.items.map((item) => {
       const { files: _legacyFiles, references = [], ...rest } = item;
       return {
@@ -454,6 +486,8 @@ export default function Home() {
   const [lighting, setLighting] = useState<LightingOption>("soft_daylight");
   const [heroItemId, setHeroItemId] = useState("");
   const [outputFilename, setOutputFilename] = useState("material-collage.png");
+  const [layoutMaster, setLayoutMaster] = useState<LayoutMasterState | null>(null);
+  const layoutPreviewRef = useRef<string | null>(null);
   const apiKey = "";
   const [items, setItems] = useState<UiItem[]>(() => presetItems("bathroom_fixture_collage"));
   const [panelText, setPanelText] = useState("Board ready.");
@@ -565,13 +599,48 @@ export default function Home() {
     lighting,
     heroItemId,
     outputFilename,
+    layoutMaster,
     items,
   ]);
+
+  // The layout master's preview is the one object URL not owned by an item, so
+  // it needs its own unmount cleanup.
+  useEffect(() => () => {
+    if (layoutPreviewRef.current) URL.revokeObjectURL(layoutPreviewRef.current);
+  }, []);
 
   function revokeItemPreviews(currentItems: UiItem[]) {
     for (const item of currentItems) {
       for (const reference of item.references) URL.revokeObjectURL(reference.preview);
     }
+  }
+
+  // Single entry point for setting/replacing/clearing the layout master, so the
+  // previous preview URL is always revoked exactly once.
+  function applyLayoutMaster(next: { uiKey: string; name: string; file: File } | null) {
+    if (layoutPreviewRef.current) URL.revokeObjectURL(layoutPreviewRef.current);
+    if (!next) {
+      layoutPreviewRef.current = null;
+      setLayoutMaster(null);
+      return;
+    }
+    const preview = URL.createObjectURL(next.file);
+    layoutPreviewRef.current = preview;
+    setLayoutMaster({ ...next, preview });
+  }
+
+  function chooseLayoutMaster(file: File | undefined) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setPanelText("The layout reference must be an image file.");
+      return;
+    }
+    if (file.size >= MAX_REFERENCE_FILE_BYTES) {
+      setPanelText(`The layout reference must be under ${formatBytes(MAX_REFERENCE_FILE_BYTES)}.`);
+      return;
+    }
+    applyLayoutMaster({ uiKey: createUiKey(), name: file.name, file });
+    setPanelText("Layout reference set. Composition and spacing now follow this collage instead of the art-direction presets.");
   }
 
   function changeType(nextType: CollageType) {
@@ -859,6 +928,9 @@ export default function Home() {
       lighting,
       heroItemId,
       outputFilename,
+      layoutMaster: layoutMaster
+        ? { uiKey: layoutMaster.uiKey, name: layoutMaster.name, file: layoutMaster.file }
+        : undefined,
       savedAt: Date.now(),
       items: items.map((item) => ({
         id: item.id,
@@ -924,6 +996,7 @@ export default function Home() {
     setLighting(draft.lighting ?? "soft_daylight");
     setHeroItemId(draft.heroItemId ?? "");
     setOutputFilename(draft.outputFilename);
+    applyLayoutMaster(draft.layoutMaster ?? null);
     commitResult(null);
     setPromptPreview("");
   }
@@ -980,6 +1053,11 @@ export default function Home() {
       heroItemId: heroItemId || undefined,
       outputFilename,
       apiKey: includeApiKey ? apiKey : "",
+      // A board-level layout master rides along as Image 1 on every render it
+      // applies to. finalizeDraft overrides both fields, because there the
+      // approved draft is the layout authority (and it was itself composed
+      // under this master, so the arrangement carries through).
+      ...(layoutMaster ? { layoutReference: true, layoutReferenceMode: "uploaded-collage" as const } : {}),
       items: items.map((item, index) => ({
         id: resolvedItemId(item, index),
         role: item.role,
@@ -1089,6 +1167,9 @@ export default function Home() {
           quality: "high",
           outputResolution: "final",
           layoutReference: true,
+          // Image 1 here is the approved draft, never the board's uploaded
+          // layout master — pin the mode so makePayload's value cannot leak in.
+          layoutReferenceMode: "approved-draft",
           layoutReferenceFileId: layoutFileId,
           renderKind: "final",
         };
@@ -1116,6 +1197,8 @@ export default function Home() {
         quality: "high",
         outputResolution: "final",
         layoutReference: true,
+        // As in the economy branch: Image 1 is the approved draft here.
+        layoutReferenceMode: "approved-draft",
         renderKind: "final",
       };
       validateCollageRequest(payload);
@@ -1263,9 +1346,14 @@ export default function Home() {
     let transportFilesForReport: File[] | null = null;
 
     try {
+      // The isolation test deliberately sends a bare minimum request, and the
+      // server counts its expected images without a layout slot, so the layout
+      // master is withheld there rather than throwing a count mismatch.
+      const sendLayoutMaster = Boolean(layoutMaster) && !diagnosticMode;
       const renderPayload = (payload: CollageRequestInput): CollageRequestInput => ({
         ...payload,
         ...(renderPreset === "draft" ? { quality: "low" as const, outputResolution: "standard" as const } : {}),
+        ...(sendLayoutMaster ? {} : { layoutReference: undefined, layoutReferenceMode: undefined }),
         renderKind: renderPreset === "draft" ? "draft" : "studio",
       });
       const validationPayload = renderPayload(makePayload(false));
@@ -1279,12 +1367,19 @@ export default function Home() {
       const form = new FormData();
       form.append("payload", JSON.stringify(payload));
       const referencesToSend = diagnosticMode ? references.slice(0, diagnosticCount) : references;
-      setWorkingStage("Optimizing references for direct generation");
+      setWorkingStage(sendLayoutMaster ? "Optimizing the layout reference and references" : "Optimizing references for direct generation");
       const transportFiles = await optimizeReferencesForTransport(
         referencesToSend.map((entry) => entry.reference.file),
         DIRECT_REQUEST_REFERENCE_BUDGET,
       );
       transportFilesForReport = transportFiles;
+      // Image order is the contract: the server treats the first image as the
+      // layout reference whenever payload.layoutReference is set, and the
+      // prompt's REFERENCE MAP numbers the items from 2 onward to match.
+      if (sendLayoutMaster && layoutMaster) {
+        const layoutTransport = await optimizeReferenceForTransport(layoutMaster.file, LAYOUT_MASTER_TRANSPORT_BUDGET);
+        form.append("image[]", layoutTransport, layoutTransport.name);
+      }
       for (const file of transportFiles) form.append("image[]", file, file.name);
       setWorkingStage("Composing collage");
       const response = await fetch(diagnosticMode ? `/api/generate?diagnostic=isolation&count=${diagnosticCount}` : "/api/generate", {
@@ -1470,6 +1565,7 @@ export default function Home() {
               <DropdownSelect
                 value={composition}
                 onChange={(next) => setComposition(next as Composition)}
+                disabled={Boolean(layoutMaster)}
                 options={COMPOSITIONS.map((option) => ({ value: option, label: labelFor(option) }))}
               />
             </label>
@@ -1478,6 +1574,7 @@ export default function Home() {
               <DropdownSelect
                 value={density}
                 onChange={(next) => setDensity(next as Density)}
+                disabled={Boolean(layoutMaster)}
                 options={DENSITIES.map((option) => ({ value: option, label: labelFor(option) }))}
               />
             </label>
@@ -1511,6 +1608,60 @@ export default function Home() {
             </label>
           </div>
 
+          <section className="layout-master">
+            <div className="layout-master-heading">
+              <div>
+                <span>Layout reference</span>
+                <strong>{layoutMaster ? "Following your uploaded collage" : "Using the settings above"}</strong>
+              </div>
+              {layoutMaster && <span className="status-pill ready">Active</span>}
+            </div>
+            {layoutMaster ? (
+              <div className="layout-master-active">
+                <img src={layoutMaster.preview} alt="Uploaded layout reference" />
+                <div className="layout-master-detail">
+                  <p>{layoutMaster.name}</p>
+                  <small>
+                    Placement, scale hierarchy, overlap, and spacing are taken from this collage. Its
+                    products are ignored — only the items in your reference tray are rendered.
+                  </small>
+                  <div className="layout-master-actions">
+                    <label className="layout-master-replace">
+                      Replace
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(event) => {
+                          chooseLayoutMaster(event.target.files?.[0]);
+                          event.target.value = "";
+                        }}
+                      />
+                    </label>
+                    <button type="button" className="danger" onClick={() => {
+                      applyLayoutMaster(null);
+                      setPanelText("Layout reference removed. Composition and spacing follow the art-direction settings again.");
+                    }}>
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <label className="layout-master-drop">
+                <span>Upload a previous collage</span>
+                <small>Its layout and organization become the sole source of truth for the next render.</small>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(event) => {
+                    chooseLayoutMaster(event.target.files?.[0]);
+                    event.target.value = "";
+                  }}
+                />
+              </label>
+            )}
+          </section>
+
           <details className="settings-drawer">
             <summary>Studio settings</summary>
             <div className="control-grid settings-controls">
@@ -1534,8 +1685,11 @@ export default function Home() {
               <h2>Reference tray</h2>
             </div>
             <div className="reference-heading-actions">
-              <span className={hasFiles ? "status-pill ready" : "status-pill"}>
-                {totalReferences}/{MAX_REFERENCE_IMAGES}
+              <span
+                className={hasFiles ? "status-pill ready" : "status-pill"}
+                title={layoutMaster ? "The layout reference occupies one of the 16 image slots." : undefined}
+              >
+                {totalReferences}/{layoutMaster ? MAX_REFERENCE_IMAGES - 1 : MAX_REFERENCE_IMAGES}
               </span>
               <button type="button" className="add-item-button" onClick={addItem}>+ Add item</button>
             </div>

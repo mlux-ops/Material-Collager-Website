@@ -52,6 +52,14 @@ export type CollageRequestInput = {
   apiKey?: string;
   layoutReference?: boolean;
   layoutReferenceFileId?: string;
+  // What kind of authority Image 1 carries when layoutReference is set.
+  // "approved-draft" (the default, and what a Final render sends) is this
+  // app's own draft being rebuilt at full quality, so its composition is a
+  // strong guide. "uploaded-collage" is a previous collage the user supplied
+  // as the definitive layout; it outranks the art-direction composition and
+  // spacing settings, which are omitted from the prompt rather than emitted
+  // as contradictory instructions.
+  layoutReferenceMode?: "approved-draft" | "uploaded-collage";
   renderKind?: "draft" | "studio" | "final";
   items: CollageItemInput[];
 };
@@ -183,7 +191,7 @@ export function validateCollageRequest(request: CollageRequestInput) {
     throw new Error(`Use no more than ${MAX_REFERENCE_IMAGES} reference images in one collage.`);
   }
   if (request.layoutReference && totalReferenceCount(request) >= MAX_REFERENCE_IMAGES) {
-    throw new Error("A final render can use the approved draft plus up to 15 product references. Remove one supporting view or render without the draft.");
+    throw new Error(`A layout reference occupies one of the ${MAX_REFERENCE_IMAGES} image slots, so it can accompany at most ${MAX_REFERENCE_IMAGES - 1} product references. Remove one supporting view, or render without the layout reference.`);
   }
 
   if (request.heroItemId && !ids.has(request.heroItemId)) {
@@ -251,6 +259,33 @@ function supportingRange(start: number, end: number) {
   return start === end ? `Image ${start}` : `Images ${start}-${end}`;
 }
 
+// True when Image 1 is a previous collage the user uploaded as the definitive
+// layout, rather than this app's own approved draft being finalized.
+export function usesLayoutMaster(request: CollageRequestInput) {
+  return Boolean(request.layoutReference) && request.layoutReferenceMode === "uploaded-collage";
+}
+
+// The REFERENCE MAP lines describing Image 1. The uploaded-collage wording is
+// deliberately much stronger than the approved-draft wording: the draft is a
+// composition this same board already produced, while an uploaded master is an
+// unrelated collage whose PRODUCTS must be ignored entirely — the failure mode
+// is the model treating its objects as things to render.
+function layoutReferenceLines(request: CollageRequestInput) {
+  if (!usesLayoutMaster(request)) {
+    return [
+      "Image 1 -> approved draft used only for composition, item placement, scale hierarchy, overlap, camera, lighting direction, and negative space. It is not a product-identity reference.",
+      "Preserve the approved draft composition as closely as possible, but use Images 2 onward as the sole visual truth for product identity, geometry, finish, material, color, and detail. Never copy a draft error over an original reference.",
+    ];
+  }
+  return [
+    "Image 1 -> a previously produced collage supplied as the LAYOUT MASTER. It is the single source of truth for composition and organization: item placement, reading order, relative scale hierarchy, rotation angles, overlap and stacking order, spacing rhythm, margins, and negative space. It is NOT a product-identity reference.",
+    "Reproduce that arrangement as a set of slots, then fill the slots with this board's items: keep each slot's position, footprint, angle, and layering from Image 1. Where Image 1 and any other composition or spacing instruction disagree, Image 1 wins.",
+    "Ignore every product, material, color, finish, and prop shown in Image 1 — none of its objects carry over, and none of them may appear in the output. Images 2 onward are the only source of product identity, geometry, finish, material, color, and detail.",
+    "If Image 1 holds a different number of objects than the item list below, keep its spatial logic and rhythm while adding or removing slots as needed, distributing the change so the composition stays balanced.",
+    "If Image 1's aspect ratio differs from the target canvas, keep the relative arrangement and adapt the margins and spacing to fill the target canvas. Never crop an item to force the old proportions.",
+  ];
+}
+
 export function buildGenerationPrompt(request: CollageRequestInput) {
   const items = activeItems(request);
   const labels: string[] = [];
@@ -278,26 +313,30 @@ export function buildGenerationPrompt(request: CollageRequestInput) {
     labels.push(`${imageRange} -> item \"${item.id}\" (${details.join("; ")})`);
   }
 
+  const layoutMaster = usesLayoutMaster(request);
   const hero = request.heroItemId
-    ? `Make item \"${request.heroItemId}\" the visual anchor. It may be largest, but it must remain faithful to its reference.`
-    : "Choose the most visually substantial referenced item as the anchor without diminishing any other requested item.";
+    ? layoutMaster
+      ? `Assign item \"${request.heroItemId}\" to the layout master's most prominent slot. It must remain faithful to its reference.`
+      : `Make item \"${request.heroItemId}\" the visual anchor. It may be largest, but it must remain faithful to its reference.`
+    : layoutMaster
+      ? "Keep the layout master's existing emphasis; do not promote a different item to anchor."
+      : "Choose the most visually substantial referenced item as the anchor without diminishing any other requested item.";
 
   return [
     "GOAL",
     "Create one finished, photorealistic interior-design material collage that feels art-directed, restrained, and publication-ready for a leading architecture and interiors magazine.",
     TYPE_PROMPTS[request.collageType],
     "ART DIRECTION",
-    COMPOSITION_PROMPTS[resolvedComposition(request)],
-    DENSITY_PROMPTS[resolvedDensity(request)],
+    // A layout master already dictates arrangement and spacing, so emitting
+    // the composition/density presets alongside it would contradict it. The
+    // lighting and styling presets are independent of layout and still apply.
+    ...(layoutMaster ? [] : [COMPOSITION_PROMPTS[resolvedComposition(request)], DENSITY_PROMPTS[resolvedDensity(request)]]),
     LIGHTING_PROMPTS[resolvedLighting(request)],
     STYLING_PROMPTS[resolvedStyling(request)],
     hero,
     "REFERENCE MAP",
     "Use the uploaded images by their exact order below. The images, not the text labels, are the visual source of truth.",
-    ...(request.layoutReference ? [
-      "Image 1 -> approved draft used only for composition, item placement, scale hierarchy, overlap, camera, lighting direction, and negative space. It is not a product-identity reference.",
-      "Preserve the approved draft composition as closely as possible, but use Images 2 onward as the sole visual truth for product identity, geometry, finish, material, color, and detail. Never copy a draft error over an original reference.",
-    ] : []),
+    ...(request.layoutReference ? layoutReferenceLines(request) : []),
     labels.join("\n"),
     "OBJECT COUNT",
     [
@@ -330,11 +369,16 @@ export function buildGenerationPrompt(request: CollageRequestInput) {
 }
 
 export function buildSummary(request: CollageRequestInput) {
+  const layoutMaster = usesLayoutMaster(request);
   const lines = [
     `Collage type: ${labelFor(request.collageType)}`,
     `Canvas: ${resolvedSize(request)}`,
-    `Composition: ${labelFor(resolvedComposition(request))}`,
-    `Spacing: ${labelFor(resolvedDensity(request))}`,
+    layoutMaster
+      ? "Composition: from the uploaded layout master"
+      : `Composition: ${labelFor(resolvedComposition(request))}`,
+    layoutMaster
+      ? "Spacing: from the uploaded layout master"
+      : `Spacing: ${labelFor(resolvedDensity(request))}`,
     `Styling: ${labelFor(resolvedStyling(request))}`,
     `Quality: ${labelFor(request.quality)}`,
     `References: ${totalReferenceCount(request)}/${MAX_REFERENCE_IMAGES}`,
