@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./motion-tokens.css";
 import "./globals.css";
+import "./effects.css";
 
 const inter = localFont({
   src: [
@@ -44,7 +45,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${inter.variable} antialiased`}>{children}</body>
+      <body className={`${inter.variable} antialiased`}>
+        {children}
+        <div className="grain-overlay" aria-hidden />
+      </body>
     </html>
   );
 }

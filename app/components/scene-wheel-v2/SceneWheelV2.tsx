@@ -1,7 +1,6 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   adaptCompletedCollages,
@@ -12,6 +11,7 @@ import {
 } from "@/app/lib/scene-lab-assets";
 import type { SceneWheelHoverState } from "./SceneCard";
 import { useNativeScrollProgress } from "./useNativeScrollProgress";
+import { SiteNavigation } from "../SiteNavigation";
 import styles from "./scene-wheel-v2.module.css";
 
 const SceneWheelCanvas = dynamic(() => import("./SceneWheelCanvas"), { ssr: false });
@@ -239,28 +239,7 @@ export default function SceneWheelV2() {
             ) : null}
           </div>
 
-          <header className={styles.chrome} aria-label="Material Collager">
-            <Link
-              href="/"
-              className={`${styles.chromeCell} ${styles.brand}`}
-              aria-label="Material Collager"
-              title="MATERIAL COLLAGER"
-            >
-              <span className={styles.brandFull}>MATERIAL COLLAGER</span>
-              <span className={styles.brandShort} aria-hidden="true">MATERIAL COLL.</span>
-            </Link>
-            <nav aria-label="Primary navigation">
-              <Link href="/" className={styles.chromeCell} aria-current="page">
-                LIBRARY
-              </Link>
-              <Link href="/generator" className={styles.chromeCell}>
-                GENERATOR
-              </Link>
-              <Link href="/workbench" className={styles.chromeCell}>
-                WORKBENCH
-              </Link>
-            </nav>
-          </header>
+          <SiteNavigation active="library" className={styles.chrome} />
 
           <div className={styles.caption}>
             <p>

@@ -12,7 +12,7 @@
   --accent: #28685b;
   --accent-dark: #19483f;
   --blue: #345f80;
-  --warm: #a54d39;
+  --warm: #171a18;
   --danger: #9a392f;
   --shadow: 0 14px 38px rgba(25, 33, 28, 0.08);
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
@@ -1340,7 +1340,7 @@ details[open]::details-content {
   --accent: #16796b;
   --accent-dark: #0c574c;
   --blue: #3567a6;
-  --warm: #dc654d;
+  --warm: #171a18;
   --danger: #a43b34;
   --yellow: #f3c85b;
   --shadow: 0 12px 30px rgba(31, 47, 39, 0.1);
@@ -1871,7 +1871,7 @@ body {
 .draft-button {
   background: #fff;
   border-color: var(--warm);
-  color: #9a402f;
+  color: #171a18;
 }
 
 /* Layout reference: an uploaded collage that supplies composition only. Shares
@@ -1915,7 +1915,7 @@ body {
 
 .layout-master-drop {
   align-items: center;
-  border: 1px dashed #c9b7ab;
+  border: 1px dashed #b9bfb8;
   border-radius: 6px;
   cursor: pointer;
   display: grid;
@@ -1927,7 +1927,7 @@ body {
 }
 
 .layout-master-drop:hover {
-  background: #fdf8f5;
+  background: #f4f6f2;
   border-color: var(--warm);
 }
 
@@ -2938,10 +2938,13 @@ body {
 }
 
 .generator-shell .workbench {
-  background: var(--mono-black);
-  border: 1px solid var(--mono-black);
-  gap: 1px;
-  grid-template-columns: 194px minmax(590px, 1fr) minmax(455px, 540px);
+  /* Separation between rail/tray/output comes from 1px rules on each
+     surface (see below), not from a background bleeding through a gap --
+     that produces a black void wherever a surface is short. */
+  background: var(--mono-off-white);
+  border: 0;
+  gap: 0;
+  grid-template-columns: 232px minmax(590px, 1fr) minmax(455px, 540px);
   height: calc(100dvh - 66px);
   margin-top: 66px;
 }
@@ -2951,13 +2954,20 @@ body {
 .generator-shell .output-surface {
   background: var(--mono-white);
   border: 0;
+  border-right: 1px solid var(--mono-line);
   border-radius: 0;
   box-shadow: none;
 }
 
+.generator-shell .output-surface { border-right: 0; }
 .generator-shell .references-surface { background: var(--mono-off-white); }
 .generator-shell .surface-heading h2 { color: var(--mono-black); font-size: 14px; font-weight: 500; }
-.generator-shell .section-kicker { color: var(--mono-black); font-size: 8.4px; }
+.generator-shell .section-kicker {
+  color: var(--mono-black);
+  font-size: 8.4px;
+  font-weight: 700;
+  letter-spacing: 0.1575px;
+}
 .generator-shell .surface-divider { border-color: var(--mono-soft-line); }
 .generator-shell .reference-heading { background: rgba(250, 250, 250, 0.92); border-color: var(--mono-soft-line); }
 .generator-shell .reference-heading h2 { font-size: 18px; }
@@ -2969,8 +2979,16 @@ body {
 .generator-shell .download-button,
 .generator-shell .library-link-button {
   border-color: var(--mono-line);
-  border-radius: 6px;
+  border-radius: 0;
   box-shadow: none;
+}
+
+.generator-shell .dropdown-menu { border-radius: 0; box-shadow: none; }
+.generator-shell .dropdown-option { border-radius: 0; }
+.generator-shell .dropdown-option[aria-selected="true"] {
+  background: var(--mono-black);
+  color: var(--mono-white);
+  font-weight: 500;
 }
 
 .generator-shell button:hover,
@@ -3013,6 +3031,97 @@ body {
   text-decoration: none;
 }
 
+/* The primary render action reads as the single most confident control on
+   the page: full-width, solid black, uppercase. It stays solid black even
+   while disabled (no reference uploaded yet) instead of fading to the grey
+   that used to read as "broken". */
+.generator-shell .primary-actions .primary-button {
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.1575px;
+  min-height: 48px;
+  text-transform: uppercase;
+}
+
+.generator-shell .primary-button:disabled {
+  background: var(--mono-black);
+  border-color: var(--mono-black);
+  color: rgba(255, 255, 255, 0.55);
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.generator-shell .draft-button:disabled,
+.generator-shell .secondary-button:disabled {
+  background: var(--mono-white);
+  border-color: var(--mono-line);
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+/* Board setup / art direction rail: one field per row so the value never
+   truncates (the 2-up grid used to clip "Bathroom Fixture Coll...",
+   "Studio...", "Soft D...", "Balanc..." etc at this column width). */
+.generator-shell .controls-surface .control-grid,
+.generator-shell .controls-surface .setup-controls,
+.generator-shell .controls-surface .art-controls {
+  grid-template-columns: 1fr;
+}
+
+.generator-shell .controls-surface .wide-field { grid-column: auto; }
+
+.generator-shell .controls-surface label > span,
+.generator-shell .controls-surface .toggle-field > span {
+  color: var(--mono-black);
+  font-size: 8.4px;
+  font-weight: 500;
+  letter-spacing: 0.1575px;
+  opacity: 0.6;
+  text-transform: uppercase;
+}
+
+/* "Ready"/status tags read as an inverted black block, not grey text --
+   emphasis by inversion, never by colour. */
+.generator-shell .status-pill {
+  background: var(--mono-white);
+  border: 1px solid var(--mono-black);
+  border-radius: 0;
+  color: var(--mono-black);
+  font-size: 8.4px;
+  font-weight: 500;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+}
+
+.generator-shell .status-pill.ready {
+  background: var(--mono-black);
+  border-color: var(--mono-black);
+  color: var(--mono-white);
+}
+
+.generator-shell .status-pill.working {
+  background: var(--mono-white);
+  border-color: var(--mono-black);
+  color: var(--mono-black);
+}
+
+.generator-shell .add-item-button {
+  background: var(--mono-black);
+  border: 1px solid var(--mono-black);
+  color: var(--mono-white);
+  font-size: 8.4px;
+  font-weight: 500;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+}
+
+.generator-shell .item-number {
+  font-size: 8.4px;
+  font-weight: 500;
+  letter-spacing: 0.1575px;
+}
+
 .generator-shell .material-item {
   background: var(--mono-white);
   border: 1px solid var(--mono-line);
@@ -3027,8 +3136,29 @@ body {
 .generator-shell .item-title-group div > span { font-size: 10px; }
 .generator-shell .item-number { background: var(--mono-black); border-radius: 0; color: var(--mono-white); }
 .generator-shell .reference-tile { flex-basis: 128px; }
-.generator-shell .reference-dropzone { background: var(--mono-off-white); border-color: var(--mono-line); }
+.generator-shell .reference-dropzone {
+  background: var(--mono-off-white);
+  border-color: var(--mono-line);
+  min-height: 56px;
+  padding: 7px;
+}
 .generator-shell .reference-dropzone:hover { background: var(--mono-white); border-color: var(--mono-black); }
+.generator-shell .reference-dropzone label > span {
+  font-size: 8.4px;
+  font-weight: 500;
+  letter-spacing: 0.1575px;
+  min-height: 26px;
+  padding: 5px 8px;
+  text-transform: uppercase;
+}
+/* The repeated "Drop a photo here" caption is the least important line in
+   each of the (up to) seven tray cards -- keep it, but quiet and out of the
+   way instead of competing with the upload button. */
+.generator-shell .reference-dropzone > span {
+  color: var(--muted);
+  font-size: 8px;
+  opacity: 0.75;
+}
 
 .generator-shell .investigation-panel,
 .generator-shell .investigation-status {
@@ -3056,12 +3186,11 @@ body {
   box-shadow: none;
 }
 
-.generator-shell .status-pill,
 .generator-shell .quality-lock,
 .generator-shell .job-status {
   background: var(--mono-white);
   border: 1px solid var(--mono-line);
-  border-radius: 6px;
+  border-radius: 0;
   color: var(--mono-black);
 }
 
@@ -3206,4 +3335,37 @@ body {
   .glass-track { scroll-behavior: auto; }
   .glass-panel,
   .glass-panel.active { transform: none; transition: none; }
+}
+
+/* ---------------------------------------------------------------------------
+   v4 normalisation. Sharp corners are the house style: separation comes from
+   1px rules and black/white inversion, never from rounding, colour or shadow.
+   Kept as a final override block so the rules above stay readable in diff.
+--------------------------------------------------------------------------- */
+*,
+*::before,
+*::after {
+  border-radius: 0 !important;
+}
+
+/* The dither reveal stands in for the result image while a render resolves. */
+.result-stage .dither-stage {
+  background: #fff;
+  object-fit: contain;
+  width: 100%;
+}
+
+/* Board setup rail: at rail width the heading and its two quiet buttons no
+   longer fit on one line, so stack them instead of letting them collide. */
+.generator-shell .controls-surface > .surface-heading {
+  display: block;
+}
+
+.generator-shell .controls-surface > .surface-heading .surface-actions {
+  margin-top: 10px;
+}
+
+.generator-shell .controls-surface > .surface-heading .surface-actions button {
+  flex: 1 1 0;
+  justify-content: center;
 }
