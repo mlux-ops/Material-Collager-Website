@@ -3071,8 +3071,13 @@ body {
 
 .generator-shell .controls-surface .wide-field { grid-column: auto; }
 
-.generator-shell .controls-surface label > span,
-.generator-shell .controls-surface .toggle-field > span {
+/* Field-caption styling only. `.dropdown-field` is also a direct span child
+   of these labels, and giving it opacity < 1 both greyed the control out and
+   made it a stacking context -- which trapped the dropdown's fixed-position
+   menu (z-index 1200) underneath the panels below it, so the open menu looked
+   see-through and clicks fell through to whatever sat under it. */
+.generator-shell .controls-surface label > span:not(.dropdown-field),
+.generator-shell .controls-surface .toggle-field > span:not(.dropdown-field) {
   color: var(--mono-black);
   font-size: 8.4px;
   font-weight: 500;
