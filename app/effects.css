@@ -1,0 +1,160 @@
+/* effects.css
+ * Self-contained motion/effect primitives. Additive only -- nothing here
+ * touches .site-navigation or any selector owned by app/globals.css.
+ * All timing pulls from app/motion-tokens.css tokens, no invented numbers.
+ */
+
+/* ---------------------------------------------------------------------
+ * 1. Grain overlay
+ * A ~2-3% opacity paper-grain wash over the whole page. Generated as an
+ * inline SVG feTurbulence data URI so it costs zero image requests.
+ * Usage: add <div className="grain-overlay" aria-hidden /> once, near the
+ * root of the page (e.g. in layout.tsx, but that file is owned elsewhere --
+ * ship it from whichever page mounts first).
+ * ------------------------------------------------------------------- */
+.grain-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  pointer-events: none;
+  opacity: 0.025;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  background-repeat: repeat;
+  background-size: 180px 180px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grain-overlay {
+    opacity: 0.02;
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * 2. Hover-focus card grid
+ * Hovering one item in the grid holds it at full contrast and drops its
+ * siblings to ~60%. Contrast only -- no movement, no shadow, no scale.
+ * Usage: wrap the grid container with `.focus-grid` and each item with
+ * `.focus-grid-item`.
+ * ------------------------------------------------------------------- */
+.focus-grid {
+  display: contents;
+}
+
+.focus-grid-item {
+  opacity: 1;
+  transition: opacity var(--duration-fast) var(--ease-smooth-out);
+}
+
+.focus-grid:hover .focus-grid-item {
+  opacity: 0.6;
+}
+
+.focus-grid:hover .focus-grid-item:hover,
+.focus-grid:hover .focus-grid-item:focus-within {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .focus-grid-item {
+    transition: none;
+  }
+}
+
+/* Fallback for browsers without :has()-adjacent needs: if the grid wraps a
+ * real element (not display:contents), use this variant instead. */
+.focus-grid-block {
+  display: block;
+}
+
+.focus-grid-block:hover .focus-grid-item {
+  opacity: 0.6;
+}
+
+.focus-grid-block:hover .focus-grid-item:hover,
+.focus-grid-block:hover .focus-grid-item:focus-within {
+  opacity: 1;
+}
+
+/* ---------------------------------------------------------------------
+ * 3. CountUp — no CSS required beyond inheriting text styles, the component
+ * (app/components/CountUp.tsx) does the tweening in JS via rAF so the
+ * number itself can be selected/read by a screen reader as plain text.
+ * Nothing to declare here; kept as a section marker for discoverability.
+ * ------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------
+ * 4. Nav pill slide (SNIPPET ONLY — not wired into .site-navigation).
+ * The other agent owns app/globals.css and the nav markup right now, so
+ * this ships as documented CSS + a companion hook, ready to drop in once
+ * the nav markup is finalized. See app/components/useNavPillSlide.ts for
+ * the paired hook. Do not import this block anywhere yet.
+ *
+ * Markup shape it expects:
+ *   <nav class="nav-pill-track" style="position:relative">
+ *     <span class="nav-pill" aria-hidden style="position:absolute; ...transform driven by the hook..." />
+ *     <a class="nav-pill-link" data-nav-key="a">A</a>
+ *     <a class="nav-pill-link" data-nav-key="b">B</a>
+ *   </nav>
+ * ------------------------------------------------------------------- */
+.nav-pill-track {
+  position: relative;
+}
+
+.nav-pill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: var(--ink, #171a18);
+  z-index: 0;
+  transition:
+    transform var(--duration-fast) var(--ease-smooth-out),
+    width var(--duration-fast) var(--ease-smooth-out);
+  will-change: transform, width;
+}
+
+.nav-pill-link {
+  position: relative;
+  z-index: 1;
+  transition: color var(--duration-fast) var(--ease-smooth-out);
+}
+
+.nav-pill-link[data-active="true"] {
+  color: var(--background, #eceeea);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-pill {
+    transition: none;
+  }
+
+  .nav-pill-link {
+    transition: none;
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * Indeterminate shimmer keyframe used by DitherReveal's inline canvas
+ * animation is driven entirely in JS (rAF), but the loading/hold border
+ * pulse around the reveal container (if used) can borrow this.
+ * ------------------------------------------------------------------- */
+@keyframes dither-hold-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+.dither-hold {
+  animation: dither-hold-pulse var(--duration-very-slow) var(--ease-in-out) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dither-hold {
+    animation: none;
+  }
+}

@@ -2,7 +2,6 @@
 
 import "@xyflow/react/dist/style.css";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
@@ -44,6 +43,7 @@ import { connectionIsValid, nodeKindsForWire, useWorkbenchStore } from "./store"
 import { Spotlight } from "./Spotlight";
 import { instantiateTemplate, TEMPLATES, type TemplateId } from "./templates";
 import { useModalDismiss } from "./useModalDismiss";
+import { SiteNavigation } from "../SiteNavigation";
 import styles from "./workbench.module.css";
 import { acceptedKindsFor, PORT_COLORS, specFor, type NodeKind, type PortKind, type WorkbenchNode } from "./types";
 
@@ -1036,17 +1036,17 @@ export default function WorkbenchApp() {
 
   return (
     <div className={styles.shell}>
-      <header className="site-navigation generator-navigation">
-        <Link className="site-wordmark" href="/">Material Collager</Link>
-        <nav aria-label="Primary navigation">
-          <Link href="/">Library</Link>
-          <Link href="/generator">Generator</Link>
-          <Link className="active" href="/workbench">Workbench</Link>
-        </nav>
-        <span className={styles.savedAt}>
-          {restoreError ? "Could not load" : savedAt ? `Saved ${new Date(savedAt).toLocaleTimeString()}` : restored ? "Autosaves locally" : "Loading…"}
-        </span>
-      </header>
+      <SiteNavigation
+        active="workbench"
+        className="generator-navigation"
+        right={
+          <div className="generator-status" aria-label="Workbench save state">
+          <span className={styles.savedAt}>
+            {restoreError ? "Could not load" : savedAt ? `Saved ${new Date(savedAt).toLocaleTimeString()}` : restored ? "Autosaves locally" : "Loading…"}
+          </span>
+          </div>
+        }
+      />
       <div className={styles.canvasWrap}>
         <div className={styles.canvasFlow}>
           <ReactFlowProvider>

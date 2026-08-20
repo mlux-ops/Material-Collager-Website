@@ -4,6 +4,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DropdownSelect } from "../components/DropdownSelect";
+import { DitherReveal } from "../components/DitherReveal";
+import { SiteNavigation } from "../components/SiteNavigation";
 import {
   COLLAGE_TYPES,
   COMPOSITIONS,
@@ -494,6 +496,10 @@ export default function Home() {
   const [diagnostics, setDiagnostics] = useState<GenerationDiagnostics | null>(null);
   const [promptPreview, setPromptPreview] = useState("");
   const [isWorking, setIsWorking] = useState(false);
+  // The render API returns one finished image with no progress stream, so the
+  // dither holds while working and then resolves once, driven from here.
+  const [revealProgress, setRevealProgress] = useState(1);
+
   const [workingStage, setWorkingStage] = useState("");
   const [overallProgress, setOverallProgress] = useState(0);
   const [referenceProgress, setReferenceProgress] = useState<Record<string, number>>({});
@@ -509,6 +515,11 @@ export default function Home() {
     }
     if (next?.dataUrl.startsWith("blob:")) resultUrlRef.current = next.dataUrl;
     setResult(next);
+    if (next) {
+      // Hold the new image as ink for a beat, then let the dither resolve it.
+      setRevealProgress(0);
+      window.setTimeout(() => setRevealProgress(1), 80);
+    }
   };
   const [finalFormat, setFinalFormat] = useState<FinalFormat>("landscape");
   const [jobs, setJobs] = useState<GenerationJob[]>([]);
@@ -1481,19 +1492,17 @@ export default function Home() {
 
   return (
     <main className="app-shell generator-shell">
-      <header className="site-navigation generator-navigation">
-        <Link className="site-wordmark" href="/">Material Collager</Link>
-        <nav aria-label="Primary navigation">
-          <Link href="/">Library</Link>
-          <Link className="active" href="/generator">Generator</Link>
-          <Link href="/workbench">Workbench</Link>
-        </nav>
-        <div className="generator-status" aria-label="Board reference summary">
-          <span>{totalReferences}/{MAX_REFERENCE_IMAGES} references</span>
-          <span>{formatBytes(totalReferenceBytes)}</span>
-          <span>{lastSavedAt ? "Draft saved" : "Local draft"}</span>
-        </div>
-      </header>
+      <SiteNavigation
+        active="generator"
+        className="generator-navigation"
+        right={
+          <div className="generator-status" aria-label="Board reference summary">
+            <span>{totalReferences}/{MAX_REFERENCE_IMAGES} references</span>
+            <span>{formatBytes(totalReferenceBytes)}</span>
+            <span>{lastSavedAt ? "Draft saved" : "Local draft"}</span>
+          </div>
+        }
+      />
 
       <div className="workbench">
         <section className="builder-surface">
@@ -1893,8 +1902,22 @@ export default function Home() {
               className={`result-stage ${result ? "has-result" : ""}`}
               style={result ? { aspectRatio: `${previewWidth} / ${previewHeight}` } : undefined}
             >
-              {result ? (
-                <img src={result.dataUrl} alt="Generated material collage" />
+              {isWorking ? (
+                <DitherReveal
+                  className="dither-stage"
+                  style={{ height: "100%" }}
+                  src={result?.dataUrl ?? "/sample-collage.png"}
+                  alt="Rendering the collage"
+                />
+              ) : result ? (
+                <DitherReveal
+                  key={result.dataUrl}
+                  className="dither-stage"
+                  style={{ height: "100%" }}
+                  src={result.dataUrl}
+                  alt="Generated material collage"
+                  progress={revealProgress}
+                />
               ) : (
                 <img src="/sample-collage.png" alt="Sample material collage" />
               )}
@@ -1915,7 +1938,7 @@ export default function Home() {
                 <button type="button" className="cancel-button" onClick={cancelWork}>Cancel</button>
               ) : (
                 <button type="button" className="primary-button" onClick={() => void generate(false)} disabled={!hasFiles} title="Renders immediately using the selected quality, resolution, and styling settings.">
-                  Current Settings
+                  Generate Collage
                 </button>
               )}
               <button type="button" className="draft-button" onClick={() => void generate(false, 1, "draft")} disabled={isWorking || !hasFiles} title="Creates a low-cost preview for composition and placement.">
