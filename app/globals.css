@@ -3374,3 +3374,11 @@ body {
   flex: 1 1 0;
   justify-content: center;
 }
+
+/* The active nav chip is now the sliding .nav-pill element (see effects.css),
+   so the link itself must not paint its own black background or the block
+   would appear to teleport rather than travel. */
+.site-navigation nav a.active {
+  background: transparent;
+  color: var(--mono-white);
+}

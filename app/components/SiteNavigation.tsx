@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
+import { TransitionLink } from "./TransitionLink";
+import { useNavPillSlide } from "./useNavPillSlide";
 
 export type SiteNavigationActive = "library" | "generator" | "workbench";
 
@@ -20,19 +22,32 @@ export function SiteNavigation({
   className?: string;
   right?: ReactNode;
 }) {
+  const trackRef = useRef<HTMLElement>(null);
+  const pillRef = useRef<HTMLSpanElement>(null);
+  // The black block is one element that slides between the three links rather
+  // than a background that blinks from one link to the next.
+  useNavPillSlide(trackRef, pillRef, active);
+
+  const item = (key: SiteNavigationActive, href: string, label: string) => (
+    <TransitionLink
+      href={href}
+      className={`nav-pill-link${active === key ? " active" : ""}`}
+      data-nav-key={key}
+      data-active={active === key}
+      aria-current={active === key ? "page" : undefined}
+    >
+      {label}
+    </TransitionLink>
+  );
+
   return (
     <header className={className ? `site-navigation ${className}` : "site-navigation"}>
       <Link className="site-wordmark" href="/">Material Collager</Link>
-      <nav aria-label="Primary navigation">
-        <Link href="/" className={active === "library" ? "active" : undefined} aria-current={active === "library" ? "page" : undefined}>
-          Library
-        </Link>
-        <Link href="/generator" className={active === "generator" ? "active" : undefined} aria-current={active === "generator" ? "page" : undefined}>
-          Generator
-        </Link>
-        <Link href="/workbench" className={active === "workbench" ? "active" : undefined} aria-current={active === "workbench" ? "page" : undefined}>
-          Workbench
-        </Link>
+      <nav aria-label="Primary navigation" className="nav-pill-track" ref={trackRef}>
+        <span className="nav-pill" aria-hidden ref={pillRef} />
+        {item("library", "/", "Library")}
+        {item("generator", "/generator", "Generator")}
+        {item("workbench", "/workbench", "Workbench")}
       </nav>
       {right}
     </header>

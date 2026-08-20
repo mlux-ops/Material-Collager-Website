@@ -158,3 +158,54 @@
     animation: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Page transition: the plotter wipe.
+   The outgoing page holds still and the incoming one is drawn over it from the
+   left, with a single 1px black rule riding the leading edge - the same line
+   weight everything else on the site is built from. No crossfade, no blur.
+   Paired with app/components/TransitionLink.tsx.
+--------------------------------------------------------------------------- */
+@keyframes mc-plotter-wipe {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes mc-hold {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+::view-transition-old(root) {
+  /* Held at full strength, not faded - the new sheet is drawn over the top of
+     it. `animation: none` is NOT enough here: the snapshot then falls back to
+     its own zero-duration state and the outgoing page vanishes, leaving white
+     paper behind the wipe. */
+  animation: mc-hold var(--duration-slow, 400ms) linear both;
+  mix-blend-mode: normal;
+}
+
+::view-transition-new(root) {
+  animation: mc-plotter-wipe var(--duration-slow, 400ms) var(--ease-smooth-out, cubic-bezier(0.22, 1, 0.36, 1)) both;
+  filter: drop-shadow(1px 0 0 var(--ink, #171a18));
+}
+
+::view-transition-group(root) {
+  animation-duration: var(--duration-slow, 400ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+    filter: none;
+  }
+}
