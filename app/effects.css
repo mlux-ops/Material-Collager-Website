@@ -106,12 +106,17 @@
   top: 0;
   bottom: 0;
   left: 0;
+  /* Fixed base width; useNavPillSlide sizes the pill with scaleX instead of
+     animating `width` — width transitions run on the main thread (layout +
+     paint every frame) and visibly drop frames while React commits a route,
+     whereas a pure transform stays on the compositor at the display's
+     refresh rate. The block is solid ink, so scaling has no visual cost. */
+  width: 100px;
   background: var(--ink, #171a18);
   z-index: 0;
-  transition:
-    transform var(--duration-fast) var(--ease-smooth-out),
-    width var(--duration-fast) var(--ease-smooth-out);
-  will-change: transform, width;
+  transform-origin: left center;
+  transition: transform var(--duration-fast) var(--ease-smooth-out);
+  will-change: transform;
 }
 
 .nav-pill-link {
