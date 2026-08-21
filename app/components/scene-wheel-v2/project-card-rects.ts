@@ -22,8 +22,16 @@ import {
 /** Must match useMobileSceneFraming in SceneWheelCanvas. */
 export const MOBILE_FRAMING_QUERY = "(max-width: 700px) and (max-aspect-ratio: 18 / 25)";
 
-// Mirrors SceneCard: plane height is fixed, width follows the image aspect.
+// Mirrors SceneCard exactly: the VISIBLE photo is not the card box's center
+// plane — it is an inset plane pushed toward the camera along the card's
+// local +Z (mesh position [0, 0, CARD_DEPTH / 2 + 0.001], planeGeometry
+// [width - IMAGE_INSET, CARD_HEIGHT - IMAGE_INSET]). Projecting the box's
+// mid-plane instead left the placeholders a few pixels off, growing with
+// proximity to the camera.
 const CARD_HEIGHT = 2.52;
+const CARD_DEPTH = 0.045;
+const IMAGE_INSET = 0.018;
+const IMAGE_PLANE_Z = CARD_DEPTH / 2 + 0.001;
 
 export type Point = { x: number; y: number };
 
@@ -100,12 +108,13 @@ export function projectCardRects(
     const pose = getSceneWheelPose(index, count, progress);
     if (pose.opacity <= 0.02) continue;
     const aspect = Math.max(0.72, Math.min(1.65, aspects[index] ?? 4 / 3));
-    const hw = (CARD_HEIGHT * aspect * pose.scale) / 2;
-    const hh = (CARD_HEIGHT * pose.scale) / 2;
+    const hw = ((CARD_HEIGHT * aspect - IMAGE_INSET) * pose.scale) / 2;
+    const hh = ((CARD_HEIGHT - IMAGE_INSET) * pose.scale) / 2;
+    const planeZ = IMAGE_PLANE_Z * pose.scale;
     // Pose position/quaternion come from shared scratch objects — consume
     // them fully before the next getSceneWheelPose call.
     const corner = (x: number, y: number) =>
-      toScreen(new Vector3(x, y, 0).applyQuaternion(pose.quaternion).add(pose.position));
+      toScreen(new Vector3(x, y, planeZ).applyQuaternion(pose.quaternion).add(pose.position));
     const tl = corner(-hw, hh);
     const tr = corner(hw, hh);
     const br = corner(hw, -hh);
