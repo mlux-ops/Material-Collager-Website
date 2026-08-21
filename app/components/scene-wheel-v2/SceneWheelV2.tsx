@@ -381,7 +381,8 @@ export default function SceneWheelV2() {
                         src={thumb.thumb}
                         alt=""
                         progress={scenePainted ? 1 : undefined}
-                        cell={3}
+                        cell={1.5}
+                        colorize
                         ink="#171a18"
                         paper="#fafafa"
                         style={{ width: "100%", height: "100%" }}

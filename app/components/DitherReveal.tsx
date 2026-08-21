@@ -36,6 +36,9 @@ export type DitherRevealProps = {
   mode?: DitherRevealMode;
   /** Cell size in CSS px at the image's intrinsic resolution. */
   cell?: number;
+  /** Tint the dithered "ink" cells with the image's own sampled color at
+   * that cell instead of the flat ink color. Paper gaps are unchanged. */
+  colorize?: boolean;
   ink?: string;
   paper?: string;
   width?: number;
@@ -123,6 +126,7 @@ export function DitherReveal({
   progress,
   mode = "bayer",
   cell = 4,
+  colorize = false,
   ink = "var(--ink, #171a18)",
   paper = "var(--background, #eceeea)",
   width,
@@ -251,9 +255,18 @@ export function DitherReveal({
               // ink/paper split breathes instead of a static frozen still.
               const l = indeterminate ? (lum[i] + Math.sin(shimmer + i * 0.37) * 0.03) : lum[i];
               const isInk = l < threshold;
-              data[o] = isInk ? ir : pr;
-              data[o + 1] = isInk ? ig : pg;
-              data[o + 2] = isInk ? ib : pb;
+              if (colorize) {
+                // Ink cells carry the image's own color at this cell, so the
+                // dither reads as the picture screened onto paper rather than
+                // a flat 1-bit stamp.
+                data[o] = isInk ? r[i] : pr;
+                data[o + 1] = isInk ? g[i] : pg;
+                data[o + 2] = isInk ? b[i] : pb;
+              } else {
+                data[o] = isInk ? ir : pr;
+                data[o + 1] = isInk ? ig : pg;
+                data[o + 2] = isInk ? ib : pb;
+              }
             }
           } else {
             // halftone: dot coverage sized by darkness, revealed cells show true color
@@ -356,7 +369,7 @@ export function DitherReveal({
     };
     // Re-run when mode/indeterminate/reducedMotion changes; progress/src are
     // read live via refs so we don't restart the loop on every tick update.
-  }, [mode, indeterminate, reducedMotion]);
+  }, [mode, indeterminate, reducedMotion, colorize]);
 
   const aspect = useMemo(() => {
     if (width && height) return `${width} / ${height}`;

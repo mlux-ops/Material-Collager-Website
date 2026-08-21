@@ -188,6 +188,18 @@ transition tests, lint 0 errors.
 
 47/47 transition tests, lint 0 errors.
 
+## User eyeball round 6 (2026-08-21) — colorized, finer dither
+
+- Cell size halved again (cell 3 → 1.5 on 224px captures; ~1.5px on-screen).
+- New `colorize` mode on DitherReveal (opt-in; the generator's uses are
+  unchanged): dithered ink cells take the image's own sampled color at that
+  cell instead of flat ink, so the placeholder reads as the picture
+  screened onto paper and the resolve-to-photo handoff is nearly
+  imperceptible. Verified with a re-entry capture: all 12 placed cards
+  render the colorized fine dither in place.
+
+47/47 transition tests, lint 0 errors.
+
 ## Environment repairs made during this work (dev-only)
 
 Recorded in specs/20260821-page-transitions-upgrade/research.md: Cloudflare
