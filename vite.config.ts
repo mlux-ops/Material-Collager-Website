@@ -14,6 +14,14 @@ export default defineConfig({
     sites(),
     cloudflare({
       viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
+      // Remote-proxied bindings (Workers AI, Images) require authenticating
+      // against the deployed worker's domain, which sits behind Cloudflare
+      // Access — without an Access service token, `vinext dev` exits at
+      // startup (docs/troubleshooting.md). Off by default so local dev works
+      // out of the box; opt in when Access credentials are configured:
+      //   ENABLE_REMOTE_BINDINGS=1 npm run dev
+      // Dev-server-only setting; deploys via `wrangler deploy` are unaffected.
+      remoteBindings: process.env.ENABLE_REMOTE_BINDINGS === "1",
     }),
   ],
 });

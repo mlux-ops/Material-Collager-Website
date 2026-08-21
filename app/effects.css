@@ -202,10 +202,51 @@
   animation-duration: var(--duration-slow, 400ms);
 }
 
+/* Directional wipe: forward (nav order left-to-right) keeps the default
+   left-origin draw above; backward — a nav click earlier in the order — draws
+   from the right instead, so the spatial metaphor holds. Selected two ways:
+   transition types where the engine has them (Baseline Jan 2026), and the
+   data-nav-direction attribute TransitionLink mirrors onto <html> for engines
+   with the API but not types. */
+@keyframes mc-plotter-wipe-back {
+  from {
+    clip-path: inset(0 0 0 100%);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+html:active-view-transition-type(nav-back)::view-transition-new(root),
+html[data-nav-direction="back"]::view-transition-new(root) {
+  animation-name: mc-plotter-wipe-back;
+  filter: drop-shadow(-1px 0 0 var(--ink, #171a18));
+}
+
+/* The nav block is the continuous fixture: naming it lifts it out of the root
+   wipe into its own group (verified against the clip-path wipe — no flat-tree
+   clipping; see specs/20260821-page-transitions-upgrade/research.md T003).
+   During the transition the group crossfades the old and new pill states, so
+   the bar reads as one element whose active block dissolves to the new item
+   while the sheet changes underneath. */
+.site-navigation {
+  view-transition-name: site-nav;
+}
+
+::view-transition-group(site-nav) {
+  animation-duration: var(--duration-fast, 200ms);
+}
+
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-old(root),
-  ::view-transition-new(root) {
+  ::view-transition-new(root),
+  html[data-nav-direction="back"]::view-transition-new(root),
+  ::view-transition-group(site-nav) {
     animation: none;
     filter: none;
+  }
+
+  .site-navigation {
+    view-transition-name: none;
   }
 }

@@ -12,6 +12,7 @@ import {
 import type { SceneWheelHoverState } from "./SceneCard";
 import { useNativeScrollProgress } from "./useNativeScrollProgress";
 import { SiteNavigation } from "../SiteNavigation";
+import { RouteReady } from "../RouteReady";
 import styles from "./scene-wheel-v2.module.css";
 
 const SceneWheelCanvas = dynamic(() => import("./SceneWheelCanvas"), { ssr: false });
@@ -214,6 +215,12 @@ export default function SceneWheelV2() {
 
   return (
     <main className={`${styles.page} ${revealed ? styles.pageRevealed : ""}`} aria-busy={!revealed}>
+      {/* DOM-level readiness: the scene's chunk is loaded and this shell
+          (veil included — designed content, like the workbench's) is
+          committed. The signal cannot live inside the R3F tree: the canvas
+          mounts through R3F's rAF-scheduled loop, which is suspended during a
+          ViewTransition update callback (research.md T016). */}
+      <RouteReady path="/" />
       {revealed ? null : (
         <div className={styles.loadingVeil} role="status" aria-label="Loading library">
           <p ref={countRef} className={styles.loadingCount}>0%</p>

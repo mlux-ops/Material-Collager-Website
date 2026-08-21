@@ -5,6 +5,19 @@ import { useRef, type ReactNode } from "react";
 import { TransitionLink } from "./TransitionLink";
 import { useNavPillSlide } from "./useNavPillSlide";
 
+// Warm the Library's scene chunk on navigation intent. Only the module fetch
+// is warmable — the scene's GL/texture init (~700ms cold) happens on mount
+// and is covered by the route-ready wait instead (research.md T004). Import
+// only: must stay side-effect safe (spec FR-011).
+let libraryChunkWarmed = false;
+function warmLibraryChunk() {
+  if (libraryChunkWarmed) return;
+  libraryChunkWarmed = true;
+  void import("./scene-wheel-v2/SceneWheelV2").catch(() => {
+    libraryChunkWarmed = false; // transient failure: allow a retry on next intent
+  });
+}
+
 export type SiteNavigationActive = "library" | "generator" | "workbench";
 
 // The one shared top bar for all three pages (Library, Generator, Workbench).
@@ -35,6 +48,8 @@ export function SiteNavigation({
       data-nav-key={key}
       data-active={active === key}
       aria-current={active === key ? "page" : undefined}
+      onPointerEnter={href === "/" ? warmLibraryChunk : undefined}
+      onPointerDown={href === "/" ? warmLibraryChunk : undefined}
     >
       {label}
     </TransitionLink>

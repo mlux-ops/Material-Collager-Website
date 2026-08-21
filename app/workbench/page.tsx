@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { RouteReady } from "@/app/components/RouteReady";
 
 const WorkbenchApp = dynamic(() => import("@/app/components/workbench/WorkbenchApp"), {
   ssr: false,
@@ -12,5 +13,12 @@ const WorkbenchApp = dynamic(() => import("@/app/components/workbench/WorkbenchA
 });
 
 export default function WorkbenchPage() {
-  return <WorkbenchApp />;
+  return (
+    <>
+      {/* The workbench's own loading veil is designed content, so shell paint
+          counts as ready — the wipe never reveals a blank page (FR-008). */}
+      <RouteReady path="/workbench" />
+      <WorkbenchApp />
+    </>
+  );
 }
