@@ -29,16 +29,34 @@ const DATA_URI = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/;
 
 type StoreShape = { v: 1; items: LibraryThumb[] };
 
+/** Hard ceiling per stored data URI (~9KB of image). Anything bigger is not
+ * a 48px thumbnail and is rejected wholesale. */
+export const MAX_THUMB_CHARS = 12_000;
+
 function isValidThumb(candidate: unknown): candidate is LibraryThumb {
   if (typeof candidate !== "object" || candidate === null) return false;
   const t = candidate as Record<string, unknown>;
   return (
     typeof t.id === "string" &&
     t.id.trim().length > 0 &&
+    t.id.length <= 128 &&
     typeof t.name === "string" &&
+    t.name.length <= 256 &&
     typeof t.thumb === "string" &&
+    t.thumb.length <= MAX_THUMB_CHARS &&
     DATA_URI.test(t.thumb)
   );
+}
+
+/** Validate an untrusted list into at most MAX_THUMBS clean entries. Shared
+ * by the localStorage parse (client) and the API route (server) — the same
+ * rules guard both directions. */
+export function sanitizeThumbs(candidate: unknown): LibraryThumb[] {
+  if (!Array.isArray(candidate)) return [];
+  return candidate
+    .filter(isValidThumb)
+    .map((t) => ({ id: t.id, name: t.name, thumb: t.thumb }))
+    .slice(0, MAX_THUMBS);
 }
 
 /** Parse a serialized store. Exposed for tests; tolerant of any garbage. */
@@ -48,9 +66,7 @@ export function parseThumbStore(raw: string | null): LibraryThumb[] {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return [];
     if ((parsed as StoreShape).v !== 1) return [];
-    const items = (parsed as StoreShape).items;
-    if (!Array.isArray(items)) return [];
-    return items.filter(isValidThumb).slice(0, MAX_THUMBS);
+    return sanitizeThumbs((parsed as StoreShape).items);
   } catch {
     return [];
   }
@@ -58,7 +74,7 @@ export function parseThumbStore(raw: string | null): LibraryThumb[] {
 
 /** Serialize with the version stamp and cap. Exposed for tests. */
 export function serializeThumbStore(items: LibraryThumb[]): string {
-  return JSON.stringify({ v: 1, items: items.filter(isValidThumb).slice(0, MAX_THUMBS) } satisfies StoreShape);
+  return JSON.stringify({ v: 1, items: sanitizeThumbs(items) } satisfies StoreShape);
 }
 
 export function loadStoredThumbs(): LibraryThumb[] {
@@ -86,9 +102,28 @@ export function storedThumbsMatch(stored: LibraryThumb[], ids: string[]): boolea
 }
 
 /**
- * Downscale the given card images to data-URI thumbnails and persist them.
- * Runs after the scene has painted (images are in the HTTP cache), so this
- * is cheap; failures skip the item rather than aborting the batch.
+ * Fetch the shared thumbnail set from D1 (see /api/library/thumbs). Fills
+ * localStorage so the next visit paints without a round trip. Returns []
+ * on any failure — the placeholder row is always optional.
+ */
+export async function fetchServerThumbs(): Promise<LibraryThumb[]> {
+  try {
+    const response = await fetch("/api/library/thumbs", { cache: "no-store" });
+    if (!response.ok) return [];
+    const payload: unknown = await response.json();
+    const thumbs = sanitizeThumbs((payload as { thumbs?: unknown })?.thumbs);
+    if (thumbs.length > 0) storeThumbs(thumbs);
+    return thumbs;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Downscale the given card images to data-URI thumbnails and persist them —
+ * locally for instant next paint, and to D1 so every device and visitor
+ * shares the set. Runs after the scene has painted (images are in the HTTP
+ * cache), so this is cheap; failures skip the item rather than aborting.
  */
 export async function captureAndStoreThumbs(
   cards: { id: string; url: string; name: string }[],
@@ -113,5 +148,15 @@ export async function captureAndStoreThumbs(
       // Broken/blocked image: skip it.
     }
   }
-  if (out.length > 0) storeThumbs(out);
+  if (out.length === 0) return;
+  storeThumbs(out);
+  try {
+    await fetch("/api/library/thumbs", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ thumbs: out }),
+    });
+  } catch {
+    // Server persistence is best-effort; the local copy already landed.
+  }
 }

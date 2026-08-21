@@ -123,6 +123,30 @@ Post-round verification (headless): 34/34 transition tests; wipe 700ms;
 `nav-pill` group present; veil skipped on re-entry; canvas mounts after
 transition settle; ready→finished both directions; lint 0 errors.
 
+## User eyeball round 3 (2026-08-21) — texture-gap placeholder + D1 persistence
+
+Owner confirmed all round-2 fixes; remaining item was the white flash while
+the Library's textures load. Shipped their design: tiny stored thumbnails
+of the cards hold the canvas area as a 1-bit Bayer-dithered row
+(DitherReveal, the generator's effect); the scene's first painted frame —
+signalled from inside the texture Suspense boundary, so empty clear-frames
+can't fire it — resolves the dither and fades the row.
+
+Storage graduated from localStorage to **D1** (`library_thumbs`, lazy
+schema per the generation-jobs pattern) behind `GET/PUT
+/api/library/thumbs`: thumbnails are captured client-side after a
+successful paint (~48px JPEG data URIs), validated on both write and read
+(data:-URI-only regex, per-entry 12KB cap, 16 max, unknown fields
+stripped), and shared across devices; localStorage remains as an instant
+local cache hydrated from the server.
+
+Verified headless: capture stores 16 to D1 on first visit; re-entry shows
+a 7-card dithered row and fades after paint; a fresh profile (empty
+localStorage) hydrates 16 from the server; first-ever loads stay
+veil-covered with the row locked out (no late placeholder flash — a
+regression where the flash-guard skipped the capture pass was caught and
+fixed in the same round). 40/40 transition tests, lint 0 errors.
+
 ## Environment repairs made during this work (dev-only)
 
 Recorded in specs/20260821-page-transitions-upgrade/research.md: Cloudflare

@@ -33,6 +33,7 @@ Chunked upload pipeline that preserves original files end-to-end.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/library` | List saved boards/outputs |
+| GET / PUT | `/api/library/thumbs` | Shared placeholder thumbnails for the Library scene (D1 `library_thumbs`; validated ~48px data URIs, capped at 16) |
 | GET | `/api/library/[id]` — `/image` | Fetch a stored output image (R2-backed) |
 | PATCH | `/api/library/[id]` | Update board metadata |
 | POST | `/api/release-import` | Import a release bundle into the library |

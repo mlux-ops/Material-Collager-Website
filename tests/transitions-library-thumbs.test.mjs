@@ -1,9 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { parseThumbStore, serializeThumbStore, storedThumbsMatch, MAX_THUMBS } = await import(
-  "../app/lib/library-thumbs.ts"
-);
+const {
+  parseThumbStore,
+  serializeThumbStore,
+  storedThumbsMatch,
+  sanitizeThumbs,
+  MAX_THUMBS,
+  MAX_THUMB_CHARS,
+} = await import("../app/lib/library-thumbs.ts");
 
 const validThumb = (id) => ({
   id,
@@ -44,6 +49,19 @@ test("rejects non-data-URI thumb sources (store poisoning guard)", () => {
     ],
   });
   assert.deepEqual(parseThumbStore(poisoned).map((t) => t.id), ["clean"]);
+});
+
+test("sanitizeThumbs is the shared guard for API input", () => {
+  assert.deepEqual(sanitizeThumbs(null), []);
+  assert.deepEqual(sanitizeThumbs("[]"), []);
+  assert.deepEqual(sanitizeThumbs([validThumb("a")]).map((t) => t.id), ["a"]);
+  // Oversized payloads are rejected per entry, not truncated
+  const fat = { ...validThumb("fat"), thumb: `data:image/jpeg;base64,${"A".repeat(MAX_THUMB_CHARS)}` };
+  assert.deepEqual(sanitizeThumbs([fat, validThumb("ok")]).map((t) => t.id), ["ok"]);
+  // Extra properties are stripped, never stored
+  const noisy = { ...validThumb("n"), extra: "field", __proto__: { evil: true } };
+  const clean = sanitizeThumbs([noisy])[0];
+  assert.deepEqual(Object.keys(clean).sort(), ["id", "name", "thumb"]);
 });
 
 test("storedThumbsMatch compares ids in order, capped", () => {

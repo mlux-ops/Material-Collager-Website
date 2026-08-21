@@ -17,6 +17,7 @@ import { DitherReveal } from "../DitherReveal";
 import { awaitTransitionSettled } from "@/app/lib/route-ready.ts";
 import {
   captureAndStoreThumbs,
+  fetchServerThumbs,
   loadStoredThumbs,
   storedThumbsMatch,
   MAX_THUMBS,
@@ -58,9 +59,26 @@ export default function SceneWheelV2() {
   // painted frame resolves the dither into the tiny color images and fades
   // the row out, revealing the real cards behind it. No stored thumbs (very
   // first visit) simply means no row — the veil covers first arrival anyway.
-  const [thumbs] = useState(loadStoredThumbs);
+  const [thumbs, setThumbs] = useState(loadStoredThumbs);
   const [scenePainted, setScenePainted] = useState(false);
   const [thumbRowGone, setThumbRowGone] = useState(false);
+
+  // New device / cleared storage: hydrate the row from the shared D1 set.
+  // Skipped once the scene has painted — a placeholder arriving after the
+  // real thing would only flash.
+  useEffect(() => {
+    if (thumbs.length > 0) return;
+    let alive = true;
+    void fetchServerThumbs().then((serverThumbs) => {
+      if (alive && serverThumbs.length > 0) {
+        setThumbs((current) => (current.length === 0 ? serverThumbs : current));
+      }
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only hydration
+  }, []);
   const countRef = useRef<HTMLParagraphElement>(null);
   // Written by the fetch + image-preload passes, read by the rAF counter so
   // progress eases toward the real figure instead of snapping between images.
@@ -177,7 +195,12 @@ export default function SceneWheelV2() {
   // CSS), then refresh the stored thumbnails while the tab is idle.
   useEffect(() => {
     if (!scenePainted) return;
-    const gone = window.setTimeout(() => setThumbRowGone(true), 600);
+    // Row retire: with no row up, lock it out on the next tick so a late
+    // server hydration can't flash a placeholder over the visible scene;
+    // otherwise fade it out shortly after the dither resolves (fade in CSS).
+    const gone = window.setTimeout(() => setThumbRowGone(true), thumbs.length === 0 ? 0 : 600);
+    // Thumbnail refresh runs regardless of whether a row was shown — first
+    // visits are exactly the case that must capture and persist the set.
     const idle = window.setTimeout(() => {
       const cards = catalog.items
         .slice(0, MAX_THUMBS)
