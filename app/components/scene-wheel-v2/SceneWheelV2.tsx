@@ -374,7 +374,7 @@ export default function SceneWheelV2() {
                         height: `${card.height}px`,
                         opacity: card.opacity,
                         zIndex: card.z,
-                        transform: `matrix(${card.a}, ${card.b}, ${card.c}, ${card.d}, ${card.left}, ${card.top})`,
+                        transform: card.transform,
                       }}
                     >
                       <DitherReveal

@@ -4,6 +4,12 @@
  * placeholder layer (dithered thumbnails in SceneWheelV2) can stand exactly
  * where each card will render. No GL, no renderer: three's vector/camera
  * classes only.
+ *
+ * Placement is a full projective map: a perspective camera imaging a planar
+ * card is a homography, so mapping the element's rect onto the four
+ * projected corners (CSS matrix3d) reproduces the card's outline exactly —
+ * foreshortening included — rather than approximating it with a
+ * parallelogram.
  */
 
 import { PerspectiveCamera, Vector3 } from "three";
@@ -19,26 +25,56 @@ export const MOBILE_FRAMING_QUERY = "(max-width: 700px) and (max-aspect-ratio: 1
 // Mirrors SceneCard: plane height is fixed, width follows the image aspect.
 const CARD_HEIGHT = 2.52;
 
+export type Point = { x: number; y: number };
+
 export type PlacedCard = {
-  /** Screen px of the card's top-left corner. */
-  left: number;
-  top: number;
-  /** Screen px lengths of the projected top and left edges. */
+  /** Layout box size in px; the transform maps this box onto the quad. */
   width: number;
   height: number;
-  /** CSS matrix() components mapping the width×height box onto the
-   * projected parallelogram (perspective tilt approximated linearly —
-   * within a pixel or two at this scene's mild angles). */
-  a: number;
-  b: number;
-  c: number;
-  d: number;
+  /** CSS transform (matrix3d homography incl. translation; origin 0 0). */
+  transform: string;
+  /** Projected corners, exported for tests and debugging overlays. */
+  corners: { tl: Point; tr: Point; br: Point; bl: Point };
   opacity: number;
   z: number;
   /** Rail-relative slot (negative = the wrap-around card easing in behind
    * the viewer's shoulder). */
   relative: number;
 };
+
+/**
+ * Homography mapping the rect (0,0)-(w,h) onto the quad tl,tr,br,bl,
+ * expressed as a CSS matrix3d (Heckbert's unit-square-to-quad mapping,
+ * rescaled to the element box). Returns null when the quad degenerates.
+ */
+export function quadTransform(
+  tl: Point,
+  tr: Point,
+  br: Point,
+  bl: Point,
+  w: number,
+  h: number,
+): string | null {
+  const sx = tl.x - tr.x + br.x - bl.x;
+  const sy = tl.y - tr.y + br.y - bl.y;
+  const dx1 = tr.x - br.x;
+  const dy1 = tr.y - br.y;
+  const dx2 = bl.x - br.x;
+  const dy2 = bl.y - br.y;
+  const den = dx1 * dy2 - dx2 * dy1;
+  if (!Number.isFinite(den) || Math.abs(den) < 1e-9) return null;
+  const g = (sx * dy2 - dx2 * sy) / den;
+  const hh = (dx1 * sy - sx * dy1) / den;
+  const a = tr.x - tl.x + g * tr.x;
+  const b = bl.x - tl.x + hh * bl.x;
+  const c = tl.x;
+  const d = tr.y - tl.y + g * tr.y;
+  const e = bl.y - tl.y + hh * bl.y;
+  const f = tl.y;
+  const m = [a / w, d / w, 0, g / w, b / h, e / h, 0, hh / h, 0, 0, 1, 0, c, f, 0, 1];
+  if (!m.every(Number.isFinite)) return null;
+  return `matrix3d(${m.map((v) => v.toPrecision(8)).join(", ")})`;
+}
 
 export function projectCardRects(
   count: number,
@@ -54,7 +90,7 @@ export function projectCardRects(
   camera.position.set(...spec.position);
   camera.updateMatrixWorld(true);
 
-  const toScreen = (v: Vector3) => {
+  const toScreen = (v: Vector3): Point => {
     const ndc = v.clone().project(camera);
     return { x: ((ndc.x + 1) / 2) * viewportWidth, y: ((1 - ndc.y) / 2) * viewportHeight };
   };
@@ -72,19 +108,18 @@ export function projectCardRects(
       toScreen(new Vector3(x, y, 0).applyQuaternion(pose.quaternion).add(pose.position));
     const tl = corner(-hw, hh);
     const tr = corner(hw, hh);
+    const br = corner(hw, -hh);
     const bl = corner(-hw, -hh);
     const width = Math.hypot(tr.x - tl.x, tr.y - tl.y);
     const height = Math.hypot(bl.x - tl.x, bl.y - tl.y);
     if (!Number.isFinite(width) || !Number.isFinite(height) || width < 2 || height < 2) continue;
+    const transform = quadTransform(tl, tr, br, bl, width, height);
+    if (!transform) continue;
     out.push({
-      left: tl.x,
-      top: tl.y,
       width,
       height,
-      a: (tr.x - tl.x) / width,
-      b: (tr.y - tl.y) / width,
-      c: (bl.x - tl.x) / height,
-      d: (bl.y - tl.y) / height,
+      transform,
+      corners: { tl, tr, br, bl },
       opacity: pose.opacity,
       // Lower `relative` = nearer the viewer = stacked on top.
       z: Math.max(1, Math.round(500 - pose.relative * 10)),

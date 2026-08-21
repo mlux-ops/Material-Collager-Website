@@ -171,6 +171,23 @@ Verified headless: re-entry renders 12 placed dithered cards in the exact
 cascade (screenshot); fade-through to the painted scene unchanged. 46/46
 transition tests, lint 0 errors.
 
+## User eyeball round 5 (2026-08-21) — exact registration + pill dip revert
+
+- **Placeholder outlines didn't line up with the cards**: the parallelogram
+  approximation ignored perspective foreshortening. Placement is now a full
+  projective map — Heckbert square-to-quad homography as CSS matrix3d onto
+  the four projected corners. A unit test asserts the matrix lands all four
+  corners within 0.01px, and a half-opacity ghost capture over the painted
+  scene shows exact registration on all 12 visible cards.
+- **Ink pill dipped vertically during route changes**: the snapshot-morph
+  interpolated both axes between per-page bar positions. Reverted in favor
+  of a live slide — the incoming bar seats its pill on the previous route's
+  item (remembered at module scope) and slides horizontally within its own
+  bar; the pill's view-transition-name is gone (verified computed "none").
+  Reduced motion seats directly with no slide.
+
+47/47 transition tests, lint 0 errors.
+
 ## Environment repairs made during this work (dev-only)
 
 Recorded in specs/20260821-page-transitions-upgrade/research.md: Cloudflare

@@ -262,32 +262,12 @@ html:active-view-transition .site-navigation {
   opacity: 1;
 }
 
-/* The ink pill gets its own name, which lifts it OUT of the bar's snapshot
-   into a group of its own — so the browser morphs its box from the old
-   active item to the new one. This is what makes the pill visibly travel in
-   BOTH directions; the per-page pill element mounts already at its
-   destination, so without this the backward journey read as a hard jump. */
-.nav-pill {
-  view-transition-name: nav-pill;
-}
-
-::view-transition-group(nav-pill) {
-  animation-duration: var(--duration-fast, 250ms);
-  animation-timing-function: var(--ease-smooth-out, cubic-bezier(0.22, 1, 0.36, 1));
-}
-
-/* Both pill snapshots are the same solid ink block — crossfading them adds
-   nothing and can shimmer at fractional offsets. Show one solid block and
-   let the group's geometry morph do the sliding. */
-::view-transition-old(nav-pill) {
-  animation: none;
-  opacity: 0;
-}
-
-::view-transition-new(nav-pill) {
-  animation: none;
-  opacity: 1;
-}
+/* The pill's cross-page slide is LIVE, not snapshot-morphed: the incoming
+   bar (shown from frame one, above) seats its pill on the previous route's
+   item and slides it horizontally to the new one (useNavPillSlide). A
+   view-transition group morph was tried here and reverted — it interpolates
+   both axes, so any per-page difference in the bar's position read as the
+   pill dipping vertically mid-slide. */
 
 /* Let clicks land on the incoming page while the wipe plays: the snapshot
    overlay otherwise swallows input for the full wipe duration. With this,
@@ -301,17 +281,12 @@ html:active-view-transition .site-navigation {
   ::view-transition-old(root),
   ::view-transition-new(root),
   html[data-nav-direction="back"]::view-transition-new(root),
-  ::view-transition-group(site-nav),
-  ::view-transition-group(nav-pill) {
+  ::view-transition-group(site-nav) {
     animation: none;
     filter: none;
   }
 
   .site-navigation {
-    view-transition-name: none;
-  }
-
-  .nav-pill {
     view-transition-name: none;
   }
 }
