@@ -3382,3 +3382,30 @@ body {
   background: transparent;
   color: var(--mono-white);
 }
+
+/* MAX LUX wordmark, persistent top-right in the site navigation. Additive:
+   does not restyle the bar itself. The right-group wrapper carries the
+   push-right so per-page `right` content (e.g. the generator status, which
+   has its own margin-left: auto that becomes a no-op inside the wrapper)
+   keeps sitting flush against the logo. */
+.site-nav-right {
+  align-items: stretch;
+  display: flex;
+  gap: 16px;
+  margin-left: auto;
+}
+
+.site-logo {
+  align-self: center;
+  color: var(--mono-black);
+  display: block;
+  user-select: none;
+}
+
+/* The mark is inline SVG: textLength stretches all six glyphs to identical
+   block widths (see SiteNavigation), so sizing is one knob — the box. */
+.site-logo svg {
+  display: block;
+  height: 42px;
+  width: 54px; /* viewBox 60x47 ratio */
+}

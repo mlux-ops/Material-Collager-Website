@@ -94,7 +94,39 @@ export function SiteNavigation({
         {item("generator", "/generator", "Generator")}
         {item("workbench", "/workbench", "Workbench")}
       </nav>
-      {right}
+      <div className="site-nav-right">
+        {right}
+        {/* MAX LUX wordmark — persistent, top right, on every page. Drawn as
+            type + rule bars (not an image) so it stays crisp at any zoom and
+            inherits the ink token. */}
+        <span className="site-logo" role="img" aria-label="Max Lux">
+          {/* textLength + spacingAndGlyphs stretches every glyph to the same
+              exact width — the mark's six letters are uniform blocks with
+              near-zero whitespace, which per-letter cells can't achieve
+              (glyphs keep natural widths and an X leaves air an M doesn't). */}
+          <svg viewBox="0 0 60 47" aria-hidden="true" focusable="false">
+            {["MAX", "LUX"].map((row, rowIndex) => (
+              <g key={row}>
+                {row.split("").map((letter, i) => (
+                  <text
+                    key={i}
+                    x={0.8 + i * 20}
+                    y={16.5 + rowIndex * 25}
+                    fontSize="22"
+                    fontWeight="900"
+                    textLength="18.4"
+                    lengthAdjust="spacingAndGlyphs"
+                    fill="currentColor"
+                  >
+                    {letter}
+                  </text>
+                ))}
+                <rect x="0" y={19.5 + rowIndex * 25} width="60" height="2.5" fill="currentColor" />
+              </g>
+            ))}
+          </svg>
+        </span>
+      </div>
     </header>
   );
 }
