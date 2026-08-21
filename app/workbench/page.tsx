@@ -3,7 +3,6 @@
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { RouteReady } from "@/app/components/RouteReady";
-import { awaitTransitionSettled } from "@/app/lib/route-ready.ts";
 
 const WorkbenchApp = dynamic(() => import("@/app/components/workbench/WorkbenchApp"), {
   ssr: false,
@@ -19,28 +18,35 @@ function WorkbenchVeil() {
 }
 
 export default function WorkbenchPage() {
-  // First visits pay the workbench chunk's parse/eval and the node editor's
-  // mount on the main thread; doing that mid-wipe starves the transition of
-  // frames (the incoming side is live) and reads as a white freeze. Hold the
-  // app until the wipe settles — the designed veil carries the gap, and with
-  // hover warming (SiteNavigation) the post-settle mount is quick.
-  const [mountApp, setMountApp] = useState(false);
+  // Readiness is deliberately NOT signalled until the real app's chunk has
+  // loaded and committed: the wipe holds on the outgoing page (readiness
+  // wait in TransitionLink, bounded by READY_BUDGET_MS) while the chunk
+  // fetches and evaluates — the update callback suspends rendering, so that
+  // work never competes with animation frames — and then one normal-speed
+  // wipe reveals the finished workbench. If the chunk outlives the budget,
+  // the wipe proceeds onto the designed veil instead (FR-007/FR-008), which
+  // is also what a direct page load shows. Hover warming (SiteNavigation)
+  // makes the hold imperceptible in the common case.
+  const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     let alive = true;
-    void awaitTransitionSettled().then(() => {
-      if (alive) setMountApp(true);
-    });
+    void import("@/app/components/workbench/WorkbenchApp")
+      .then(() => {
+        if (alive) setLoaded(true);
+      })
+      .catch(() => {
+        // Chunk failure: leave the veil; the budget releases the wipe.
+      });
     return () => {
       alive = false;
     };
   }, []);
 
+  if (!loaded) return <WorkbenchVeil />;
   return (
     <>
-      {/* The workbench's own loading veil is designed content, so shell paint
-          counts as ready — the wipe never reveals a blank page (FR-008). */}
       <RouteReady path="/workbench" />
-      {mountApp ? <WorkbenchApp /> : <WorkbenchVeil />}
+      <WorkbenchApp />
     </>
   );
 }
