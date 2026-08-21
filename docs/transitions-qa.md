@@ -2,7 +2,7 @@
 
 Date: 2026-08-21
 Feature: specs/20260821-page-transitions-upgrade (spec / plan / tasks / research)
-Status: **Verified locally (headless). Physical-device pass and deploy approval remain open.**
+Status: **Complete. Headless verification + owner desktop passes (rounds 1–8) + owner physical-device pass (2026-08-21). Deploy approved by owner.**
 
 ## Method
 
