@@ -162,6 +162,20 @@
   to { transform: translateX(0); }
 }
 
+/* Dedicated exit keyframes: reusing the enter animation with
+   animation-direction: reverse does not reliably restart a finished
+   animation, so closes popped instead of sliding. Distinct names always
+   retrigger. */
+@keyframes viewer-frost-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes viewer-slide-out {
+  from { transform: translateX(0); }
+  to { transform: translateX(102%); }
+}
+
 .viewerBackdrop {
   position: fixed;
   inset: 0;
@@ -189,11 +203,11 @@
 }
 
 .viewerLeaving {
-  animation: viewer-frost-in 340ms var(--ease-smooth-out) both reverse;
+  animation: viewer-frost-out 340ms var(--ease-smooth-out) both;
 }
 
 .viewerLeaving .viewerPanel {
-  animation: viewer-slide-in 340ms var(--ease-smooth-out) both reverse;
+  animation: viewer-slide-out 340ms var(--ease-smooth-out) both;
 }
 
 .viewerFigure {
