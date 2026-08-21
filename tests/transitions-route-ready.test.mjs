@@ -1,9 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { markRouteReady, awaitRouteReady, _resetRouteReadyForTests } = await import(
-  "../app/lib/route-ready.ts"
-);
+const {
+  markRouteReady,
+  awaitRouteReady,
+  _resetRouteReadyForTests,
+  setActiveTransition,
+  awaitTransitionSettled,
+} = await import("../app/lib/route-ready.ts");
 
 test.beforeEach(() => _resetRouteReadyForTests());
 
@@ -47,4 +51,37 @@ test("paths normalize the same way as direction mapping", async () => {
   const wait = awaitRouteReady("/generator/", 500);
   markRouteReady("/generator?from=mount");
   assert.equal(await wait, "ready");
+});
+
+test("transition-idle resolves immediately when nothing is animating", async () => {
+  let settled = false;
+  await awaitTransitionSettled().then(() => { settled = true; });
+  assert.equal(settled, true);
+});
+
+test("transition-idle waits for the active transition to finish", async () => {
+  let release;
+  setActiveTransition(new Promise((r) => { release = r; }));
+  let settled = false;
+  const wait = awaitTransitionSettled().then(() => { settled = true; });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(settled, false, "must not settle while the transition runs");
+  release();
+  await wait;
+  assert.equal(settled, true);
+});
+
+test("transition-idle treats a rejected finished promise as settled", async () => {
+  setActiveTransition(Promise.reject(new Error("skipped")));
+  await assert.doesNotReject(() => awaitTransitionSettled());
+});
+
+test("a newer transition replaces the previous one", async () => {
+  let releaseOld;
+  setActiveTransition(new Promise((r) => { releaseOld = r; }));
+  setActiveTransition(Promise.resolve());
+  // The new (already-finished) transition governs: settles without releaseOld.
+  await awaitTransitionSettled();
+  releaseOld();
+  assert.ok(true);
 });

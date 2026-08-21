@@ -237,16 +237,68 @@ html[data-nav-direction="back"]::view-transition-new(root) {
   animation-duration: var(--duration-fast, 200ms);
 }
 
+/* Bar snapshots must never be scaled to fit the group box: page-to-page
+   differences in the bar's right-side content change the snapshot size, and
+   scaled text reads as a momentary blur near the end of the wipe. Pin the
+   snapshots at natural size, anchored to the same corner the bar lays out
+   from, and let the pair crossfade without resampling. */
+::view-transition-old(site-nav),
+::view-transition-new(site-nav) {
+  object-fit: none;
+  object-position: left top;
+  overflow: hidden;
+}
+
+/* The ink pill gets its own name, which lifts it OUT of the bar's snapshot
+   into a group of its own — so the browser morphs its box from the old
+   active item to the new one. This is what makes the pill visibly travel in
+   BOTH directions; the per-page pill element mounts already at its
+   destination, so without this the backward journey read as a hard jump. */
+.nav-pill {
+  view-transition-name: nav-pill;
+}
+
+::view-transition-group(nav-pill) {
+  animation-duration: var(--duration-fast, 250ms);
+  animation-timing-function: var(--ease-smooth-out, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+/* Both pill snapshots are the same solid ink block — crossfading them adds
+   nothing and can shimmer at fractional offsets. Show one solid block and
+   let the group's geometry morph do the sliding. */
+::view-transition-old(nav-pill) {
+  animation: none;
+  opacity: 0;
+}
+
+::view-transition-new(nav-pill) {
+  animation: none;
+  opacity: 1;
+}
+
+/* Let clicks land on the incoming page while the wipe plays: the snapshot
+   overlay otherwise swallows input for the full wipe duration. With this,
+   a second nav click mid-wipe reaches the (already live) new page's nav and
+   latest-navigation-wins takes over. */
+::view-transition {
+  pointer-events: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-old(root),
   ::view-transition-new(root),
   html[data-nav-direction="back"]::view-transition-new(root),
-  ::view-transition-group(site-nav) {
+  ::view-transition-group(site-nav),
+  ::view-transition-group(nav-pill) {
     animation: none;
     filter: none;
   }
 
   .site-navigation {
+    view-transition-name: none;
+  }
+
+  .nav-pill {
     view-transition-name: none;
   }
 }

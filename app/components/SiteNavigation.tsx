@@ -5,17 +5,32 @@ import { useRef, type ReactNode } from "react";
 import { TransitionLink } from "./TransitionLink";
 import { useNavPillSlide } from "./useNavPillSlide";
 
-// Warm the Library's scene chunk on navigation intent. Only the module fetch
-// is warmable — the scene's GL/texture init (~700ms cold) happens on mount
-// and is covered by the route-ready wait instead (research.md T004). Import
-// only: must stay side-effect safe (spec FR-011).
-let libraryChunkWarmed = false;
+// Warm the Library on navigation intent: the scene chunk (module fetch) plus
+// the card images, so the browser has them fetched and decoded before the
+// scene mounts after the wipe. Read-only side effects (a GET and image cache
+// fills) — spec FR-011 safe. GL init itself is not warmable; the scene
+// defers its mount to after the transition instead (SceneWheelV2).
+let libraryWarmed = false;
 function warmLibraryChunk() {
-  if (libraryChunkWarmed) return;
-  libraryChunkWarmed = true;
+  if (libraryWarmed) return;
+  libraryWarmed = true;
   void import("./scene-wheel-v2/SceneWheelV2").catch(() => {
-    libraryChunkWarmed = false; // transient failure: allow a retry on next intent
+    libraryWarmed = false; // transient failure: allow a retry on next intent
   });
+  void fetch("/api/library", { cache: "no-store" })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((payload: unknown) => {
+      const records = Array.isArray((payload as { records?: unknown })?.records)
+        ? ((payload as { records: { imageUrl?: string }[] }).records)
+        : [];
+      for (const record of records.slice(0, 8)) {
+        if (typeof record.imageUrl !== "string") continue;
+        const img = new Image();
+        img.decoding = "async";
+        img.src = record.imageUrl;
+      }
+    })
+    .catch(() => {});
 }
 
 export type SiteNavigationActive = "library" | "generator" | "workbench";

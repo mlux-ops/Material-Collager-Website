@@ -28,7 +28,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { type ComponentProps, type MouseEvent } from "react";
 import { navDirection, shouldStartViewTransition } from "@/app/lib/nav-direction.ts";
-import { awaitRouteReady, READY_BUDGET_MS } from "@/app/lib/route-ready.ts";
+import { awaitRouteReady, READY_BUDGET_MS, setActiveTransition } from "@/app/lib/route-ready.ts";
 import { logTransition, observeTransition } from "@/app/lib/transition-debug.ts";
 
 type Props = ComponentProps<typeof Link> & { href: string };
@@ -83,6 +83,7 @@ export function TransitionLink({ href, onClick, ...rest }: Props) {
       vt.types?.add(direction === "forward" ? "nav-forward" : "nav-back");
     }
     observeTransition(vt);
+    setActiveTransition(vt.finished);
     // finished REJECTS when a transition is skipped or times out; .finally
     // would re-propagate that as an unhandled rejection in production (dev
     // attaches a catch via observeTransition). Clean up on both settlements.

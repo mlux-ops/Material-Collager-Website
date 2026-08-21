@@ -68,5 +68,30 @@ export function cancelRouteWait(): void {
   settle("superseded");
 }
 
+// ---------------------------------------------------------------------------
+// Transition-idle signal. Heavy destination work (the Library's GL/texture
+// init) stutters the wipe if it runs mid-animation, because the incoming
+// side of a same-document transition is live-rendered. Pages that want to
+// defer such work park it behind awaitTransitionSettled(): resolves
+// immediately when no wipe is running, otherwise when the current one
+// finishes (or is skipped — `finished` rejection counts as settled).
+
+let activeTransition: Promise<void> | null = null;
+
+/** Called by TransitionLink with the ViewTransition's `finished` promise. */
+export function setActiveTransition(finished: Promise<unknown>): void {
+  const p: Promise<void> = finished
+    .catch(() => {})
+    .then(() => {
+      if (activeTransition === p) activeTransition = null;
+    });
+  activeTransition = p;
+}
+
+/** Resolves when no route transition is animating. */
+export function awaitTransitionSettled(): Promise<void> {
+  return activeTransition ?? Promise.resolve();
+}
+
 /** Test seam: identical to cancelRouteWait, kept as an explicit name. */
 export const _resetRouteReadyForTests = cancelRouteWait;

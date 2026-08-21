@@ -13,6 +13,7 @@ import type { SceneWheelHoverState } from "./SceneCard";
 import { useNativeScrollProgress } from "./useNativeScrollProgress";
 import { SiteNavigation } from "../SiteNavigation";
 import { RouteReady } from "../RouteReady";
+import { awaitTransitionSettled } from "@/app/lib/route-ready.ts";
 import styles from "./scene-wheel-v2.module.css";
 
 const SceneWheelCanvas = dynamic(() => import("./SceneWheelCanvas"), { ssr: false });
@@ -39,6 +40,12 @@ export default function SceneWheelV2() {
   // choppy interruption mid-wipe — start revealed instead. Module scope, so
   // it resets on a full page load but survives route changes.
   const [revealed, setRevealed] = useState(() => hasRevealedThisSession);
+  // On SPA re-entry the wipe animates over this page LIVE, so mounting the
+  // three.js canvas (GL context + texture upload for every card at once)
+  // mid-wipe steals main-thread frames and the wipe stutters. Hold the scene
+  // until the transition settles (~50ms of scene work right after the sheet
+  // lands, measured). First arrival mounts immediately — the veil covers it.
+  const [sceneMountReady, setSceneMountReady] = useState(() => !hasRevealedThisSession);
   const countRef = useRef<HTMLParagraphElement>(null);
   // Written by the fetch + image-preload passes, read by the rAF counter so
   // progress eases toward the real figure instead of snapping between images.
@@ -76,6 +83,17 @@ export default function SceneWheelV2() {
   useLayoutEffect(() => {
     if (hoveredItem) positionCursorLabel();
   }, [hoveredItem, positionCursorLabel]);
+
+  useEffect(() => {
+    if (sceneMountReady) return;
+    let alive = true;
+    void awaitTransitionSettled().then(() => {
+      if (alive) setSceneMountReady(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [sceneMountReady]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -198,7 +216,11 @@ export default function SceneWheelV2() {
     let shown = 0;
     const step = () => {
       const target = loadTargetRef.current;
-      shown += Math.max((target - shown) * 0.12, target > shown ? 0.25 : 0);
+      // Rate-capped ease: the lerp alone let a warm load sprint 0->100 in a
+      // few hundred ms, which read as a glitch rather than a count. The cap
+      // (~1.1%/frame) stretches a best-case ramp to ~1.6s while still easing
+      // into the tail, and slow loads still track real progress.
+      shown += Math.min(Math.max((target - shown) * 0.12, target > shown ? 0.25 : 0), 1.1);
       if (target >= 100 && shown > 99.4) {
         if (countRef.current) countRef.current.textContent = "100%";
         hasRevealedThisSession = true;
@@ -246,7 +268,7 @@ export default function SceneWheelV2() {
       >
         <div className={styles.sticky}>
           <div className={styles.canvas} onPointerLeave={() => setHoveredItem(null)}>
-            {libraryState !== "loading" && catalog.items.length > 0 ? (
+            {sceneMountReady && libraryState !== "loading" && catalog.items.length > 0 ? (
               <SceneWheelCanvas
                 items={catalog.items}
                 onHover={handleHover}

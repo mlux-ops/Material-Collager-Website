@@ -82,6 +82,47 @@ Post-round verification: transitions 30/30, workbench 136, collage 19,
 scene-lab 16, lint 0 errors; forward/back QA run clean (`ready` →
 `finished`, direction attribute lifecycle correct).
 
+## User eyeball round 2 (2026-08-21) — findings and resolutions
+
+Confirmed by the owner: no flashes, no workbench errors, nav continuity,
+snappy warm navigation, reduced-motion instant, modified clicks, no
+traversal wipe, library/workbench function. New findings, all addressed:
+
+1. **FPS question** — the wipe is compositor-driven and vsync-locked (runs
+   at the display's maximum). Perceived stutter was main-thread work on the
+   live incoming page, not animation frame-rate; see items 2–3.
+2. **Stutter entering the Library as pictures load** — with the veil gone on
+   re-entry, GL init + texture upload ran mid-wipe on the live incoming
+   side. The scene mount now defers until the transition settles
+   (`awaitTransitionSettled()` in route-ready; scene work is ~50ms right
+   after the sheet lands). Hover warming now also prefetches + decodes the
+   first 8 library images alongside the chunk.
+3. **Workbench header momentarily blurry near wipe end** — the bar's old/new
+   snapshots differ in size between pages (right-side content), and scaling
+   them to the morphing group box resamples the text. Snapshots are now
+   pinned at natural size (`object-fit: none`, anchored left/top).
+4. **Ink pill jumps instead of sliding on backward navigation** — each page
+   mounts its own nav with the pill already at the destination, so no live
+   slide ever crossed a navigation. The pill now carries its own
+   `view-transition-name: nav-pill`, so the browser morphs its box between
+   the old and new positions — a real slide in both directions (250ms,
+   pill excluded from the bar's snapshots; crossfade disabled in favor of
+   the geometry morph).
+5. **First-load 0–100 count too fast to be satisfying** — the counter is now
+   rate-capped (~1.1%/frame): a warm load ramps over ~1.6s with the same
+   eased tail; slow loads still track real progress.
+6. **Header not clickable mid-wipe** — the snapshot overlay swallowed input.
+   `::view-transition { pointer-events: none }` lets clicks through to the
+   live incoming page; a mid-wipe nav click now triggers the next
+   transition, with latest-navigation-wins already covering the semantics.
+7. Clarified, no change: `?qa=1&progress=…` intentionally freezes the scene
+   (deterministic visual-QA states per AGENTS.md) — non-scrolling there is
+   the feature. Dev console transition logs are optional diagnostics (F12).
+
+Post-round verification (headless): 34/34 transition tests; wipe 700ms;
+`nav-pill` group present; veil skipped on re-entry; canvas mounts after
+transition settle; ready→finished both directions; lint 0 errors.
+
 ## Environment repairs made during this work (dev-only)
 
 Recorded in specs/20260821-page-transitions-upgrade/research.md: Cloudflare
