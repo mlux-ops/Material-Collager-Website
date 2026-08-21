@@ -64,4 +64,11 @@
   --acc-collapse: 250ms;
   --acc-chevron: 250ms;
   --acc-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Page transition (plotter wipe) — semantic tunables. Slower than the
+     generic --duration-slow on purpose: the drawn sheet should read as a
+     deliberate gesture, and the extra time also absorbs destinations that
+     signal ready late (route-ready budget is 900ms). */
+  --wipe-dur: 700ms;
+  --wipe-ease: cubic-bezier(0.22, 1, 0.36, 1);
 }

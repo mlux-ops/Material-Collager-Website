@@ -56,6 +56,32 @@ NOT been run and stays a release gate.
   (types support tiers) is engine-reported, not locally tested; the
   attribute-selector fallback covers the gap by construction.
 
+## User eyeball round 1 (2026-08-21) — findings and resolutions
+
+First visible-browser pass by the owner. Items 4 (no flashes) and the wipe
+shape itself passed. Three changes came out of it:
+
+1. **Wipe too fast (both directions)** → new semantic tokens `--wipe-dur:
+   700ms` / `--wipe-ease` in `motion-tokens.css`; all root wipe animations
+   now use them (was 400 ms via the generic `--duration-slow`). Verified
+   live: computed `--wipe-dur` = 700ms.
+2. **0–100% veil interrupts Generator → Library** → the veil is now
+   first-arrival-only: a module-scope session flag in `SceneWheelV2` starts
+   re-entries revealed. Full page load still shows the counter. Verified:
+   `veilShown: false` after SPA re-entry; this also resolves the one header
+   continuity break the owner saw (item 5, veil painting the screen white).
+3. **Error popups obscuring transitions into Workbench** → not transition
+   noise: `node_modules` was stale (`@xyflow/react` missing entirely,
+   wrangler/next at older versions than the lockfile), so `WorkbenchApp`'s
+   dynamic import crashed on every load — which was ALSO the root cause of
+   the earlier "workbench has zero nav anchors" finding. `npm install`
+   synced from the intact lockfile (no lockfile changes). Verified:
+   /workbench renders with 4 nav anchors, no runtime-error overlay.
+
+Post-round verification: transitions 30/30, workbench 136, collage 19,
+scene-lab 16, lint 0 errors; forward/back QA run clean (`ready` →
+`finished`, direction attribute lifecycle correct).
+
 ## Environment repairs made during this work (dev-only)
 
 Recorded in specs/20260821-page-transitions-upgrade/research.md: Cloudflare

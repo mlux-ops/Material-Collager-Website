@@ -20,6 +20,10 @@ const SceneWheelCanvas = dynamic(() => import("./SceneWheelCanvas"), { ssr: fals
 // Progress is split so the counter starts moving on the library response and
 // spends the rest of its travel on the card images, which dominate the wait.
 const FETCH_SHARE = 12;
+
+// Whether the 0–100% loading veil has completed once this browser session.
+// See the `revealed` state below for why re-entries skip it.
+let hasRevealedThisSession = false;
 // A slow or hung image must never trap the visitor on the loading screen.
 const PRELOAD_TIMEOUT_MS = 12000;
 
@@ -29,7 +33,12 @@ export default function SceneWheelV2() {
   const targetProgress = useNativeScrollProgress(trackRef);
   const [records, setRecords] = useState<LibraryCollageRecord[]>([]);
   const [libraryState, setLibraryState] = useState<"loading" | "ready" | "fallback">("loading");
-  const [revealed, setRevealed] = useState(false);
+  // The 0–100% veil belongs to the site's first arrival only. On SPA
+  // re-entry (Generator/Workbench -> Library) the scene's chunk, textures,
+  // and browser caches are warm, so re-showing the counter reads as a
+  // choppy interruption mid-wipe — start revealed instead. Module scope, so
+  // it resets on a full page load but survives route changes.
+  const [revealed, setRevealed] = useState(() => hasRevealedThisSession);
   const countRef = useRef<HTMLParagraphElement>(null);
   // Written by the fetch + image-preload passes, read by the rAF counter so
   // progress eases toward the real figure instead of snapping between images.
@@ -192,6 +201,7 @@ export default function SceneWheelV2() {
       shown += Math.max((target - shown) * 0.12, target > shown ? 0.25 : 0);
       if (target >= 100 && shown > 99.4) {
         if (countRef.current) countRef.current.textContent = "100%";
+        hasRevealedThisSession = true;
         setRevealed(true);
         return;
       }

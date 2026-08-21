@@ -189,17 +189,17 @@
      it. `animation: none` is NOT enough here: the snapshot then falls back to
      its own zero-duration state and the outgoing page vanishes, leaving white
      paper behind the wipe. */
-  animation: mc-hold var(--duration-slow, 400ms) linear both;
+  animation: mc-hold var(--wipe-dur, 700ms) linear both;
   mix-blend-mode: normal;
 }
 
 ::view-transition-new(root) {
-  animation: mc-plotter-wipe var(--duration-slow, 400ms) var(--ease-smooth-out, cubic-bezier(0.22, 1, 0.36, 1)) both;
+  animation: mc-plotter-wipe var(--wipe-dur, 700ms) var(--wipe-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
   filter: drop-shadow(1px 0 0 var(--ink, #171a18));
 }
 
 ::view-transition-group(root) {
-  animation-duration: var(--duration-slow, 400ms);
+  animation-duration: var(--wipe-dur, 700ms);
 }
 
 /* Directional wipe: forward (nav order left-to-right) keeps the default
