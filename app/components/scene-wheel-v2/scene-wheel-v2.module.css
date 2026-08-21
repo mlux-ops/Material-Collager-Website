@@ -158,7 +158,7 @@
 }
 
 @keyframes viewer-slide-in {
-  from { transform: translateX(-102%); }
+  from { transform: translateX(102%); }
   to { transform: translateX(0); }
 }
 
@@ -168,6 +168,7 @@
   z-index: 50;
   display: flex;
   align-items: stretch;
+  justify-content: flex-end;
   background: rgb(250 250 250 / 55%);
   backdrop-filter: blur(22px) saturate(1.05);
   animation: viewer-frost-in 460ms var(--ease-smooth-out) both;
@@ -177,13 +178,13 @@
   position: relative;
   display: grid;
   place-items: center;
-  width: min(720px, 62vw);
+  width: 50vw;
   padding: clamp(28px, 5vw, 72px);
   padding-left: clamp(56px, 7vw, 96px);
-  background: rgb(255 255 255 / 55%);
+  background: rgb(255 255 255 / 33%);
   backdrop-filter: blur(40px) saturate(1.05);
-  border-right: 1px solid rgb(17 17 17 / 16%);
-  box-shadow: 34px 0 90px rgb(0 0 0 / 10%);
+  border-left: 1px solid rgb(17 17 17 / 16%);
+  box-shadow: -34px 0 90px rgb(0 0 0 / 10%);
   animation: viewer-slide-in 460ms var(--ease-smooth-out) both;
 }
 
@@ -309,7 +310,7 @@
 
   .viewerPanel {
     width: 100%;
-    border-right: 0;
+    border-left: 0;
     padding: 18px;
     padding-left: 52px;
   }
