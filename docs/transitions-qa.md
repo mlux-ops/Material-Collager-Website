@@ -213,6 +213,15 @@ threshold artifact on a sparse tan band; the ghost capture shows every
 card fused). The measurement harness (pixel top-edge scan) is the new
 regression tool for placeholder alignment.
 
+## User eyeball round 8 (2026-08-21) — dither at first load
+
+The dither choreography only ran on re-entries: on first load the scene
+painted behind the 0-100 veil and the row retired before the veil lifted.
+The resolve now gates on `scenePainted && revealed`, so first arrivals get
+counter -> dithered cascade -> resolve-to-cards, same as re-entries.
+Verified headless on a fresh profile: at the veil's lift the row is up
+(12 cards), then retires over the live scene. 47/47 tests.
+
 ## Environment repairs made during this work (dev-only)
 
 Recorded in specs/20260821-page-transitions-upgrade/research.md: Cloudflare

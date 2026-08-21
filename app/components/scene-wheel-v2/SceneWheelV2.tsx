@@ -216,8 +216,14 @@ export default function SceneWheelV2() {
 
   // Retire the thumb row shortly after the dither resolves (fade handled in
   // CSS), then refresh the stored thumbnails while the tab is idle.
+  // The dither resolves only once the scene has painted AND the first-load
+  // veil is gone — so first arrivals get the same dither-to-cards reveal as
+  // re-entries (the scene paints behind the veil; without gating on
+  // `revealed`, the row would retire before anyone saw it).
+  const showResolved = scenePainted && revealed;
+
   useEffect(() => {
-    if (!scenePainted) return;
+    if (!showResolved) return;
     // Row retire: with no row up, lock it out on the next tick so a late
     // server hydration can't flash a placeholder over the visible scene;
     // otherwise fade it out shortly after the dither resolves (fade in CSS).
@@ -236,7 +242,7 @@ export default function SceneWheelV2() {
       window.clearTimeout(gone);
       window.clearTimeout(idle);
     };
-  }, [scenePainted, catalog.items, thumbs]);
+  }, [showResolved, catalog.items, thumbs]);
 
   // Preload the card images the canvas is about to turn into textures. Both
   // share the HTTP cache, so counting these to 100% means the reveal shows
@@ -359,7 +365,7 @@ export default function SceneWheelV2() {
             ) : null}
             {thumbs.length > 0 && !thumbRowGone && placed.length > 0 ? (
               <div
-                className={`${styles.thumbRow} ${scenePainted ? styles.thumbRowResolved : ""}`}
+                className={`${styles.thumbRow} ${showResolved ? styles.thumbRowResolved : ""}`}
                 aria-hidden="true"
               >
                 {placed.map((card, index) => {
@@ -380,7 +386,7 @@ export default function SceneWheelV2() {
                       <DitherReveal
                         src={thumb.thumb}
                         alt=""
-                        progress={scenePainted ? 1 : undefined}
+                        progress={showResolved ? 1 : undefined}
                         cell={1.5}
                         colorize
                         ink="#171a18"
