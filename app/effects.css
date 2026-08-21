@@ -233,20 +233,33 @@ html[data-nav-direction="back"]::view-transition-new(root) {
   view-transition-name: site-nav;
 }
 
-::view-transition-group(site-nav) {
-  animation-duration: var(--duration-fast, 200ms);
+/* The bar's frosted glass (backdrop-filter, globals.css) has nothing real to
+   sample while a transition is running — it blurs the animating snapshots
+   beneath the overlay, smearing the bar for the wipe's duration (worst over
+   the workbench's dark toolbar). Freeze the frost during transitions:
+   opaque paper, no filter; the frost resumes the moment the overlay lifts. */
+html:active-view-transition .site-navigation {
+  backdrop-filter: none;
+  background: var(--mono-off-white, #fafafa);
 }
 
-/* Bar snapshots must never be scaled to fit the group box: page-to-page
-   differences in the bar's right-side content change the snapshot size, and
-   scaled text reads as a momentary blur near the end of the wipe. Pin the
-   snapshots at natural size, anchored to the same corner the bar lays out
-   from, and let the pair crossfade without resampling. */
-::view-transition-old(site-nav),
+/* The bar itself never animates: geometry morphs between pages with
+   different bar heights resample the snapshot (text blur near the wipe's
+   end), and `object-fit: none` trades that for a devicePixelRatio-scaled
+   snapshot — also blur. So no crossfade and no morph: the incoming page's
+   bar shows crisp at its natural place from the first frame, and the pill's
+   own group (below) carries the visual continuity between pages. */
+::view-transition-group(site-nav) {
+  animation: none;
+}
+
+::view-transition-old(site-nav) {
+  display: none;
+}
+
 ::view-transition-new(site-nav) {
-  object-fit: none;
-  object-position: left top;
-  overflow: hidden;
+  animation: none;
+  opacity: 1;
 }
 
 /* The ink pill gets its own name, which lifts it OUT of the bar's snapshot
