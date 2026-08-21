@@ -108,6 +108,26 @@ export default function SceneWheelV2() {
   const loadTargetRef = useRef(0);
   const [hoveredItem, setHoveredItem] = useState<SceneLabCollageItem | null>(null);
   const [selectedItem, setSelectedItem] = useState<SceneLabCollageItem | null>(null);
+  // Two-phase close so the panel can slide back out and the frost can lift
+  // before the viewer unmounts (reduced motion closes immediately).
+  const [viewerClosing, setViewerClosing] = useState(false);
+  const closeTimer = useRef<number | null>(null);
+  const requestCloseViewer = useCallback(() => {
+    if (closeTimer.current !== null) return; // already leaving
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setSelectedItem(null);
+      return;
+    }
+    setViewerClosing(true);
+    closeTimer.current = window.setTimeout(() => {
+      closeTimer.current = null;
+      setViewerClosing(false);
+      setSelectedItem(null);
+    }, 350);
+  }, []);
+  useEffect(() => () => {
+    if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
+  }, []);
   const cursorLabelRef = useRef<HTMLParagraphElement>(null);
   const hoverPointRef = useRef({ x: 0, y: 0 });
 
@@ -189,7 +209,7 @@ export default function SceneWheelV2() {
     });
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setSelectedItem(null);
+      if (event.key === "Escape") requestCloseViewer();
     };
 
     window.addEventListener("keydown", onKeyDown);
@@ -201,7 +221,7 @@ export default function SceneWheelV2() {
         previouslyFocused.focus({ preventScroll: true });
       }
     };
-  }, [selectedItem]);
+  }, [selectedItem, requestCloseViewer]);
 
   useEffect(() => {
     const clearHover = () => setHoveredItem(null);
@@ -429,24 +449,32 @@ export default function SceneWheelV2() {
 
       {selectedItem ? (
         <div
-          className={styles.viewerBackdrop}
+          className={viewerClosing ? `${styles.viewerBackdrop} ${styles.viewerLeaving}` : styles.viewerBackdrop}
           role="presentation"
           onPointerDown={(event) => {
-            if (event.target === event.currentTarget) setSelectedItem(null);
+            if (event.target === event.currentTarget) requestCloseViewer();
           }}
         >
-          <section className={styles.viewer} role="dialog" aria-modal="true" aria-labelledby="scene-wheel-viewer-title">
-            <div className={styles.viewerToolbar}>
-              <div>
-                <p>Material rail</p>
-                <h2 id="scene-wheel-viewer-title">{selectedItem.title}</h2>
-              </div>
-              <button ref={closeButtonRef} type="button" onClick={() => setSelectedItem(null)}>Close</button>
-            </div>
-            <div className={styles.viewerImage}>
+          <section
+            className={styles.viewerPanel}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="scene-wheel-viewer-title"
+          >
+            <button
+              ref={closeButtonRef}
+              type="button"
+              className={styles.viewerClose}
+              aria-label="Close viewer"
+              onClick={requestCloseViewer}
+            >
+              ×
+            </button>
+            <figure className={styles.viewerFigure}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={selectedItem.url} alt={selectedItem.title} />
-            </div>
+              <figcaption id="scene-wheel-viewer-title">{selectedItem.title}</figcaption>
+            </figure>
           </section>
         </div>
       ) : null}
