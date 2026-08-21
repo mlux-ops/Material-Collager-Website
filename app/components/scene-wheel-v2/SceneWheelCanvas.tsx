@@ -12,7 +12,20 @@ type Props = {
   onHover: (state: SceneWheelHoverState) => void;
   onOpen: (item: SceneLabCollageItem) => void;
   targetProgress: MutableRefObject<number>;
+  /** Fires once, on the scene's first rendered frame — the moment the canvas
+   * actually has pixels, so placeholders above it can stand down. */
+  onFirstFrame?: () => void;
 };
+
+function FirstFramePing({ onFirstFrame }: { onFirstFrame?: () => void }) {
+  const fired = useRef(false);
+  useFrame(() => {
+    if (fired.current) return;
+    fired.current = true;
+    onFirstFrame?.();
+  });
+  return null;
+}
 
 function useMobileSceneFraming() {
   const [isMobile, setIsMobile] = useState(() => (
@@ -117,6 +130,10 @@ export default function SceneWheelCanvas(props: Props) {
       <color attach="background" args={["#fafafa"]} />
       <Suspense fallback={null}>
         <WheelScene {...props} />
+        {/* Inside the boundary on purpose: mounts only after the scene's
+            textures resolve, so the first tick it sees is the first frame
+            that actually shows cards — not an empty clear. */}
+        <FirstFramePing onFirstFrame={props.onFirstFrame} />
       </Suspense>
     </Canvas>
   );

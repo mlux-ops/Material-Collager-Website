@@ -29,6 +29,43 @@
   height: 100%;
 }
 
+/* Dithered placeholder row: stored card thumbnails holding the canvas area
+   while the scene's textures load. Sits on the page paper so nothing white
+   flashes through; fades away once the scene has painted (thumbRowResolved
+   is added on the scene's first painted frame, unmount follows the fade). */
+.thumbRow {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(10px, 1.6vw, 24px);
+  padding: 0 5vw;
+  background: #fafafa;
+  opacity: 1;
+  transition: opacity var(--duration-fast, 250ms) var(--ease-smooth-out, ease-out);
+  pointer-events: none;
+}
+
+.thumbRowResolved {
+  opacity: 0;
+  transition-delay: 220ms; /* let the dither finish resolving before fading */
+}
+
+.thumbCard {
+  width: clamp(72px, 9vw, 140px);
+  height: auto;
+  image-rendering: pixelated; /* upscaled 48px thumbs keep crisp dither cells */
+  box-shadow: 0 1px 0 rgba(23, 26, 24, 0.18);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thumbRow {
+    transition: none;
+  }
+}
+
 /* .chrome no longer owns its own floating-card layout: the header markup is
    now the shared <SiteNavigation> component, which already renders the
    fixed, full-width `.site-navigation` bar from app/globals.css (the same

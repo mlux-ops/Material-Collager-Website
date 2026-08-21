@@ -13,7 +13,14 @@ import type { SceneWheelHoverState } from "./SceneCard";
 import { useNativeScrollProgress } from "./useNativeScrollProgress";
 import { SiteNavigation } from "../SiteNavigation";
 import { RouteReady } from "../RouteReady";
+import { DitherReveal } from "../DitherReveal";
 import { awaitTransitionSettled } from "@/app/lib/route-ready.ts";
+import {
+  captureAndStoreThumbs,
+  loadStoredThumbs,
+  storedThumbsMatch,
+  MAX_THUMBS,
+} from "@/app/lib/library-thumbs.ts";
 import styles from "./scene-wheel-v2.module.css";
 
 const SceneWheelCanvas = dynamic(() => import("./SceneWheelCanvas"), { ssr: false });
@@ -46,6 +53,14 @@ export default function SceneWheelV2() {
   // until the transition settles (~50ms of scene work right after the sheet
   // lands, measured). First arrival mounts immediately — the veil covers it.
   const [sceneMountReady, setSceneMountReady] = useState(() => !hasRevealedThisSession);
+  // Placeholder choreography for the texture gap: stored thumbnails of the
+  // cards hold as a 1-bit dither row over the canvas area; the scene's first
+  // painted frame resolves the dither into the tiny color images and fades
+  // the row out, revealing the real cards behind it. No stored thumbs (very
+  // first visit) simply means no row — the veil covers first arrival anyway.
+  const [thumbs] = useState(loadStoredThumbs);
+  const [scenePainted, setScenePainted] = useState(false);
+  const [thumbRowGone, setThumbRowGone] = useState(false);
   const countRef = useRef<HTMLParagraphElement>(null);
   // Written by the fetch + image-preload passes, read by the rAF counter so
   // progress eases toward the real figure instead of snapping between images.
@@ -157,6 +172,25 @@ export default function SceneWheelV2() {
     () => adaptCompletedCollages(records, { allowLabFixtures: true }),
     [records],
   );
+
+  // Retire the thumb row shortly after the dither resolves (fade handled in
+  // CSS), then refresh the stored thumbnails while the tab is idle.
+  useEffect(() => {
+    if (!scenePainted) return;
+    const gone = window.setTimeout(() => setThumbRowGone(true), 600);
+    const idle = window.setTimeout(() => {
+      const cards = catalog.items
+        .slice(0, MAX_THUMBS)
+        .map((item) => ({ id: item.id, url: item.url, name: item.accessibleName }));
+      if (!storedThumbsMatch(thumbs, cards.map((c) => c.id))) {
+        void captureAndStoreThumbs(cards);
+      }
+    }, 1500);
+    return () => {
+      window.clearTimeout(gone);
+      window.clearTimeout(idle);
+    };
+  }, [scenePainted, catalog.items, thumbs]);
 
   // Preload the card images the canvas is about to turn into textures. Both
   // share the HTTP cache, so counting these to 100% means the reveal shows
@@ -274,7 +308,27 @@ export default function SceneWheelV2() {
                 onHover={handleHover}
                 onOpen={handleOpen}
                 targetProgress={targetProgress}
+                onFirstFrame={() => setScenePainted(true)}
               />
+            ) : null}
+            {thumbs.length > 0 && !thumbRowGone ? (
+              <div
+                className={`${styles.thumbRow} ${scenePainted ? styles.thumbRowResolved : ""}`}
+                aria-hidden="true"
+              >
+                {thumbs.slice(0, 7).map((thumb) => (
+                  <DitherReveal
+                    key={thumb.id}
+                    src={thumb.thumb}
+                    alt=""
+                    progress={scenePainted ? 1 : undefined}
+                    cell={2}
+                    ink="#171a18"
+                    paper="#fafafa"
+                    className={styles.thumbCard}
+                  />
+                ))}
+              </div>
             ) : null}
           </div>
 
