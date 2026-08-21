@@ -79,7 +79,16 @@ export function SiteNavigation({
         {item("generator", "/generator", "Generator")}
         {item("workbench", "/workbench", "Workbench")}
       </nav>
-      {right}
+      <div className="site-nav-right">
+        {right}
+        {/* MAX LUX wordmark — persistent, top right, on every page. Drawn as
+            type + rule bars (not an image) so it stays crisp at any zoom and
+            inherits the ink token. */}
+        <span className="site-logo" role="img" aria-label="Max Lux">
+          <span aria-hidden="true">MAX</span>
+          <span aria-hidden="true">LUX</span>
+        </span>
+      </div>
     </header>
   );
 }

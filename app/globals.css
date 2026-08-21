@@ -3382,3 +3382,36 @@ body {
   background: transparent;
   color: var(--mono-white);
 }
+
+/* MAX LUX wordmark, persistent top-right in the site navigation. Additive:
+   does not restyle the bar itself. The right-group wrapper carries the
+   push-right so per-page `right` content (e.g. the generator status, which
+   has its own margin-left: auto that becomes a no-op inside the wrapper)
+   keeps sitting flush against the logo. */
+.site-nav-right {
+  align-items: stretch;
+  display: flex;
+  gap: 16px;
+  margin-left: auto;
+}
+
+.site-logo {
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  user-select: none;
+}
+
+.site-logo span {
+  border-bottom: 3px solid var(--mono-black);
+  color: var(--mono-black);
+  display: block;
+  font-size: 12.5px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  padding-bottom: 2px;
+  text-align: justify;
+  text-align-last: justify;
+}
