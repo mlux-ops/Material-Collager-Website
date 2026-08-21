@@ -5,11 +5,12 @@ import { useRef, type ReactNode } from "react";
 import { TransitionLink } from "./TransitionLink";
 import { useNavPillSlide } from "./useNavPillSlide";
 
-// Warm the Library on navigation intent: the scene chunk (module fetch) plus
-// the card images, so the browser has them fetched and decoded before the
-// scene mounts after the wipe. Read-only side effects (a GET and image cache
-// fills) — spec FR-011 safe. GL init itself is not warmable; the scene
-// defers its mount to after the transition instead (SceneWheelV2).
+// Warm heavy destination chunks on navigation intent so their fetch AND
+// module parse/eval happen on an idle page instead of mid-wipe (the incoming
+// side of a transition is live — a long eval there reads as a white freeze).
+// Read-only side effects (imports, a GET, image cache fills) — FR-011 safe.
+// GL/mount work is not warmable; both heavy routes defer their mount until
+// the transition settles instead (SceneWheelV2, WorkbenchPage).
 let libraryWarmed = false;
 function warmLibraryChunk() {
   if (libraryWarmed) return;
@@ -32,6 +33,20 @@ function warmLibraryChunk() {
     })
     .catch(() => {});
 }
+
+let workbenchWarmed = false;
+function warmWorkbenchChunk() {
+  if (workbenchWarmed) return;
+  workbenchWarmed = true;
+  void import("./workbench/WorkbenchApp").catch(() => {
+    workbenchWarmed = false; // transient failure: allow a retry on next intent
+  });
+}
+
+const WARMERS: Record<string, () => void> = {
+  "/": warmLibraryChunk,
+  "/workbench": warmWorkbenchChunk,
+};
 
 export type SiteNavigationActive = "library" | "generator" | "workbench";
 
@@ -63,8 +78,8 @@ export function SiteNavigation({
       data-nav-key={key}
       data-active={active === key}
       aria-current={active === key ? "page" : undefined}
-      onPointerEnter={href === "/" ? warmLibraryChunk : undefined}
-      onPointerDown={href === "/" ? warmLibraryChunk : undefined}
+      onPointerEnter={WARMERS[href]}
+      onPointerDown={WARMERS[href]}
     >
       {label}
     </TransitionLink>
