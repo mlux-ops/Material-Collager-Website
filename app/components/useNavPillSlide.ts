@@ -29,9 +29,10 @@
  *   </nav>
  *
  * The hook measures the active link's offsetLeft/offsetWidth and writes them
- * onto the pill element as a transform + width, letting the CSS transition
- * in effects.css (var(--duration-fast) var(--ease-smooth-out)) do the actual
- * sliding. Re-measures on resize and on activeKey change.
+ * onto the pill as a single transform (translateX + scaleX against the fixed
+ * 100px base width in effects.css), letting the CSS transition
+ * (var(--duration-fast) var(--ease-smooth-out)) slide it entirely on the
+ * compositor. Re-measures on resize and on activeKey change.
  */
 
 import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
@@ -53,10 +54,16 @@ export function useNavPillSlide(
   const frame = useRef<number | null>(null);
   const slideFrom = useRef<string | null>(null);
 
+  // The pill keeps a fixed 100px base width (effects.css) and is sized with
+  // scaleX so the slide is a single compositor-driven transform — animating
+  // `width` re-layouts and repaints every frame on the main thread, which
+  // visibly stutters while a route commit is in flight.
+  const PILL_BASE_WIDTH = 100;
+
   const seat = (pill: HTMLElement, link: HTMLElement) => {
     pill.style.opacity = "1";
-    pill.style.transform = `translateX(${link.offsetLeft}px)`;
-    pill.style.width = `${link.offsetWidth}px`;
+    pill.style.transform =
+      `translateX(${link.offsetLeft}px) scaleX(${link.offsetWidth / PILL_BASE_WIDTH})`;
   };
 
   const measure = () => {
