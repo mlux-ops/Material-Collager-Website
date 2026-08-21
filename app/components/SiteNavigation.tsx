@@ -85,8 +85,13 @@ export function SiteNavigation({
             type + rule bars (not an image) so it stays crisp at any zoom and
             inherits the ink token. */}
         <span className="site-logo" role="img" aria-label="Max Lux">
-          <span aria-hidden="true">MAX</span>
-          <span aria-hidden="true">LUX</span>
+          {["MAX", "LUX"].map((row) => (
+            <span key={row} className="site-logo-row" aria-hidden="true">
+              {row.split("").map((letter, i) => (
+                <i key={i}>{letter}</i>
+              ))}
+            </span>
+          ))}
         </span>
       </div>
     </header>

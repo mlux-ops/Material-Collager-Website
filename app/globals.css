@@ -3399,19 +3399,26 @@ body {
   align-self: center;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   user-select: none;
 }
 
-.site-logo span {
-  border-bottom: 3px solid var(--mono-black);
+/* Each of the six glyphs sits in an identical cell (the mark reads as
+   monospaced blocks — an X occupies the same slot as an M), with the rule
+   bar tight under the letters. */
+.site-logo-row {
+  border-bottom: 2px solid var(--mono-black);
   color: var(--mono-black);
-  display: block;
+  display: grid;
   font-size: 12.5px;
   font-weight: 900;
-  letter-spacing: 0.04em;
+  grid-template-columns: repeat(3, 1fr);
   line-height: 1;
-  padding-bottom: 2px;
-  text-align: justify;
-  text-align-last: justify;
+  padding-bottom: 1.5px;
+  width: 38px;
+}
+
+.site-logo-row i {
+  font-style: normal;
+  text-align: center;
 }
