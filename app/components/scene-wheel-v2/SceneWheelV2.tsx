@@ -22,6 +22,7 @@ import {
   storedThumbsMatch,
   MAX_THUMBS,
 } from "@/app/lib/library-thumbs.ts";
+import { projectCardRects, MOBILE_FRAMING_QUERY, type PlacedCard } from "./project-card-rects";
 import styles from "./scene-wheel-v2.module.css";
 
 const SceneWheelCanvas = dynamic(() => import("./SceneWheelCanvas"), { ssr: false });
@@ -62,6 +63,28 @@ export default function SceneWheelV2() {
   const [thumbs, setThumbs] = useState(loadStoredThumbs);
   const [scenePainted, setScenePainted] = useState(false);
   const [thumbRowGone, setThumbRowGone] = useState(false);
+  // The placeholders stand exactly where the scene will draw each card:
+  // same curve model, same camera, projected to screen space (see
+  // project-card-rects.ts), so the dither resolves into the real card in
+  // place instead of a detached strip.
+  const [placed, setPlaced] = useState<PlacedCard[]>([]);
+  const stickyRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (thumbs.length === 0 || thumbRowGone) return;
+    const compute = () => {
+      const box = stickyRef.current?.getBoundingClientRect();
+      const w = box?.width ?? window.innerWidth;
+      const h = box?.height ?? window.innerHeight;
+      const mobile = window.matchMedia(MOBILE_FRAMING_QUERY).matches;
+      setPlaced(
+        projectCardRects(thumbs.length, targetProgress.current, w, h, mobile, thumbs.map((t) => t.ar)),
+      );
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
+  }, [thumbs, thumbRowGone, targetProgress]);
 
   // New device / cleared storage: hydrate the row from the shared D1 set.
   // Skipped once the scene has painted — a placeholder arriving after the
@@ -323,7 +346,7 @@ export default function SceneWheelV2() {
         aria-hidden={selectedItem ? true : undefined}
         inert={selectedItem ? true : undefined}
       >
-        <div className={styles.sticky}>
+        <div className={styles.sticky} ref={stickyRef}>
           <div className={styles.canvas} onPointerLeave={() => setHoveredItem(null)}>
             {sceneMountReady && libraryState !== "loading" && catalog.items.length > 0 ? (
               <SceneWheelCanvas
@@ -334,23 +357,38 @@ export default function SceneWheelV2() {
                 onFirstFrame={() => setScenePainted(true)}
               />
             ) : null}
-            {thumbs.length > 0 && !thumbRowGone ? (
+            {thumbs.length > 0 && !thumbRowGone && placed.length > 0 ? (
               <div
                 className={`${styles.thumbRow} ${scenePainted ? styles.thumbRowResolved : ""}`}
                 aria-hidden="true"
               >
-                {thumbs.slice(0, 7).map((thumb) => (
-                  <DitherReveal
-                    key={thumb.id}
-                    src={thumb.thumb}
-                    alt=""
-                    progress={scenePainted ? 1 : undefined}
-                    cell={2}
-                    ink="#171a18"
-                    paper="#fafafa"
-                    className={styles.thumbCard}
-                  />
-                ))}
+                {placed.map((card, index) => {
+                  const thumb = thumbs[index];
+                  if (!thumb) return null;
+                  return (
+                    <div
+                      key={thumb.id}
+                      className={styles.thumbCard}
+                      style={{
+                        width: `${card.width}px`,
+                        height: `${card.height}px`,
+                        opacity: card.opacity,
+                        zIndex: card.z,
+                        transform: `matrix(${card.a}, ${card.b}, ${card.c}, ${card.d}, ${card.left}, ${card.top})`,
+                      }}
+                    >
+                      <DitherReveal
+                        src={thumb.thumb}
+                        alt=""
+                        progress={scenePainted ? 1 : undefined}
+                        cell={3}
+                        ink="#171a18"
+                        paper="#fafafa"
+                        style={{ width: "100%", height: "100%" }}
+                      />
+                    </div>
+                  );
+                })}
               </div>
             ) : null}
           </div>

@@ -3,14 +3,16 @@
  *
  * The scene's canvas has nothing to show between mounting and its textures
  * arriving — that gap used to read as a white flash. These thumbnails are
- * captured client-side after the scene's first successful paint (~48px-wide
- * JPEG data URIs, a few hundred bytes each) and persisted in localStorage,
- * so every later visit can paint a dithered placeholder row instantly while
- * the real scene loads behind it (SceneWheelV2 + DitherReveal).
+ * captured client-side after the scene's first successful paint (224px-wide
+ * JPEG data URIs, fine enough for generator-scale dither cells) and
+ * persisted to D1 via /api/library/thumbs, with localStorage as an instant
+ * local cache. Later visits paint them as dithered placeholders standing
+ * exactly where each card will render (SceneWheelV2 + project-card-rects +
+ * DitherReveal), dissolving into the real cards once the scene paints.
  *
- * No backend involvement: the store is derived, versioned, capped, and safe
- * to lose — a missing or corrupt store just means one visit without the
- * placeholder row, and the next paint re-captures it.
+ * The store is derived, versioned, capped, and safe to lose — a missing or
+ * corrupt store just means one visit without placeholders, and the next
+ * paint re-captures it.
  */
 
 export type LibraryThumb = {
@@ -18,20 +20,24 @@ export type LibraryThumb = {
   /** data: URI of the downscaled image. */
   thumb: string;
   name: string;
+  /** Aspect ratio (w/h), clamped to SceneCard's plane range. Legacy entries
+   * without one default to 4/3. */
+  ar: number;
 };
 
-const STORE_KEY = "mc:library-thumbs:v1";
+const STORE_KEY = "mc:library-thumbs:v2";
 export const MAX_THUMBS = 16;
-const THUMB_WIDTH = 48;
+const THUMB_WIDTH = 224;
 /** data: URIs only — anything else is rejected on load (a poisoned store
  * must never become an image source). */
 const DATA_URI = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/;
 
-type StoreShape = { v: 1; items: LibraryThumb[] };
+type StoreShape = { v: 2; items: LibraryThumb[] };
 
-/** Hard ceiling per stored data URI (~9KB of image). Anything bigger is not
- * a 48px thumbnail and is rejected wholesale. */
-export const MAX_THUMB_CHARS = 12_000;
+/** Hard ceiling per stored data URI (~20KB of image). Sized for 224px-wide
+ * JPEGs — big enough for generator-fine dither cells, small enough that a
+ * full set stays under ~350KB in D1. */
+export const MAX_THUMB_CHARS = 28_000;
 
 function isValidThumb(candidate: unknown): candidate is LibraryThumb {
   if (typeof candidate !== "object" || candidate === null) return false;
@@ -44,9 +50,13 @@ function isValidThumb(candidate: unknown): candidate is LibraryThumb {
     t.name.length <= 256 &&
     typeof t.thumb === "string" &&
     t.thumb.length <= MAX_THUMB_CHARS &&
-    DATA_URI.test(t.thumb)
+    DATA_URI.test(t.thumb) &&
+    (t.ar === undefined || (typeof t.ar === "number" && Number.isFinite(t.ar)))
   );
 }
+
+const clampAspect = (ar: unknown): number =>
+  typeof ar === "number" && Number.isFinite(ar) ? Math.max(0.72, Math.min(1.65, ar)) : 4 / 3;
 
 /** Validate an untrusted list into at most MAX_THUMBS clean entries. Shared
  * by the localStorage parse (client) and the API route (server) — the same
@@ -55,7 +65,7 @@ export function sanitizeThumbs(candidate: unknown): LibraryThumb[] {
   if (!Array.isArray(candidate)) return [];
   return candidate
     .filter(isValidThumb)
-    .map((t) => ({ id: t.id, name: t.name, thumb: t.thumb }))
+    .map((t) => ({ id: t.id, name: t.name, thumb: t.thumb, ar: clampAspect((t as { ar?: unknown }).ar) }))
     .slice(0, MAX_THUMBS);
 }
 
@@ -65,7 +75,7 @@ export function parseThumbStore(raw: string | null): LibraryThumb[] {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return [];
-    if ((parsed as StoreShape).v !== 1) return [];
+    if ((parsed as StoreShape).v !== 2) return [];
     return sanitizeThumbs((parsed as StoreShape).items);
   } catch {
     return [];
@@ -74,7 +84,7 @@ export function parseThumbStore(raw: string | null): LibraryThumb[] {
 
 /** Serialize with the version stamp and cap. Exposed for tests. */
 export function serializeThumbStore(items: LibraryThumb[]): string {
-  return JSON.stringify({ v: 1, items: sanitizeThumbs(items) } satisfies StoreShape);
+  return JSON.stringify({ v: 2, items: sanitizeThumbs(items) } satisfies StoreShape);
 }
 
 export function loadStoredThumbs(): LibraryThumb[] {
@@ -143,7 +153,12 @@ export async function captureAndStoreThumbs(
       const ctx = canvas.getContext("2d");
       if (!ctx) continue;
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      out.push({ id: card.id, name: card.name, thumb: canvas.toDataURL("image/jpeg", 0.6) });
+      out.push({
+        id: card.id,
+        name: card.name,
+        thumb: canvas.toDataURL("image/jpeg", 0.6),
+        ar: clampAspect(img.naturalWidth / Math.max(1, img.naturalHeight)),
+      });
     } catch {
       // Broken/blocked image: skip it.
     }

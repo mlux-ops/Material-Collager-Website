@@ -29,23 +29,19 @@
   height: 100%;
 }
 
-/* Dithered placeholder row: stored card thumbnails holding the canvas area
-   while the scene's textures load. Sits on the page paper so nothing white
-   flashes through; fades away once the scene has painted (thumbRowResolved
-   is added on the scene's first painted frame, unmount follows the fade). */
+/* Dithered placeholders standing exactly where the scene will draw each
+   card (projected via project-card-rects.ts), so the dither resolves into
+   the real card in place. Transparent layer — the canvas beneath clears to
+   the same paper, so gaps never flash. Fades once the scene has painted
+   (thumbRowResolved is added on the first painted frame; unmount follows). */
 .thumbRow {
   position: absolute;
   inset: 0;
   z-index: 5;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: clamp(10px, 1.6vw, 24px);
-  padding: 0 5vw;
-  background: #fafafa;
   opacity: 1;
   transition: opacity var(--duration-fast, 250ms) var(--ease-smooth-out, ease-out);
   pointer-events: none;
+  overflow: hidden;
 }
 
 .thumbRowResolved {
@@ -54,10 +50,12 @@
 }
 
 .thumbCard {
-  width: clamp(72px, 9vw, 140px);
-  height: auto;
-  image-rendering: pixelated; /* upscaled 48px thumbs keep crisp dither cells */
-  box-shadow: 0 1px 0 rgba(23, 26, 24, 0.18);
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  box-shadow: 0 1px 0 rgba(23, 26, 24, 0.14);
+  background: #fff;
 }
 
 @media (prefers-reduced-motion: reduce) {

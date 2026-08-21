@@ -147,6 +147,30 @@ veil-covered with the row locked out (no late placeholder flash — a
 regression where the flash-guard skipped the capture pass was caught and
 fixed in the same round). 40/40 transition tests, lint 0 errors.
 
+## User eyeball round 4 (2026-08-21) — placeholders moved into the cascade
+
+Owner: the dithered placeholders must not be a detached centered strip —
+they should stand where the cards are and dissolve into them; and the
+dither must be generator-fine, not chunky.
+
+- **In-place projection**: new `project-card-rects.ts` runs the scene's own
+  curve model + camera (`getSceneWheelPose`, `SCENE_WHEEL_CAMERA`, plain
+  three math, no GL) to project each card's quad to screen space; the
+  placeholder layer positions each DitherReveal with a CSS matrix on those
+  quads (tilt approximated linearly), z-stacked by rail depth, opacity from
+  the pose. Recomputed on resize; wrap-around card handled. Covered by
+  tests/transitions-card-projection.test.mjs (5 tests).
+- **Dither scale**: capture resolution raised 48px → 224px wide and cell 3
+  (the generator is cell 4 on full-res images) → ~3px on-screen cells.
+  Per-entry cap raised to 28k chars; store schema v2 with per-thumb aspect
+  ratio (`ar`, clamped to SceneCard's 0.72–1.65), D1 column added via the
+  PRAGMA-checked additive-migration pattern; legacy/absent aspect defaults
+  to 4/3. Stale coarse sets were wiped from dev D1.
+
+Verified headless: re-entry renders 12 placed dithered cards in the exact
+cascade (screenshot); fade-through to the painted scene unchanged. 46/46
+transition tests, lint 0 errors.
+
 ## Environment repairs made during this work (dev-only)
 
 Recorded in specs/20260821-page-transitions-upgrade/research.md: Cloudflare
