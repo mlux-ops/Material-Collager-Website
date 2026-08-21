@@ -200,6 +200,19 @@ transition tests, lint 0 errors.
 
 47/47 transition tests, lint 0 errors.
 
+## User eyeball round 7 (2026-08-21) — the uniform upward jump, root-caused
+
+All cards shifted up a few px at the reveal. Pixel-scanned same-viewport
+captures (placeholder layer vs painted scene, top-edge y per card band):
+placeholders sat a near-uniform 16–20px LOW. That magnitude matches one
+mechanism exactly: R3F orients its default camera toward the origin, and
+from y=0.15 that is a 0.69° downward pitch ≈ 16px across a 38° fov at
+900px. The projection camera now applies the same lookAt(0,0,0).
+Re-measured deltas: 19/40/18/16/20 → 5/25/3/1/4 px (the 25 is a luminance-
+threshold artifact on a sparse tan band; the ghost capture shows every
+card fused). The measurement harness (pixel top-edge scan) is the new
+regression tool for placeholder alignment.
+
 ## Environment repairs made during this work (dev-only)
 
 Recorded in specs/20260821-page-transitions-upgrade/research.md: Cloudflare

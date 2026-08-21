@@ -96,6 +96,11 @@ export function projectCardRects(
   const spec = mobileFraming ? SCENE_WHEEL_MOBILE_CAMERA : SCENE_WHEEL_CAMERA;
   const camera = new PerspectiveCamera(spec.fov, viewportWidth / viewportHeight, spec.near, spec.far);
   camera.position.set(...spec.position);
+  // R3F orients its default camera toward the origin (measured empirically:
+  // without this the whole placeholder field sat ~16px low — the 0.69°
+  // downward pitch from y=0.15 across a 38° fov). Keep in lockstep with the
+  // live scene's camera orientation.
+  camera.lookAt(0, 0, 0);
   camera.updateMatrixWorld(true);
 
   const toScreen = (v: Vector3): Point => {
