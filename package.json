@@ -15,6 +15,7 @@
     "test:workbench-export-import": "node --experimental-strip-types --test tests/workbench-export-import.test.mjs",
     "test:collage": "node --experimental-strip-types --test tests/collage-*.test.mjs",
     "test:workbench": "node --experimental-strip-types --test --test-isolation=none tests/workbench-*.test.mjs",
+    "test:transitions": "node --experimental-strip-types --test tests/transitions-*.test.mjs",
     "db:generate": "drizzle-kit generate",
     "test:release-readiness": "node --test tests/release-readiness.test.mjs",
     "validate:rights": "node scripts/validate-release-collage-rights.mjs",

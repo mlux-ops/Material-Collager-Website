@@ -5,6 +5,34 @@ import { useRef, type ReactNode } from "react";
 import { TransitionLink } from "./TransitionLink";
 import { useNavPillSlide } from "./useNavPillSlide";
 
+// Warm the Library on navigation intent: the scene chunk (module fetch) plus
+// the card images, so the browser has them fetched and decoded before the
+// scene mounts after the wipe. Read-only side effects (a GET and image cache
+// fills) — spec FR-011 safe. GL init itself is not warmable; the scene
+// defers its mount to after the transition instead (SceneWheelV2).
+let libraryWarmed = false;
+function warmLibraryChunk() {
+  if (libraryWarmed) return;
+  libraryWarmed = true;
+  void import("./scene-wheel-v2/SceneWheelV2").catch(() => {
+    libraryWarmed = false; // transient failure: allow a retry on next intent
+  });
+  void fetch("/api/library", { cache: "no-store" })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((payload: unknown) => {
+      const records = Array.isArray((payload as { records?: unknown })?.records)
+        ? ((payload as { records: { imageUrl?: string }[] }).records)
+        : [];
+      for (const record of records.slice(0, 8)) {
+        if (typeof record.imageUrl !== "string") continue;
+        const img = new Image();
+        img.decoding = "async";
+        img.src = record.imageUrl;
+      }
+    })
+    .catch(() => {});
+}
+
 export type SiteNavigationActive = "library" | "generator" | "workbench";
 
 // The one shared top bar for all three pages (Library, Generator, Workbench).
@@ -35,6 +63,8 @@ export function SiteNavigation({
       data-nav-key={key}
       data-active={active === key}
       aria-current={active === key ? "page" : undefined}
+      onPointerEnter={href === "/" ? warmLibraryChunk : undefined}
+      onPointerDown={href === "/" ? warmLibraryChunk : undefined}
     >
       {label}
     </TransitionLink>

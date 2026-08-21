@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { DropdownSelect } from "../components/DropdownSelect";
 import { DitherReveal } from "../components/DitherReveal";
 import { SiteNavigation } from "../components/SiteNavigation";
+import { RouteReady } from "../components/RouteReady";
 import {
   COLLAGE_TYPES,
   COMPOSITIONS,
@@ -1492,6 +1493,7 @@ export default function Home() {
 
   return (
     <main className="app-shell generator-shell">
+      <RouteReady path="/generator" />
       <SiteNavigation
         active="generator"
         className="generator-navigation"

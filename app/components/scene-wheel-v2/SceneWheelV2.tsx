@@ -12,6 +12,17 @@ import {
 import type { SceneWheelHoverState } from "./SceneCard";
 import { useNativeScrollProgress } from "./useNativeScrollProgress";
 import { SiteNavigation } from "../SiteNavigation";
+import { RouteReady } from "../RouteReady";
+import { DitherReveal } from "../DitherReveal";
+import { awaitTransitionSettled } from "@/app/lib/route-ready.ts";
+import {
+  captureAndStoreThumbs,
+  fetchServerThumbs,
+  loadStoredThumbs,
+  storedThumbsMatch,
+  MAX_THUMBS,
+} from "@/app/lib/library-thumbs.ts";
+import { projectCardRects, MOBILE_FRAMING_QUERY, type PlacedCard } from "./project-card-rects";
 import styles from "./scene-wheel-v2.module.css";
 
 const SceneWheelCanvas = dynamic(() => import("./SceneWheelCanvas"), { ssr: false });
@@ -19,6 +30,10 @@ const SceneWheelCanvas = dynamic(() => import("./SceneWheelCanvas"), { ssr: fals
 // Progress is split so the counter starts moving on the library response and
 // spends the rest of its travel on the card images, which dominate the wait.
 const FETCH_SHARE = 12;
+
+// Whether the 0–100% loading veil has completed once this browser session.
+// See the `revealed` state below for why re-entries skip it.
+let hasRevealedThisSession = false;
 // A slow or hung image must never trap the visitor on the loading screen.
 const PRELOAD_TIMEOUT_MS = 12000;
 
@@ -28,7 +43,65 @@ export default function SceneWheelV2() {
   const targetProgress = useNativeScrollProgress(trackRef);
   const [records, setRecords] = useState<LibraryCollageRecord[]>([]);
   const [libraryState, setLibraryState] = useState<"loading" | "ready" | "fallback">("loading");
-  const [revealed, setRevealed] = useState(false);
+  // The 0–100% veil belongs to the site's first arrival only. On SPA
+  // re-entry (Generator/Workbench -> Library) the scene's chunk, textures,
+  // and browser caches are warm, so re-showing the counter reads as a
+  // choppy interruption mid-wipe — start revealed instead. Module scope, so
+  // it resets on a full page load but survives route changes.
+  const [revealed, setRevealed] = useState(() => hasRevealedThisSession);
+  // On SPA re-entry the wipe animates over this page LIVE, so mounting the
+  // three.js canvas (GL context + texture upload for every card at once)
+  // mid-wipe steals main-thread frames and the wipe stutters. Hold the scene
+  // until the transition settles (~50ms of scene work right after the sheet
+  // lands, measured). First arrival mounts immediately — the veil covers it.
+  const [sceneMountReady, setSceneMountReady] = useState(() => !hasRevealedThisSession);
+  // Placeholder choreography for the texture gap: stored thumbnails of the
+  // cards hold as a 1-bit dither row over the canvas area; the scene's first
+  // painted frame resolves the dither into the tiny color images and fades
+  // the row out, revealing the real cards behind it. No stored thumbs (very
+  // first visit) simply means no row — the veil covers first arrival anyway.
+  const [thumbs, setThumbs] = useState(loadStoredThumbs);
+  const [scenePainted, setScenePainted] = useState(false);
+  const [thumbRowGone, setThumbRowGone] = useState(false);
+  // The placeholders stand exactly where the scene will draw each card:
+  // same curve model, same camera, projected to screen space (see
+  // project-card-rects.ts), so the dither resolves into the real card in
+  // place instead of a detached strip.
+  const [placed, setPlaced] = useState<PlacedCard[]>([]);
+  const stickyRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (thumbs.length === 0 || thumbRowGone) return;
+    const compute = () => {
+      const box = stickyRef.current?.getBoundingClientRect();
+      const w = box?.width ?? window.innerWidth;
+      const h = box?.height ?? window.innerHeight;
+      const mobile = window.matchMedia(MOBILE_FRAMING_QUERY).matches;
+      setPlaced(
+        projectCardRects(thumbs.length, targetProgress.current, w, h, mobile, thumbs.map((t) => t.ar)),
+      );
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
+  }, [thumbs, thumbRowGone, targetProgress]);
+
+  // New device / cleared storage: hydrate the row from the shared D1 set.
+  // Skipped once the scene has painted — a placeholder arriving after the
+  // real thing would only flash.
+  useEffect(() => {
+    if (thumbs.length > 0) return;
+    let alive = true;
+    void fetchServerThumbs().then((serverThumbs) => {
+      if (alive && serverThumbs.length > 0) {
+        setThumbs((current) => (current.length === 0 ? serverThumbs : current));
+      }
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only hydration
+  }, []);
   const countRef = useRef<HTMLParagraphElement>(null);
   // Written by the fetch + image-preload passes, read by the rAF counter so
   // progress eases toward the real figure instead of snapping between images.
@@ -66,6 +139,17 @@ export default function SceneWheelV2() {
   useLayoutEffect(() => {
     if (hoveredItem) positionCursorLabel();
   }, [hoveredItem, positionCursorLabel]);
+
+  useEffect(() => {
+    if (sceneMountReady) return;
+    let alive = true;
+    void awaitTransitionSettled().then(() => {
+      if (alive) setSceneMountReady(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [sceneMountReady]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -130,6 +214,36 @@ export default function SceneWheelV2() {
     [records],
   );
 
+  // Retire the thumb row shortly after the dither resolves (fade handled in
+  // CSS), then refresh the stored thumbnails while the tab is idle.
+  // The dither resolves only once the scene has painted AND the first-load
+  // veil is gone — so first arrivals get the same dither-to-cards reveal as
+  // re-entries (the scene paints behind the veil; without gating on
+  // `revealed`, the row would retire before anyone saw it).
+  const showResolved = scenePainted && revealed;
+
+  useEffect(() => {
+    if (!showResolved) return;
+    // Row retire: with no row up, lock it out on the next tick so a late
+    // server hydration can't flash a placeholder over the visible scene;
+    // otherwise fade it out shortly after the dither resolves (fade in CSS).
+    const gone = window.setTimeout(() => setThumbRowGone(true), thumbs.length === 0 ? 0 : 600);
+    // Thumbnail refresh runs regardless of whether a row was shown — first
+    // visits are exactly the case that must capture and persist the set.
+    const idle = window.setTimeout(() => {
+      const cards = catalog.items
+        .slice(0, MAX_THUMBS)
+        .map((item) => ({ id: item.id, url: item.url, name: item.accessibleName }));
+      if (!storedThumbsMatch(thumbs, cards.map((c) => c.id))) {
+        void captureAndStoreThumbs(cards);
+      }
+    }, 1500);
+    return () => {
+      window.clearTimeout(gone);
+      window.clearTimeout(idle);
+    };
+  }, [showResolved, catalog.items, thumbs]);
+
   // Preload the card images the canvas is about to turn into textures. Both
   // share the HTTP cache, so counting these to 100% means the reveal shows
   // finished cards rather than empty planes still waiting on bytes.
@@ -188,9 +302,14 @@ export default function SceneWheelV2() {
     let shown = 0;
     const step = () => {
       const target = loadTargetRef.current;
-      shown += Math.max((target - shown) * 0.12, target > shown ? 0.25 : 0);
+      // Rate-capped ease: the lerp alone let a warm load sprint 0->100 in a
+      // few hundred ms, which read as a glitch rather than a count. The cap
+      // (~1.1%/frame) stretches a best-case ramp to ~1.6s while still easing
+      // into the tail, and slow loads still track real progress.
+      shown += Math.min(Math.max((target - shown) * 0.12, target > shown ? 0.25 : 0), 1.1);
       if (target >= 100 && shown > 99.4) {
         if (countRef.current) countRef.current.textContent = "100%";
+        hasRevealedThisSession = true;
         setRevealed(true);
         return;
       }
@@ -214,6 +333,12 @@ export default function SceneWheelV2() {
 
   return (
     <main className={`${styles.page} ${revealed ? styles.pageRevealed : ""}`} aria-busy={!revealed}>
+      {/* DOM-level readiness: the scene's chunk is loaded and this shell
+          (veil included — designed content, like the workbench's) is
+          committed. The signal cannot live inside the R3F tree: the canvas
+          mounts through R3F's rAF-scheduled loop, which is suspended during a
+          ViewTransition update callback (research.md T016). */}
+      <RouteReady path="/" />
       {revealed ? null : (
         <div className={styles.loadingVeil} role="status" aria-label="Loading library">
           <p ref={countRef} className={styles.loadingCount}>0%</p>
@@ -227,15 +352,51 @@ export default function SceneWheelV2() {
         aria-hidden={selectedItem ? true : undefined}
         inert={selectedItem ? true : undefined}
       >
-        <div className={styles.sticky}>
+        <div className={styles.sticky} ref={stickyRef}>
           <div className={styles.canvas} onPointerLeave={() => setHoveredItem(null)}>
-            {libraryState !== "loading" && catalog.items.length > 0 ? (
+            {sceneMountReady && libraryState !== "loading" && catalog.items.length > 0 ? (
               <SceneWheelCanvas
                 items={catalog.items}
                 onHover={handleHover}
                 onOpen={handleOpen}
                 targetProgress={targetProgress}
+                onFirstFrame={() => setScenePainted(true)}
               />
+            ) : null}
+            {thumbs.length > 0 && !thumbRowGone && placed.length > 0 ? (
+              <div
+                className={`${styles.thumbRow} ${showResolved ? styles.thumbRowResolved : ""}`}
+                aria-hidden="true"
+              >
+                {placed.map((card, index) => {
+                  const thumb = thumbs[index];
+                  if (!thumb) return null;
+                  return (
+                    <div
+                      key={thumb.id}
+                      className={styles.thumbCard}
+                      style={{
+                        width: `${card.width}px`,
+                        height: `${card.height}px`,
+                        opacity: card.opacity,
+                        zIndex: card.z,
+                        transform: card.transform,
+                      }}
+                    >
+                      <DitherReveal
+                        src={thumb.thumb}
+                        alt=""
+                        progress={showResolved ? 1 : undefined}
+                        cell={1.5}
+                        colorize
+                        ink="#171a18"
+                        paper="#fafafa"
+                        style={{ width: "100%", height: "100%" }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
             ) : null}
           </div>
 

@@ -29,6 +29,41 @@
   height: 100%;
 }
 
+/* Dithered placeholders standing exactly where the scene will draw each
+   card (projected via project-card-rects.ts), so the dither resolves into
+   the real card in place. Transparent layer — the canvas beneath clears to
+   the same paper, so gaps never flash. Fades once the scene has painted
+   (thumbRowResolved is added on the first painted frame; unmount follows). */
+.thumbRow {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  opacity: 1;
+  transition: opacity var(--duration-fast, 250ms) var(--ease-smooth-out, ease-out);
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.thumbRowResolved {
+  opacity: 0;
+  transition-delay: 220ms; /* let the dither finish resolving before fading */
+}
+
+.thumbCard {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  box-shadow: 0 1px 0 rgba(23, 26, 24, 0.14);
+  background: #fff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thumbRow {
+    transition: none;
+  }
+}
+
 /* .chrome no longer owns its own floating-card layout: the header markup is
    now the shared <SiteNavigation> component, which already renders the
    fixed, full-width `.site-navigation` bar from app/globals.css (the same

@@ -8,72 +8,89 @@
  * being drawn, not as a hard cut.
  *
  * Next 16.2 has no first-class <ViewTransition> (that lands in 16.3), so this
- * drives document.startViewTransition by hand: the transition's callback
- * resolves when the pathname actually changes, with a hard cap so a slow route
- * (the Library's three.js scene) can never freeze the page on a stale
- * snapshot. Browsers without the API, and anyone on prefers-reduced-motion,
- * fall straight through to a normal client navigation.
+ * drives document.startViewTransition by hand. The transition's callback
+ * resolves when the destination page declares itself painted via the
+ * route-ready registry (app/lib/route-ready.ts) — the Library signals on its
+ * scene's first rendered frame — bounded by READY_BUDGET_MS so a route that
+ * never signals can't freeze the page on a stale snapshot.
+ *
+ * Direction: the wipe encodes movement along the nav order (see
+ * app/lib/nav-direction.ts). It is exposed two ways so effects.css can select
+ * on either — transition types (vt.types, Baseline Jan 2026) and a
+ * data-nav-direction attribute on <html> for engines with the API but not
+ * types. Browsers without the API, and anyone on prefers-reduced-motion, fall
+ * straight through to a normal client navigation. Known scope edge: browser
+ * back/forward is handled by the router internally and currently navigates
+ * without a wipe; Next 16.3's <ViewTransition> covers traversal natively.
  */
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, type ComponentProps, type MouseEvent } from "react";
-
-// The old snapshot is held for at most this long. Past it the new route is
-// shown as-is rather than leaving the page apparently frozen. Sized against
-// the slowest route: the Library's three.js scene took ~790ms to put a painted
-// canvas on screen from a cold dev chunk. Releasing earlier than that wiped in
-// a blank page, which looked like a bug rather than a transition.
-const MAX_HOLD_MS = 850;
+import { type ComponentProps, type MouseEvent } from "react";
+import { navDirection, shouldStartViewTransition } from "@/app/lib/nav-direction.ts";
+import { awaitRouteReady, READY_BUDGET_MS, setActiveTransition } from "@/app/lib/route-ready.ts";
+import { logTransition, observeTransition } from "@/app/lib/transition-debug.ts";
 
 type Props = ComponentProps<typeof Link> & { href: string };
+
+// NOTE: no unmount cleanup of the readiness wait — the OLD page's links
+// unmount as part of the very navigation the wait belongs to. The registry is
+// navigation-scoped: supersession and the budget are its only cancellations.
 
 export function TransitionLink({ href, onClick, ...rest }: Props) {
   const router = useRouter();
   const pathname = usePathname();
-  const pending = useRef<(() => void) | null>(null);
-  const timer = useRef<number | null>(null);
-
-  const settle = () => {
-    if (timer.current !== null) {
-      window.clearTimeout(timer.current);
-      timer.current = null;
-    }
-    const resolve = pending.current;
-    pending.current = null;
-    resolve?.();
-  };
-
-  // The pathname changing only means the route committed - the new page has
-  // not painted yet. Give it two frames before handing the screen over.
-  useEffect(() => {
-    if (!pending.current) return;
-    const outer = requestAnimationFrame(() => requestAnimationFrame(settle));
-    return () => cancelAnimationFrame(outer);
-  }, [pathname]);
-
-  useEffect(() => () => settle(), []);
 
   const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
     onClick?.(event);
-    if (event.defaultPrevented) return;
-    // Let the browser handle modified clicks (new tab, download, etc.).
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
-    if (href === pathname) return;
 
-    const startViewTransition = document.startViewTransition?.bind(document);
-    if (!startViewTransition) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const proceed = shouldStartViewTransition({
+      defaultPrevented: event.defaultPrevented,
+      modifierPressed: event.metaKey || event.ctrlKey || event.shiftKey || event.altKey,
+      button: event.button,
+      samePath: href === pathname,
+      hasViewTransitionAPI: typeof document.startViewTransition === "function",
+      prefersReducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    });
+    if (!proceed) {
+      if (event.defaultPrevented) return;
+      if (!document.startViewTransition) logTransition("no-view-transition-api");
+      else if (window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+        logTransition("reduced-motion");
+      return; // plain navigation (next/link or the browser handles it)
+    }
 
     event.preventDefault();
-    startViewTransition(
-      () =>
-        new Promise<void>((resolve) => {
-          pending.current = resolve;
-          timer.current = window.setTimeout(settle, MAX_HOLD_MS);
-          router.push(href);
-        }),
-    );
+
+    const direction = navDirection(pathname, href);
+    const root = document.documentElement;
+    root.dataset.navDirection = direction;
+
+    const vt = document.startViewTransition(async () => {
+      router.push(href);
+      const outcome = await awaitRouteReady(href, READY_BUDGET_MS);
+      logTransition(outcome, href);
+      // One macrotask so any effects queued behind the readiness mark flush.
+      // NOT requestAnimationFrame: rendering is suspended inside this update
+      // callback, so rAF would deadlock until the browser's own transition
+      // timeout (research.md T016).
+      await new Promise<void>((r) => setTimeout(r, 0));
+    });
+
+    // Transition types drive :active-view-transition-type() selectors where
+    // supported; the data attribute above covers engines without types.
+    if (direction !== "none") {
+      vt.types?.add(direction === "forward" ? "nav-forward" : "nav-back");
+    }
+    observeTransition(vt);
+    setActiveTransition(vt.finished);
+    // finished REJECTS when a transition is skipped or times out; .finally
+    // would re-propagate that as an unhandled rejection in production (dev
+    // attaches a catch via observeTransition). Clean up on both settlements.
+    const clearDirection = () => {
+      if (root.dataset.navDirection === direction) delete root.dataset.navDirection;
+    };
+    vt.finished.then(clearDirection, clearDirection);
   };
 
   return <Link href={href} onClick={handleClick} {...rest} />;

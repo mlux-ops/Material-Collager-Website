@@ -36,12 +36,28 @@
 
 import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 
+// Each page mounts its own nav, so without help the pill would simply appear
+// at the destination. Remembering the previous page's active key at module
+// scope lets a freshly mounted bar seat the pill on the OLD item first, then
+// slide it to the new one — a purely horizontal move inside one bar, which
+// is what keeps route transitions from reading as a jump (the earlier
+// snapshot-morph approach tracked each page's bar position and dipped
+// vertically when those differed).
+let lastActiveKey: string | null = null;
+
 export function useNavPillSlide(
   trackRef: RefObject<HTMLElement | null>,
   pillRef: RefObject<HTMLElement | null>,
   activeKey: string | null,
 ) {
   const frame = useRef<number | null>(null);
+  const slideFrom = useRef<string | null>(null);
+
+  const seat = (pill: HTMLElement, link: HTMLElement) => {
+    pill.style.opacity = "1";
+    pill.style.transform = `translateX(${link.offsetLeft}px)`;
+    pill.style.width = `${link.offsetWidth}px`;
+  };
 
   const measure = () => {
     const track = trackRef.current;
@@ -55,12 +71,30 @@ export function useNavPillSlide(
       pill.style.opacity = "0";
       return;
     }
-    pill.style.opacity = "1";
-    pill.style.transform = `translateX(${link.offsetLeft}px)`;
-    pill.style.width = `${link.offsetWidth}px`;
+    const fromKey = slideFrom.current;
+    slideFrom.current = null;
+    const fromLink = fromKey && fromKey !== activeKey
+      ? track.querySelector<HTMLElement>(`[data-nav-key="${CSS.escape(fromKey)}"]`)
+      : null;
+    if (fromLink && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      // Seat on the previous route's item without animating, then let the
+      // CSS transition carry it to the new one on the next frame.
+      const previousTransition = pill.style.transition;
+      pill.style.transition = "none";
+      seat(pill, fromLink);
+      void pill.offsetWidth; // flush the un-animated seat
+      pill.style.transition = previousTransition;
+      frame.current = requestAnimationFrame(() => seat(pill, link));
+      return;
+    }
+    seat(pill, link);
   };
 
   useLayoutEffect(() => {
+    if (lastActiveKey !== activeKey) {
+      slideFrom.current = lastActiveKey;
+      lastActiveKey = activeKey;
+    }
     measure();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKey]);
