@@ -26,7 +26,9 @@
 /* Nodes already on the paperspace when the workbench loads dither into
    existence — the same Bayer 4x4 ordered dissolve the Library placeholders
    resolve through, here driven by mask-image tile swaps on each node's
-   wrapper (a 4x4 SVG tile repeated at 8px, so every dither cell is 2px).
+   wrapper (a 4x4 SVG tile repeated at 16px, so every dither cell is 4px —
+   the chunky, readable scale the library cards resolve at; owner: 2px cells
+   were too fine to read).
    Swapping a tiny tiled mask is compositor work only; nothing repaints per
    frame, unlike animating a canvas per node. WorkbenchApp owns the phases:
    .ditherPending hides the restored nodes until the page wipe has settled
@@ -37,7 +39,7 @@
 }
 
 .ditherRun :global(.react-flow__node) {
-  mask-size: 8px 8px;
+  mask-size: 16px 16px;
   mask-repeat: repeat;
   animation: node-dither-in 620ms linear both;
 }
