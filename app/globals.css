@@ -2595,7 +2595,14 @@ button.site-wordmark {
   border: 0;
   cursor: pointer;
   font-family: inherit;
+  font-size: 11.55px; /* owner: +10% over the shared 10.5px */
   text-align: left;
+}
+
+/* While the wordmark menu is open the bar sits on the topmost layer and
+   casts a soft shadow onto the glass pane emerging beneath it. */
+.site-navigation.menu-open {
+  box-shadow: 0 12px 28px rgb(0 0 0 / 12%);
 }
 
 .site-navigation nav {

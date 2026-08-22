@@ -88,7 +88,13 @@ export function SiteNavigation({
   );
 
   return (
-    <header className={className ? `site-navigation ${className}` : "site-navigation"}>
+    <header
+      className={[
+        "site-navigation",
+        className ?? "",
+        menuOpen ? "menu-open" : "",
+      ].filter(Boolean).join(" ")}
+    >
       {/* The wordmark toggles the frosted menu pane rather than linking home
           (the LIBRARY item covers home navigation). */}
       <button

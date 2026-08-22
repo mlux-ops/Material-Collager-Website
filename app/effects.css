@@ -327,7 +327,7 @@ html:active-view-transition .site-navigation {
   width: min(380px, 78vw);
   padding: 84px 28px 28px;
   background: rgba(255, 255, 255, 0.33);
-  backdrop-filter: blur(40px) saturate(1.05);
+  backdrop-filter: blur(64px) saturate(1.05); /* finest frost grain */
   border-right: 1px solid rgb(0 0 0 / 16%);
   box-shadow: 34px 0 90px rgb(0 0 0 / 8%);
   animation: menu-slide-down var(--wipe-dur, 700ms) var(--wipe-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
@@ -335,7 +335,7 @@ html:active-view-transition .site-navigation {
 }
 
 .wordmark-menu-leaving {
-  animation: menu-slide-up 380ms var(--wipe-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
+  animation: menu-slide-up 440ms var(--wipe-ease, cubic-bezier(0.22, 1, 0.36, 1)) both; /* owner: ~15% slower */
 }
 
 .wordmark-menu-rows {
@@ -347,7 +347,26 @@ html:active-view-transition .site-navigation {
 }
 
 .wordmark-menu-rows li {
-  min-height: 15px;
+  min-height: 18px;
+}
+
+/* Each option is a see-through glass rectangle: hovering slowly tints the
+   glass toward black — the translucency never changes, only the tone — and
+   moving on lets the previous rectangle fade back on the same curve. */
+.wordmark-menu-row-btn {
+  display: block;
+  width: 100%;
+  padding: 10px 14px;
+  border: 0;
+  background: rgb(0 0 0 / 0%);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 420ms var(--ease-smooth-out, ease-out);
+}
+
+.wordmark-menu-row-btn:hover,
+.wordmark-menu-row-btn:focus-visible {
+  background: rgb(0 0 0 / 16%);
 }
 
 @media (prefers-reduced-motion: reduce) {

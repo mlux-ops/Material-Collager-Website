@@ -41,7 +41,7 @@ export function WordmarkMenu({
       closeTimer.current = null;
       setClosing(false);
       onRequestClose();
-    }, 380);
+    }, 440);
   }, [onRequestClose]);
 
   // Mounted only while open (SiteNavigation renders it conditionally), so
@@ -84,7 +84,9 @@ export function WordmarkMenu({
           {ROWS.map((row, i) =>
             landed ? (
               <li key={row}>
-                <DitherTextIn text={row} delay={i * 70} duration={420} cell={1} fontSize={11} />
+                <button type="button" className="wordmark-menu-row-btn">
+                  <DitherTextIn text={row} delay={i * 70} duration={505} cell={1} fontSize={13.2} />
+                </button>
               </li>
             ) : (
               <li key={row} aria-hidden="true" />

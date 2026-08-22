@@ -100,20 +100,57 @@ export function DitherTextIn({
     const rows = Math.ceil(off.height / cellPx);
     let start: number | null = null;
 
+    // Deterministic per-cell/per-frame hash for the glitch artifacts.
+    const hash = (cx: number, cy: number, seed: number) => {
+      let h = (cx * 374761393 + cy * 668265263) ^ (seed * 69069 + 1);
+      h = (h ^ (h >>> 13)) * 1274126177;
+      return (h ^ (h >>> 16)) >>> 0;
+    };
+
     const paint = (ts: number) => {
       if (cancelled) return;
       if (start === null) start = ts;
       const t = Math.min(1, (ts - start) / duration);
+      const frameSeed = Math.floor(ts / 48); // artifact set mutates ~20x/sec
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       for (let cy = 0; cy < rows; cy += 1) {
         const brow = BAYER4[cy & 3];
         for (let cx = 0; cx < cols; cx += 1) {
-          if ((brow[cx & 3] + 0.5) / 16 > t) continue;
-          // Cell is "ink" when the rasterized glyph covers its center.
+          const threshold = (brow[cx & 3] + 0.5) / 16;
+          if (threshold > t) continue;
+          // Cell is "ink" when the rasterized glyph covers its center — so
+          // every artifact stays inside the letterform's own footprint.
           const px = Math.min(off.width - 1, cx * cellPx + (cellPx >> 1));
           const py = Math.min(off.height - 1, cy * cellPx + (cellPx >> 1));
-          if (src[(py * off.width + px) * 4 + 3] > 96) {
-            ctx.fillRect(cx * cellPx, cy * cellPx, cellPx, cellPx);
+          if (src[(py * off.width + px) * 4 + 3] <= 96) continue;
+          const x0 = cx * cellPx;
+          const y0 = cy * cellPx;
+          // Frontier cells (recently crossed the threshold) glitch: they
+          // flicker and materialize as smaller mixed artifacts — dashes,
+          // ticks, dots — before settling into the solid cell.
+          if (t < 1 && t - threshold < 0.24) {
+            const h = hash(cx, cy, frameSeed);
+            if ((h & 3) === 0) continue; // flicker off this frame
+            switch ((h >> 2) & 3) {
+              case 0: // horizontal dash
+                ctx.fillRect(x0, y0 + (cellPx >> 1), cellPx, Math.max(1, cellPx >> 1));
+                break;
+              case 1: // vertical tick
+                ctx.fillRect(x0 + ((h >> 4) & 1 ? cellPx >> 1 : 0), y0, Math.max(1, cellPx >> 1), cellPx);
+                break;
+              case 2: // corner dot
+                ctx.fillRect(
+                  x0 + ((h >> 4) & 1 ? cellPx >> 1 : 0),
+                  y0 + ((h >> 5) & 1 ? cellPx >> 1 : 0),
+                  Math.max(1, cellPx >> 1),
+                  Math.max(1, cellPx >> 1),
+                );
+                break;
+              default: // full cell, early
+                ctx.fillRect(x0, y0, cellPx, cellPx);
+            }
+          } else {
+            ctx.fillRect(x0, y0, cellPx, cellPx);
           }
         }
       }
