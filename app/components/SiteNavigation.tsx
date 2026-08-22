@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
-import { useRef, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
+import { WordmarkMenu } from "./WordmarkMenu";
 import { TransitionLink } from "./TransitionLink";
 import { useNavPillSlide } from "./useNavPillSlide";
 
@@ -65,6 +65,8 @@ export function SiteNavigation({
   className?: string;
   right?: ReactNode;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuCloseSignal, setMenuCloseSignal] = useState(0);
   const trackRef = useRef<HTMLElement>(null);
   const pillRef = useRef<HTMLSpanElement>(null);
   // The black block is one element that slides between the three links rather
@@ -87,7 +89,29 @@ export function SiteNavigation({
 
   return (
     <header className={className ? `site-navigation ${className}` : "site-navigation"}>
-      <Link className="site-wordmark" href="/">Material Collager</Link>
+      {/* The wordmark toggles the frosted menu pane rather than linking home
+          (the LIBRARY item covers home navigation). */}
+      <button
+        type="button"
+        className="site-wordmark"
+        aria-expanded={menuOpen}
+        aria-haspopup="true"
+        onClick={() => {
+          if (menuOpen) setMenuCloseSignal((n) => n + 1); // graceful slide-up
+          else setMenuOpen(true);
+        }}
+      >
+        Material Collager
+      </button>
+      {menuOpen ? (
+        <WordmarkMenu
+          closeSignal={menuCloseSignal}
+          onRequestClose={() => {
+            setMenuOpen(false);
+            setMenuCloseSignal(0);
+          }}
+        />
+      ) : null}
       <nav aria-label="Primary navigation" className="nav-pill-track" ref={trackRef}>
         <span className="nav-pill" aria-hidden ref={pillRef} />
         {item("library", "/", "Library")}
