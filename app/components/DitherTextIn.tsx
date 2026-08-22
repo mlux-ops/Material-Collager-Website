@@ -64,6 +64,10 @@ export function DitherTextIn({
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const font = `750 ${fontSize * dpr}px ${getComputedStyle(document.body).fontFamily}`;
     const cellPx = Math.max(1, Math.round(cell * dpr));
+    // The canvas and the final <span> must occupy the exact same block box,
+    // or the row jumps when the dither hands off to real text (the same
+    // box-mismatch class of bug as the library placeholder panels).
+    const boxH = Math.ceil(fontSize * 1.3);
 
     // Rasterize the line once at device resolution.
     const off = document.createElement("canvas");
@@ -74,9 +78,8 @@ export function DitherTextIn({
     const width = Math.ceil(
       text.split("").reduce((w, ch) => w + octx.measureText(ch).width + spacing, 0),
     );
-    const height = Math.ceil(fontSize * dpr * 1.3);
     off.width = Math.max(1, width);
-    off.height = height;
+    off.height = boxH * dpr;
     octx.font = font;
     octx.fillStyle = "#000";
     octx.textBaseline = "alphabetic";
@@ -90,8 +93,9 @@ export function DitherTextIn({
 
     canvas.width = off.width;
     canvas.height = off.height;
+    canvas.style.display = "block";
     canvas.style.width = `${off.width / dpr}px`;
-    canvas.style.height = `${off.height / dpr}px`;
+    canvas.style.height = `${boxH}px`;
     const ctx = canvas.getContext("2d");
     if (!ctx) { raf = requestAnimationFrame(() => setDone(true)); return () => cancelAnimationFrame(raf); }
     ctx.fillStyle = ink;
@@ -166,17 +170,34 @@ export function DitherTextIn({
     };
   }, [text, delay, duration, cell, fontSize, letterSpacing, ink, done, reduced]);
 
+  const boxH = Math.ceil(fontSize * 1.3);
   if (done || reduced) {
     return (
       <span
         className={className}
-        style={{ fontSize, fontWeight: 750, letterSpacing, color: ink, lineHeight: 1.3 }}
+        style={{
+          display: "block",
+          height: boxH,
+          fontSize,
+          fontWeight: 750,
+          letterSpacing,
+          color: ink,
+          lineHeight: `${boxH}px`,
+        }}
       >
         {text}
       </span>
     );
   }
-  return <canvas ref={canvasRef} className={className} aria-label={text} role="img" />;
+  return (
+    <canvas
+      ref={canvasRef}
+      className={className}
+      style={{ display: "block", height: boxH }}
+      aria-label={text}
+      role="img"
+    />
+  );
 }
 
 export default DitherTextIn;
