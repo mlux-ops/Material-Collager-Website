@@ -72,14 +72,15 @@ export function WordmarkMenu({
       {/* Transparent click-catcher: "outside the panel" closes. Sits under
           the nav bar (z-index), so the wordmark stays clickable as a toggle. */}
       <div className="wordmark-menu-outside" onPointerDown={requestClose} aria-hidden="true" />
-      <div
-        className={closing ? "wordmark-menu wordmark-menu-leaving" : "wordmark-menu"}
-        role="navigation"
-        aria-label="Site menu"
-        onAnimationEnd={(event) => {
-          if (event.animationName.includes("menu-slide-down")) setLanded(true);
-        }}
-      >
+      <div className="wordmark-menu-clip">
+        <div
+          className={closing ? "wordmark-menu wordmark-menu-leaving" : "wordmark-menu"}
+          role="navigation"
+          aria-label="Site menu"
+          onAnimationEnd={(event) => {
+            if (event.animationName.includes("menu-slide-down")) setLanded(true);
+          }}
+        >
         <ul className="wordmark-menu-rows">
           {ROWS.map((row, i) =>
             landed ? (
@@ -93,6 +94,7 @@ export function WordmarkMenu({
             ),
           )}
         </ul>
+        </div>
       </div>
     </>,
     document.body,

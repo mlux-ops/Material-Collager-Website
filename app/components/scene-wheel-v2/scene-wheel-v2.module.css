@@ -72,7 +72,11 @@
    what produced the boxed, two-line nav bug (three links squeezed into a
    180px/180px, two-column grid). */
 .chrome {
-  z-index: 20;
+  /* Matches .site-navigation's own z-index: this module loads after
+     globals.css, so a lower value here silently DEMOTED the bar on the
+     Library — letting the wordmark menu pane (z 95) and the viewer (z 50)
+     paint over it. Owner rule: the nav bar is topmost on every page. */
+  z-index: 100;
 }
 
 .caption {

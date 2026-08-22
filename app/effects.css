@@ -314,18 +314,31 @@ html:active-view-transition .site-navigation {
 
 .wordmark-menu-outside {
   position: fixed;
-  inset: 0;
+  inset: 58px 0 0 0; /* below the bar — the bar is its own interactive layer */
   z-index: 90;
 }
 
-.wordmark-menu {
+/* Clip window for the pane: starts exactly at the bar's bottom edge, so the
+   sliding glass genuinely emerges from underneath the bar and never overlaps
+   its pixels. (Two overlapping fixed backdrop-filter layers hit a Chromium
+   compositing quirk where the later one promotes above regardless of
+   z-index — clipping sidesteps it entirely.) */
+.wordmark-menu-clip {
   position: fixed;
-  top: 0;
+  top: 58px;
   bottom: 0;
   left: 0;
-  z-index: 95;
   width: min(380px, 78vw);
-  padding: 84px 28px 28px;
+  overflow: hidden;
+  z-index: 95;
+  pointer-events: none;
+}
+
+.wordmark-menu {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  padding: 30px 28px 28px;
   background: rgba(255, 255, 255, 0.33);
   backdrop-filter: blur(64px) saturate(1.05); /* finest frost grain */
   border-right: 1px solid rgb(0 0 0 / 16%);
