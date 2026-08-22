@@ -43,6 +43,7 @@ import { connectionIsValid, nodeKindsForWire, useWorkbenchStore } from "./store"
 import { Spotlight } from "./Spotlight";
 import { instantiateTemplate, TEMPLATES, type TemplateId } from "./templates";
 import { useModalDismiss } from "./useModalDismiss";
+import { awaitTransitionSettled } from "@/app/lib/route-ready";
 import { SiteNavigation } from "../SiteNavigation";
 import styles from "./workbench.module.css";
 import { acceptedKindsFor, PORT_COLORS, specFor, type NodeKind, type PortKind, type WorkbenchNode } from "./types";
@@ -818,6 +819,51 @@ function CanvasInner({
   );
 }
 
+// How long the dither-in reveal can possibly run: animation duration (620ms)
+// plus the capped stagger ladder (660ms, workbench.module.css) plus margin.
+// After this the phase classes come off so later node adds render normally.
+const DITHER_TOTAL_MS = 1_600;
+
+// Restored nodes dither into existence — the same Bayer ordered dissolve the
+// Library placeholders resolve through. Three phases: "pending" keeps the
+// restored nodes invisible from their very first paint (they mount during the
+// wipe's hold, well before the reveal should start), "run" swaps in the
+// staggered mask animation once the graph is restored AND the page wipe has
+// settled (the wipe suspends rendering — an animation started under it would
+// land already finished), "done" removes both classes so nodes added later
+// appear instantly, untouched.
+function useNodeDitherPhase(restored: boolean): "pending" | "run" | "done" {
+  const [phase, setPhase] = useState<"pending" | "run" | "done">("pending");
+  useEffect(() => {
+    if (!restored) return;
+    let cancelled = false;
+    let timer: number | null = null;
+    // Every phase change happens inside the promise continuation (a
+    // microtask, never synchronous in the effect). Reduced motion skips
+    // straight to "done" — the stylesheet's reduced-motion block also keeps
+    // .ditherPending inert there, so nodes were never hidden to begin with.
+    void awaitTransitionSettled().then(() => {
+      if (cancelled) return;
+      if (
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
+        useWorkbenchStore.getState().nodes.length === 0
+      ) {
+        setPhase("done");
+        return;
+      }
+      setPhase("run");
+      timer = window.setTimeout(() => {
+        if (!cancelled) setPhase("done");
+      }, DITHER_TOTAL_MS);
+    });
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [restored]);
+  return phase;
+}
+
 export default function WorkbenchApp() {
   const loadIntoStore = useWorkbenchStore((state) => state.loadGraph);
   const setRestoreBlockedInStore = useWorkbenchStore((state) => state.setRestoreBlocked);
@@ -831,6 +877,7 @@ export default function WorkbenchApp() {
   const [retrying, setRetrying] = useState(false);
   const [retryToken, setRetryToken] = useState(0);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const ditherPhase = useNodeDitherPhase(restored);
   const hasRestored = useRef(false);
   const graphIdRef = useRef(DEFAULT_GRAPH_ID);
 
@@ -1048,7 +1095,7 @@ export default function WorkbenchApp() {
         }
       />
       <div className={styles.canvasWrap}>
-        <div className={styles.canvasFlow}>
+        <div className={`${styles.canvasFlow}${ditherPhase === "pending" ? ` ${styles.ditherPending}` : ditherPhase === "run" ? ` ${styles.ditherRun}` : ""}`}>
           <ReactFlowProvider>
             <CanvasInner restored={restored} switchGraph={switchGraph} cancelPendingSaves={cancelPendingTimers} />
           </ReactFlowProvider>

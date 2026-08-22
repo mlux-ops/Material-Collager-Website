@@ -22,6 +22,74 @@
   position: relative;
 }
 
+/* --- Restored-node dither-in -------------------------------------------- */
+/* Nodes already on the paperspace when the workbench loads dither into
+   existence — the same Bayer 4x4 ordered dissolve the Library placeholders
+   resolve through, here driven by mask-image tile swaps on each node's
+   wrapper (a 4x4 SVG tile repeated at 8px, so every dither cell is 2px).
+   Swapping a tiny tiled mask is compositor work only; nothing repaints per
+   frame, unlike animating a canvas per node. WorkbenchApp owns the phases:
+   .ditherPending hides the restored nodes until the page wipe has settled
+   (the wipe suspends rendering, so an animation started under it would land
+   already finished), then .ditherRun swaps in the staggered animation. */
+.ditherPending :global(.react-flow__node) {
+  opacity: 0;
+}
+
+.ditherRun :global(.react-flow__node) {
+  mask-size: 8px 8px;
+  mask-repeat: repeat;
+  animation: node-dither-in 620ms linear both;
+}
+
+/* Stagger in DOM order (React Flow renders one wrapper per node inside
+   .react-flow__nodes, so nth-child is exactly node order). Beyond twelve
+   nodes the rest share the last slot — a long tail of one-by-one arrivals
+   would read as loading, not as a reveal. */
+.ditherRun :global(.react-flow__node:nth-child(2)) { animation-delay: 55ms; }
+.ditherRun :global(.react-flow__node:nth-child(3)) { animation-delay: 110ms; }
+.ditherRun :global(.react-flow__node:nth-child(4)) { animation-delay: 165ms; }
+.ditherRun :global(.react-flow__node:nth-child(5)) { animation-delay: 220ms; }
+.ditherRun :global(.react-flow__node:nth-child(6)) { animation-delay: 275ms; }
+.ditherRun :global(.react-flow__node:nth-child(7)) { animation-delay: 330ms; }
+.ditherRun :global(.react-flow__node:nth-child(8)) { animation-delay: 385ms; }
+.ditherRun :global(.react-flow__node:nth-child(9)) { animation-delay: 440ms; }
+.ditherRun :global(.react-flow__node:nth-child(10)) { animation-delay: 495ms; }
+.ditherRun :global(.react-flow__node:nth-child(11)) { animation-delay: 550ms; }
+.ditherRun :global(.react-flow__node:nth-child(12)) { animation-delay: 605ms; }
+.ditherRun :global(.react-flow__node:nth-child(n + 13)) { animation-delay: 660ms; }
+
+@keyframes node-dither-in {
+  0% { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3C/svg%3E"); }
+  6.25% { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Cpath d='M0 0h1v1h-1z'/%3E%3C/svg%3E"); }
+  12.5% { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Cpath d='M0 0h1v1h-1zM2 2h1v1h-1z'/%3E%3C/svg%3E"); }
+  18.75% { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Cpath d='M0 0h1v1h-1zM2 2h1v1h-1zM2 0h1v1h-1z'/%3E%3C/svg%3E"); }
+  25% { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Cpath d='M0 0h1v1h-1zM2 2h1v1h-1zM2 0h1v1h-1zM0 2h1v1h-1z'/%3E%3C/svg%3E"); }
+  31.25% { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Cpath d='M0 0h1v1h-1zM2 2h1v1h-1zM2 0h1v1h-1zM0 2h1v1h-1zM1 1h1v1h-1z'/%3E%3C/svg%3E"); }
+  37.5% { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Cpath d='M0 0h1v1h-1zM2 2h1v1h-1zM2 0h1v1h-1zM0 2h1v1h-1zM1 1h1v1h-1zM3 3h1v1h-1z'/%3E%3C/svg%3E"); }
+  43.75% { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Cpath d='M0 0h1v1h-1zM2 2h1v1h-1zM2 0h1v1h-1zM0 2h1v1h-1zM1 1h1v1h-1zM3 3h1v1h-1zM3 1h1v1h-1z'/%3E%3C/svg%3E"); }
+  50% { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Cpath d='M0 0h1v1h-1zM2 2h1v1h-1zM2 0h1v1h-1zM0 2h1v1h-1zM1 1h1v1h-1zM3 3h1v1h-1zM3 1h1v1h-1zM1 3h1v1h-1z'/%3E%3C/svg%3E"); }
+  56.25% { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Cpath d='M0 0h1v1h-1zM2 2h1v1h-1zM2 0h1v1h-1zM0 2h1v1h-1zM1 1h1v1h-1zM3 3h1v1h-1zM3 1h1v1h-1zM1 3h1v1h-1zM1 0h1v1h-1z'/%3E%3C/svg%3E"); }
+  62.5% { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Cpath d='M0 0h1v1h-1zM2 2h1v1h-1zM2 0h1v1h-1zM0 2h1v1h-1zM1 1h1v1h-1zM3 3h1v1h-1zM3 1h1v1h-1zM1 3h1v1h-1zM1 0h1v1h-1zM3 2h1v1h-1z'/%3E%3C/svg%3E"); }
+  68.75% { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Cpath d='M0 0h1v1h-1zM2 2h1v1h-1zM2 0h1v1h-1zM0 2h1v1h-1zM1 1h1v1h-1zM3 3h1v1h-1zM3 1h1v1h-1zM1 3h1v1h-1zM1 0h1v1h-1zM3 2h1v1h-1zM3 0h1v1h-1z'/%3E%3C/svg%3E"); }
+  75% { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Cpath d='M0 0h1v1h-1zM2 2h1v1h-1zM2 0h1v1h-1zM0 2h1v1h-1zM1 1h1v1h-1zM3 3h1v1h-1zM3 1h1v1h-1zM1 3h1v1h-1zM1 0h1v1h-1zM3 2h1v1h-1zM3 0h1v1h-1zM1 2h1v1h-1z'/%3E%3C/svg%3E"); }
+  81.25% { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Cpath d='M0 0h1v1h-1zM2 2h1v1h-1zM2 0h1v1h-1zM0 2h1v1h-1zM1 1h1v1h-1zM3 3h1v1h-1zM3 1h1v1h-1zM1 3h1v1h-1zM1 0h1v1h-1zM3 2h1v1h-1zM3 0h1v1h-1zM1 2h1v1h-1zM0 1h1v1h-1z'/%3E%3C/svg%3E"); }
+  87.5% { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Cpath d='M0 0h1v1h-1zM2 2h1v1h-1zM2 0h1v1h-1zM0 2h1v1h-1zM1 1h1v1h-1zM3 3h1v1h-1zM3 1h1v1h-1zM1 3h1v1h-1zM1 0h1v1h-1zM3 2h1v1h-1zM3 0h1v1h-1zM1 2h1v1h-1zM0 1h1v1h-1zM2 3h1v1h-1z'/%3E%3C/svg%3E"); }
+  93.75% { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Cpath d='M0 0h1v1h-1zM2 2h1v1h-1zM2 0h1v1h-1zM0 2h1v1h-1zM1 1h1v1h-1zM3 3h1v1h-1zM3 1h1v1h-1zM1 3h1v1h-1zM1 0h1v1h-1zM3 2h1v1h-1zM3 0h1v1h-1zM1 2h1v1h-1zM0 1h1v1h-1zM2 3h1v1h-1zM2 1h1v1h-1z'/%3E%3C/svg%3E"); }
+  100% { mask-image: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ditherPending :global(.react-flow__node) {
+    opacity: 1;
+  }
+
+  .ditherRun :global(.react-flow__node) {
+    animation: none;
+    mask-image: none;
+  }
+}
+
 /* --- React Flow chrome theming ----------------------------------------- */
 /* Align the library's stock chrome (controls, minimap, selection box, edges)
    with the site's monochrome pill language: white surfaces, hairline
