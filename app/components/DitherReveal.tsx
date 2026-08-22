@@ -127,7 +127,7 @@ export function DitherReveal({
   mode = "bayer",
   cell = 4,
   colorize = false,
-  ink = "var(--ink, #171a18)",
+  ink = "var(--ink, #000000)",
   paper = "var(--background, #eceeea)",
   width,
   height,
@@ -143,7 +143,7 @@ export function DitherReveal({
   // long-lived rAF loop below never reads a stale closured `progress` value.
   const samplesRef = useRef<CellSample | null>(null);
   const naturalSizeRef = useRef<{ w: number; h: number } | null>(null);
-  const inkRgbRef = useRef<[number, number, number]>([23, 26, 24]);
+  const inkRgbRef = useRef<[number, number, number]>([0, 0, 0]);
   const paperRgbRef = useRef<[number, number, number]>([236, 238, 234]);
   const shimmerPhaseRef = useRef(0);
   const lastTsRef = useRef<number | null>(null);

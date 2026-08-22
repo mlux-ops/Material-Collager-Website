@@ -409,7 +409,7 @@ export default function SceneWheelV2() {
                         progress={showResolved ? 1 : undefined}
                         cell={1.5}
                         colorize
-                        ink="#171a18"
+                        ink="#000000"
                         paper="#fafafa"
                         style={{ width: "100%", height: "100%" }}
                       />
