@@ -135,7 +135,7 @@ export function SiteNavigation({
               token applies. vs v3: rule bars trimmed flush with the X's
               right edge, both X glyphs and the M's right half nudged left. */}
           <svg viewBox="0 0 248.656 192.867" fill="currentColor" aria-hidden="true" focusable="false">
-            <path d="M9.502,174.324l.283-71.495h16.116v59.055h55.681v12.44H9.502Z"/>
+            <path d="M9.502,174.324l.283-71.495h16.116v59.055h53.331v12.44H9.502Z"/>
             <rect x="9.502" y="79.101" width="221.382" height="8.174"/>
             <rect x="9.502" y="179.89" width="221.382" height="8.174"/>
             <polyline points="81.348 72.959 81.348 72.959 81.348 1.459 60.878 1.459 50.568 25.543 45.339 37.76 45.212 56.06 51.748 56.057 64.941 25.396 64.949 72.955" stroke="currentColor" strokeMiterlimit="10" strokeWidth=".1"/>
