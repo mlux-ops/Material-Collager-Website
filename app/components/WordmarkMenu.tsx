@@ -74,6 +74,10 @@ export function WordmarkMenu({
       <div className="wordmark-menu-outside" onPointerDown={requestClose} aria-hidden="true" />
       <div className="wordmark-menu-clip">
         <div
+          className={closing ? "wordmark-menu-shadow wordmark-menu-leaving-shadow" : "wordmark-menu-shadow"}
+          aria-hidden="true"
+        />
+        <div
           className={closing ? "wordmark-menu wordmark-menu-leaving" : "wordmark-menu"}
           role="navigation"
           aria-label="Site menu"

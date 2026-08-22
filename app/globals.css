@@ -2599,11 +2599,9 @@ button.site-wordmark {
   text-align: left;
 }
 
-/* While the wordmark menu is open the bar sits on the topmost layer and
-   casts a soft shadow onto the glass pane emerging beneath it. */
-.site-navigation.menu-open {
-  box-shadow: 0 12px 28px rgb(0 0 0 / 12%);
-}
+/* The bar's shadow onto the wordmark pane is a dedicated strip inside the
+   pane's clip window (effects.css .wordmark-menu-shadow) — a box-shadow on
+   the bar itself would fall across the whole workspace, not just the glass. */
 
 .site-navigation nav {
   display: flex;
@@ -3421,10 +3419,10 @@ button.site-wordmark {
   user-select: none;
 }
 
-/* The mark is the owner-authored outlined SVG (references/maxlux-logo2.svg)
+/* The mark is the owner-authored outlined SVG (references/maxlux-logo3.svg)
    embedded in SiteNavigation; sizing is one knob — the box. */
 .site-logo svg {
   display: block;
   height: 42px;
-  width: 50px; /* viewBox 223.5x188 ratio */
+  width: 54px; /* viewBox 248.7x192.9 ratio */
 }
