@@ -38,6 +38,15 @@
   opacity: 0;
 }
 
+/* Wires stay hidden through both node phases; once the dither lands they
+   draw themselves in from source to target (WorkbenchApp seeds each path's
+   stroke-dashoffset to its own length while still hidden here, then
+   transitions it to 0 — the reveal itself is inline, per-edge). */
+.ditherPending :global(.react-flow__edge),
+.ditherRun :global(.react-flow__edge) {
+  opacity: 0;
+}
+
 .ditherRun :global(.react-flow__node) {
   mask-size: 16px 16px;
   mask-repeat: repeat;
@@ -82,7 +91,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ditherPending :global(.react-flow__node) {
+  .ditherPending :global(.react-flow__node),
+  .ditherPending :global(.react-flow__edge),
+  .ditherRun :global(.react-flow__edge) {
     opacity: 1;
   }
 
