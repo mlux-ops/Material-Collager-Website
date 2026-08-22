@@ -347,9 +347,22 @@ html:active-view-transition .site-navigation {
   overflow-y: auto;
 }
 
-/* The bar's soft shadow, cast only onto the glass: a strip pinned to the
-   top of the pane's clip window, above the sliding pane. It fades in fast
-   the moment the slide begins and lifts with the pane on close. */
+/* The bar's shadow, cast only onto the glass: a strip pinned to the top of
+   the pane's clip window, above the sliding pane. It fades in fast the
+   moment the slide begins and lifts with the pane on close.
+
+   Owner: a single box-shadow "doesn't read as a 3D plane". A real slab over
+   a glass sheet casts two distinguishable things — a hard contact line at
+   the edge (umbra) and a long ambient wash (penumbra) — and the sheet's own
+   cut edge catches the light. Three background layers, top to bottom:
+     1. a 1px specular lip — the glass edge lit under the bar,
+     2. a tight 3px umbra directly below it — the bar pressing overhead,
+     3. an easing-curve scrim decaying to true zero — ambient occlusion in
+        the air gap. Eased stops, not a two-stop gradient, whose visible
+        start/end edges are the same "CSS shadow" tell as a lone Gaussian.
+   A gradient is the physically right shape here: full-width bar over a
+   parallel plane means pure vertical falloff with no silhouette corners —
+   and it is cheaper than any box-shadow (no blur passes at all). */
 @keyframes menu-shadow-in {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -362,11 +375,27 @@ html:active-view-transition .site-navigation {
 
 .wordmark-menu-shadow {
   position: absolute;
-  top: -24px;
+  top: 0;
   left: 0;
   right: 0;
-  height: 24px;
-  box-shadow: 0 12px 22px rgb(0 0 0 / 16%);
+  height: 34px;
+  background:
+    linear-gradient(rgb(255 255 255 / 55%), rgb(255 255 255 / 0%) 1px),
+    linear-gradient(rgb(0 0 0 / 0%) 1px, rgb(0 0 0 / 22%) 1px, rgb(0 0 0 / 0%) 4px),
+    linear-gradient(
+      rgb(0 0 0 / 15%) 0%,
+      rgb(0 0 0 / 11.1%) 19%,
+      rgb(0 0 0 / 8.1%) 34%,
+      rgb(0 0 0 / 5.8%) 47%,
+      rgb(0 0 0 / 4.2%) 56.5%,
+      rgb(0 0 0 / 2.9%) 65%,
+      rgb(0 0 0 / 1.9%) 73%,
+      rgb(0 0 0 / 1.2%) 80.2%,
+      rgb(0 0 0 / 0.7%) 86.1%,
+      rgb(0 0 0 / 0.3%) 91%,
+      rgb(0 0 0 / 0.1%) 95.2%,
+      rgb(0 0 0 / 0%) 100%
+    );
   pointer-events: none;
   z-index: 1;
   animation: menu-shadow-in 180ms ease-out both;
