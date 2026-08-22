@@ -3402,10 +3402,10 @@ body {
   user-select: none;
 }
 
-/* The mark is inline SVG: textLength stretches all six glyphs to identical
-   block widths (see SiteNavigation), so sizing is one knob — the box. */
+/* The mark is the owner-authored outlined SVG (references/maxlux-logo2.svg)
+   embedded in SiteNavigation; sizing is one knob — the box. */
 .site-logo svg {
   display: block;
   height: 42px;
-  width: 54px; /* viewBox 60x47 ratio */
+  width: 50px; /* viewBox 223.5x188 ratio */
 }
