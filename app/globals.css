@@ -5,16 +5,16 @@
   --surface: #ffffff;
   --surface-soft: #f5f6f3;
   --surface-quiet: #fafbf9;
-  --ink: #171a18;
+  --ink: #000000;
   --muted: #68706b;
   --line: #d6dbd5;
   --line-strong: #b9c1ba;
   --accent: #28685b;
   --accent-dark: #19483f;
   --blue: #345f80;
-  --warm: #171a18;
+  --warm: #000000;
   --danger: #9a392f;
-  --shadow: 0 14px 38px rgba(25, 33, 28, 0.08);
+  --shadow: 0 14px 38px rgba(0, 0, 0, 0.08);
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
@@ -386,7 +386,7 @@ select:disabled {
   background: #fff;
   border: 1px solid var(--line-strong);
   border-radius: 6px;
-  box-shadow: 0 14px 34px rgba(25, 33, 28, 0.18);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.18);
   max-height: 260px;
   overflow: auto;
   padding: 4px;
@@ -659,7 +659,7 @@ button:disabled {
 }
 
 .primary-badge {
-  background: rgba(23, 26, 24, 0.88);
+  background: rgba(0, 0, 0, 0.88);
   border-radius: 3px;
   color: #fff;
   font-size: 9px;
@@ -1333,14 +1333,14 @@ details[open]::details-content {
   --surface: #ffffff;
   --surface-soft: #f1f4f1;
   --surface-quiet: #f8faf8;
-  --ink: #202522;
+  --ink: #000000;
   --muted: #657069;
   --line: #d5ddd7;
   --line-strong: #aebbb2;
   --accent: #16796b;
   --accent-dark: #0c574c;
   --blue: #3567a6;
-  --warm: #171a18;
+  --warm: #000000;
   --danger: #a43b34;
   --yellow: #f3c85b;
   --shadow: 0 12px 30px rgba(31, 47, 39, 0.1);
@@ -1383,7 +1383,7 @@ body {
   align-items: center;
   background: var(--yellow);
   border-radius: 6px;
-  color: #202522;
+  color: #000000;
   display: inline-flex;
   flex: 0 0 42px;
   font-size: 13px;
@@ -1871,7 +1871,7 @@ body {
 .draft-button {
   background: #fff;
   border-color: var(--warm);
-  color: #171a18;
+  color: #000000;
 }
 
 /* Layout reference: an uploaded collage that supplies composition only. Shares
@@ -2584,6 +2584,18 @@ body {
 .site-wordmark {
   min-width: 190px;
   padding-left: 0;
+}
+
+/* The wordmark is a <button> now (it toggles the frosted menu pane); keep
+   the exact anchor look. */
+button.site-wordmark {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  text-transform: inherit;
 }
 
 .site-navigation nav {

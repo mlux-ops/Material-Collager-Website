@@ -73,7 +73,7 @@ export default function DitherLabPage() {
       style={{
         minHeight: "100dvh",
         background: "var(--background, #eceeea)",
-        color: "var(--ink, #171a18)",
+        color: "var(--ink, #000000)",
         fontFamily: "var(--font-inter), Arial, sans-serif",
         padding: "40px",
       }}
@@ -115,9 +115,9 @@ export default function DitherLabPage() {
               setProgress(p);
             }}
             style={{
-              background: progress === p ? "var(--ink, #171a18)" : "var(--background, #eceeea)",
-              color: progress === p ? "var(--background, #eceeea)" : "var(--ink, #171a18)",
-              border: "1px solid var(--ink, #171a18)",
+              background: progress === p ? "var(--ink, #000000)" : "var(--background, #eceeea)",
+              color: progress === p ? "var(--background, #eceeea)" : "var(--ink, #000000)",
+              border: "1px solid var(--ink, #000000)",
               borderRadius: 0,
               padding: "8px 12px",
               cursor: "pointer",
@@ -133,9 +133,9 @@ export default function DitherLabPage() {
             setProgress(undefined);
           }}
           style={{
-            background: progress === undefined ? "var(--ink, #171a18)" : "var(--background, #eceeea)",
-            color: progress === undefined ? "var(--background, #eceeea)" : "var(--ink, #171a18)",
-            border: "1px solid var(--ink, #171a18)",
+            background: progress === undefined ? "var(--ink, #000000)" : "var(--background, #eceeea)",
+            color: progress === undefined ? "var(--background, #eceeea)" : "var(--ink, #000000)",
+            border: "1px solid var(--ink, #000000)",
             borderRadius: 0,
             padding: "8px 12px",
             cursor: "pointer",
@@ -148,8 +148,8 @@ export default function DitherLabPage() {
           onClick={() => setAutoPlay(true)}
           style={{
             background: "var(--background, #eceeea)",
-            color: "var(--ink, #171a18)",
-            border: "1px solid var(--ink, #171a18)",
+            color: "var(--ink, #000000)",
+            border: "1px solid var(--ink, #000000)",
             borderRadius: 0,
             padding: "8px 12px",
             cursor: "pointer",
@@ -165,9 +165,9 @@ export default function DitherLabPage() {
             data-testid={`cell-${c}`}
             onClick={() => setCell(c)}
             style={{
-              background: cell === c ? "var(--ink, #171a18)" : "var(--background, #eceeea)",
-              color: cell === c ? "var(--background, #eceeea)" : "var(--ink, #171a18)",
-              border: "1px solid var(--ink, #171a18)",
+              background: cell === c ? "var(--ink, #000000)" : "var(--background, #eceeea)",
+              color: cell === c ? "var(--background, #eceeea)" : "var(--ink, #000000)",
+              border: "1px solid var(--ink, #000000)",
               borderRadius: 0,
               padding: "8px 12px",
               cursor: "pointer",
@@ -184,9 +184,9 @@ export default function DitherLabPage() {
             data-testid={`mode-${m}`}
             onClick={() => setMode(m)}
             style={{
-              background: mode === m ? "var(--ink, #171a18)" : "var(--background, #eceeea)",
-              color: mode === m ? "var(--background, #eceeea)" : "var(--ink, #171a18)",
-              border: "1px solid var(--ink, #171a18)",
+              background: mode === m ? "var(--ink, #000000)" : "var(--background, #eceeea)",
+              color: mode === m ? "var(--background, #eceeea)" : "var(--ink, #000000)",
+              border: "1px solid var(--ink, #000000)",
               borderRadius: 0,
               padding: "8px 12px",
               cursor: "pointer",

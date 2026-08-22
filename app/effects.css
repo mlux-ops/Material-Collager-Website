@@ -112,7 +112,7 @@
      whereas a pure transform stays on the compositor at the display's
      refresh rate. The block is solid ink, so scaling has no visual cost. */
   width: 100px;
-  background: var(--ink, #171a18);
+  background: var(--ink, #000000);
   z-index: 0;
   transform-origin: left center;
   transition: transform var(--duration-fast) var(--ease-smooth-out);
@@ -200,7 +200,7 @@
 
 ::view-transition-new(root) {
   animation: mc-plotter-wipe var(--wipe-dur, 700ms) var(--wipe-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
-  filter: drop-shadow(1px 0 0 var(--ink, #171a18));
+  filter: drop-shadow(1px 0 0 var(--ink, #000000));
 }
 
 ::view-transition-group(root) {
@@ -225,7 +225,7 @@
 html:active-view-transition-type(nav-back)::view-transition-new(root),
 html[data-nav-direction="back"]::view-transition-new(root) {
   animation-name: mc-plotter-wipe-back;
-  filter: drop-shadow(-1px 0 0 var(--ink, #171a18));
+  filter: drop-shadow(-1px 0 0 var(--ink, #000000));
 }
 
 /* The nav block is the continuous fixture: naming it lifts it out of the root
@@ -293,5 +293,66 @@ html:active-view-transition .site-navigation {
 
   .site-navigation {
     view-transition-name: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Wordmark menu: a frosted pane that slides down from the top (the same
+   motion family as the page wipe), rests against the bottom of the screen,
+   and slides back up on close. Distinct enter/exit keyframe names — reusing
+   one animation with direction:reverse does not reliably restart.
+--------------------------------------------------------------------------- */
+@keyframes menu-slide-down {
+  from { transform: translateY(-102%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes menu-slide-up {
+  from { transform: translateY(0); }
+  to { transform: translateY(-102%); }
+}
+
+.wordmark-menu-outside {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+}
+
+.wordmark-menu {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 95;
+  width: min(380px, 78vw);
+  padding: 84px 28px 28px;
+  background: rgba(255, 255, 255, 0.33);
+  backdrop-filter: blur(40px) saturate(1.05);
+  border-right: 1px solid rgb(0 0 0 / 16%);
+  box-shadow: 34px 0 90px rgb(0 0 0 / 8%);
+  animation: menu-slide-down var(--wipe-dur, 700ms) var(--wipe-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
+  overflow-y: auto;
+}
+
+.wordmark-menu-leaving {
+  animation: menu-slide-up 380ms var(--wipe-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
+}
+
+.wordmark-menu-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 18px;
+}
+
+.wordmark-menu-rows li {
+  min-height: 15px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wordmark-menu,
+  .wordmark-menu-leaving {
+    animation: none;
   }
 }

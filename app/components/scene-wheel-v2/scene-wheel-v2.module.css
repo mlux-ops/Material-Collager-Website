@@ -1,7 +1,7 @@
 .page {
   min-height: 100vh;
   background: #fafafa;
-  color: #111;
+  color: #000;
 }
 
 .track {
@@ -54,7 +54,7 @@
   left: 0;
   top: 0;
   transform-origin: 0 0;
-  box-shadow: 0 1px 0 rgba(23, 26, 24, 0.14);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.14);
   background: #fff;
 }
 
@@ -123,7 +123,7 @@
   z-index: 30;
   max-width: min(280px, 42vw);
   padding: 5px 7px 4px;
-  background: #111;
+  background: #000;
   color: #fff;
   font-size: 9px;
   font-weight: 500;
@@ -197,7 +197,7 @@
   padding-left: clamp(56px, 7vw, 96px);
   background: rgb(255 255 255 / 33%);
   backdrop-filter: blur(40px) saturate(1.05);
-  border-left: 1px solid rgb(17 17 17 / 16%);
+  border-left: 1px solid rgb(0 0 0 / 16%);
   box-shadow: -34px 0 90px rgb(0 0 0 / 10%);
   animation: viewer-slide-in 460ms var(--ease-smooth-out) both;
 }
@@ -224,7 +224,7 @@
   object-fit: contain;
   background: #fff;
   padding: clamp(10px, 1.3vw, 18px);
-  border: 1px solid rgb(17 17 17 / 12%);
+  border: 1px solid rgb(0 0 0 / 12%);
   box-shadow: 0 18px 60px rgb(0 0 0 / 14%);
 }
 
@@ -387,7 +387,7 @@
 }
 
 .loadingCount {
-  color: #111;
+  color: #000;
   font-size: 11px;
   font-weight: 400;
   font-variant-numeric: tabular-nums;

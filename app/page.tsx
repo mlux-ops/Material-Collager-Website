@@ -15,7 +15,7 @@ const LibrarySceneV2 = dynamic(
         // actually visible, which pushes this centred counter below the fold.
         style={{ minHeight: "100dvh", display: "grid", placeItems: "center", background: "#fff" }}
       >
-        <p style={{ color: "#111", fontSize: 11, letterSpacing: "0.1em" }}>0%</p>
+        <p style={{ color: "#000", fontSize: 11, letterSpacing: "0.1em" }}>0%</p>
       </main>
     ),
   },
