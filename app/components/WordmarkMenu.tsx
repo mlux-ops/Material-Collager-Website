@@ -26,6 +26,11 @@ const ROWS = ["OPTION 1", "OPTION 2", "OPTION 3", "OPTION 4", "OPTION 5", "OPTIO
    array literal per render would re-init the WebGL context on every hover
    state change. */
 const VELARIS_BG = "#000000";
+
+/* Owner pick from the dither mockup round: fine riso — 1px color dither,
+   two levels per channel, on every row. Module-scope constant so hover
+   re-renders never re-init the WebGL context. */
+const ROW_DITHER = { cell: 1, levels: 2 };
 const ROW_PALETTES: string[][] = [
   ["#fab9b3", "#8ddbe3", "#cec3fa"], // 1 - sunlit starfish / milk waterfall / heather
   ["#a1de9f", "#f9185b", "#a36fff"], // 2 - fresh avocado / habanero / orchid
@@ -147,7 +152,7 @@ export function WordmarkMenu({
                       className={hotRow === i ? "wordmark-row-glow wordmark-row-glow-in" : "wordmark-row-glow"}
                       aria-hidden="true"
                     >
-                      <Velaris height="100%" bg={VELARIS_BG} colors={ROW_PALETTES[i % ROW_PALETTES.length]} seed={i + 1} />
+                      <Velaris height="100%" bg={VELARIS_BG} colors={ROW_PALETTES[i % ROW_PALETTES.length]} seed={i + 1} dither={ROW_DITHER} />
                     </span>
                   )}
                   <span className="wordmark-row-label">

@@ -37,8 +37,26 @@ uniform float u_grain;
 uniform float u_seed;
 uniform vec3  u_colors[4];
 uniform vec3  u_bg;
+uniform float u_dcell;   /* dither cell size in device px; 0 = off */
+uniform float u_dlevels; /* quantization levels per channel (>= 2) */
+uniform float u_dbw;     /* 1 = 1-bit luminance mode (ink dots) */
+uniform float u_dpix;    /* 1 = pixelate the field to the cell grid */
 
 vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
+
+/* Ordered-dither threshold from the classic Bayer 4x4 matrix — the same
+   matrix the site's library/node dithers use. */
+float bayer4(vec2 cell) {
+  vec2 f = floor(cell);
+  float x = mod(f.x, 4.0);
+  float y = mod(f.y, 4.0);
+  vec4 row = y < 1.0 ? vec4(0.0, 8.0, 2.0, 10.0)
+           : y < 2.0 ? vec4(12.0, 4.0, 14.0, 6.0)
+           : y < 3.0 ? vec4(3.0, 11.0, 1.0, 9.0)
+           : vec4(15.0, 7.0, 13.0, 5.0);
+  float v = x < 1.0 ? row.x : x < 2.0 ? row.y : x < 3.0 ? row.z : row.w;
+  return (v + 0.5) / 16.0;
+}
 
 float snoise(vec2 v){
   const vec4 C = vec4(0.211324865405187, 0.366025403784439,
@@ -68,6 +86,12 @@ float snoise(vec2 v){
 
 void main() {
   vec2 uv = vUv;
+  /* Pixelate mode: sample the whole field at the dither-cell grid so the
+     gradient itself goes chunky, like the site's placeholder dithers. */
+  if (u_dcell > 0.5 && u_dpix > 0.5) {
+    vec2 cellUv = u_dcell / u_resolution;
+    uv = (floor(uv / cellUv) + 0.5) * cellUv;
+  }
   float ratio = u_resolution.x / u_resolution.y;
   vec2 p = uv - 0.5;
   p.x *= ratio;
@@ -104,6 +128,20 @@ void main() {
   float grain = fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453 + u_time);
   col += (grain - 0.5) * u_grain * 0.1;
 
+  /* Ordered dither, applied last (after grain, which usefully breaks up
+     banding in the quantizer). Color mode quantizes each channel against
+     the Bayer threshold; 1-bit mode thresholds luminance into ink dots. */
+  if (u_dcell > 0.5) {
+    float b = bayer4(gl_FragCoord.xy / u_dcell);
+    if (u_dbw > 0.5) {
+      float lum = dot(col, vec3(0.299, 0.587, 0.114));
+      col = vec3(step(b, lum));
+    } else {
+      float n = max(u_dlevels - 1.0, 1.0);
+      col = floor(col * n + b) / n;
+    }
+  }
+
   gl_FragColor = vec4(col, 1.0);
 }
 `;
@@ -116,6 +154,16 @@ export interface VelarisProps {
   grain?: number;
   /** Any number; each value renders a different noise pattern and phase. */
   seed?: number;
+  /** Ordered Bayer dither over the final image. cell is in CSS px. */
+  dither?: {
+    cell?: number;
+    /** Quantization levels per channel (color mode). Default 2. */
+    levels?: number;
+    /** 1-bit luminance mode: the wash becomes ink dots. */
+    bw?: boolean;
+    /** Also pixelate the gradient field itself to the cell grid. */
+    pixelate?: boolean;
+  };
   height?: string;
   className?: string;
   children?: React.ReactNode;
@@ -138,6 +186,7 @@ const Velaris = ({
   speed = 2.0,
   grain = 0.3,
   seed = 0,
+  dither,
   height = "100vh",
   className,
   children,
@@ -191,10 +240,17 @@ const Velaris = ({
       seed: gl.getUniformLocation(program, "u_seed"),
       colors: gl.getUniformLocation(program, "u_colors"),
       bg: gl.getUniformLocation(program, "u_bg"),
+      dcell: gl.getUniformLocation(program, "u_dcell"),
+      dlevels: gl.getUniformLocation(program, "u_dlevels"),
+      dbw: gl.getUniformLocation(program, "u_dbw"),
+      dpix: gl.getUniformLocation(program, "u_dpix"),
     };
 
+    // The dither cell prop is in CSS px; the shader works in device px, so
+    // the current backing-store scale converts it (tracked by resize).
+    let dpr = Math.min(window.devicePixelRatio, 2);
     const resize = () => {
-      const dpr = Math.min(window.devicePixelRatio, 2);
+      dpr = Math.min(window.devicePixelRatio, 2);
       canvas.width = container.clientWidth * dpr;
       canvas.height = container.clientHeight * dpr;
       gl.viewport(0, 0, canvas.width, canvas.height);
@@ -209,6 +265,10 @@ const Velaris = ({
       gl.uniform1f(locs.time, t * 0.001 * speed);
       gl.uniform1f(locs.grain, grain);
       gl.uniform1f(locs.seed, seed);
+      gl.uniform1f(locs.dcell, dither?.cell ? dither.cell * dpr : 0);
+      gl.uniform1f(locs.dlevels, dither?.levels ?? 2);
+      gl.uniform1f(locs.dbw, dither?.bw ? 1 : 0);
+      gl.uniform1f(locs.dpix, dither?.pixelate ? 1 : 0);
       gl.uniform3f(locs.bg, ...hexToRgb(bg));
 
       // The shader declares exactly vec3 u_colors[4]; a shorter palette is
@@ -227,7 +287,7 @@ const Velaris = ({
       ro.disconnect();
       cancelAnimationFrame(raf);
     };
-  }, [bg, colors, speed, grain, seed]);
+  }, [bg, colors, speed, grain, seed, dither]);
 
   return (
     <div
