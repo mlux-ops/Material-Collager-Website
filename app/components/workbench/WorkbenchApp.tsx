@@ -46,7 +46,7 @@ import { useModalDismiss } from "./useModalDismiss";
 import { awaitTransitionSettled } from "@/app/lib/route-ready";
 import { SiteNavigation } from "../SiteNavigation";
 import styles from "./workbench.module.css";
-import { acceptedKindsFor, PORT_COLORS, specFor, type NodeKind, type PortKind, type WorkbenchNode } from "./types";
+import { acceptedKindsFor, PORT_COLORS, PORT_DASHES, specFor, type NodeKind, type PortKind, type WorkbenchNode } from "./types";
 
 function bytesLabel(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -353,7 +353,17 @@ function CanvasInner({
         const outputs = specFor(source.data.kind).outputs;
         const port = outputs.find((candidate) => candidate.id === edge.sourceHandle) ?? outputs[0];
         if (!port) return edge;
-        return { ...edge, animated, style: { ...edge.style, stroke: PORT_COLORS[port.kind] } };
+        // Plotter-ink wire language: every wire is true black; the port kind
+        // reads from the dash pattern (PORT_DASHES) instead of a hue. A
+        // running edge skips the pattern so React Flow's own marching-dash
+        // animation looks the same for every kind.
+        const style: React.CSSProperties = { ...edge.style, stroke: PORT_COLORS[port.kind] };
+        const dash = PORT_DASHES[port.kind];
+        if (!animated && dash) {
+          style.strokeDasharray = dash;
+          if (port.kind === "references") style.strokeLinecap = "round";
+        }
+        return { ...edge, animated, style };
       }),
     [nodes, edges],
   );
@@ -867,10 +877,15 @@ function useLoadRevealPhase(restored: boolean): "pending" | "run" | "wires" | "d
         if (cancelled) return;
         // Prep while the edges are still opacity-0 under .ditherRun: hide
         // every wire behind its own full dash offset so the flip to "wires"
-        // (which removes the hiding class) cannot flash a drawn wire.
+        // (which removes the hiding class) cannot flash a drawn wire. The
+        // pre-seed dasharray is React's own inline style (the plotter-ink
+        // kind pattern from coloredEdges) — remembered so cleanup can put it
+        // back; clearing to "" would leave the wire solid until some
+        // unrelated re-render rewrote the style prop.
         const paths = Array.from(document.querySelectorAll<SVGPathElement>(".react-flow__edge-path"));
         for (const path of paths) {
           const length = path.getTotalLength();
+          path.dataset.prevDash = path.style.strokeDasharray;
           path.style.strokeDasharray = `${length}`;
           path.style.strokeDashoffset = `${length}`;
         }
@@ -891,8 +906,9 @@ function useLoadRevealPhase(restored: boolean): "pending" | "run" | "wires" | "d
           if (cancelled) return;
           for (const path of paths) {
             path.style.transition = "";
-            path.style.strokeDasharray = "";
+            path.style.strokeDasharray = path.dataset.prevDash ?? "";
             path.style.strokeDashoffset = "";
+            delete path.dataset.prevDash;
           }
           setPhase("done");
         }, 60 + WIRE_DRAW_MS + WIRE_STAGGER_CAP_MS + 160));
