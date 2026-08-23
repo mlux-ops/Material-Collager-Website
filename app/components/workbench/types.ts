@@ -232,11 +232,26 @@ export type WorkbenchNodeData = {
 
 export type WorkbenchNode = Node<WorkbenchNodeData>;
 
+// Owner round: plotter ink (mockup option 1) replacing the old saturated
+// hues — every wire and port dot is the same true black as the rest of the
+// site, and wires are told apart by dash pattern instead of color (see
+// PORT_DASHES below).
 export const PORT_COLORS: Record<PortKind, string> = {
-  image: "#8b5cf6",
-  text: "#2563eb",
-  references: "#f59e0b", // amber
-  mask: "#7c3aed", // violet, darker than image so the two stay tellable apart
+  image: "#000000",
+  text: "#000000",
+  references: "#000000",
+  mask: "#000000",
+};
+
+// The plotter-ink wire language: solid = image, dashed = text, dotted =
+// references (round linecap turns the ticks into dots), dash-dot = mask.
+// Applied to settled wires only — a RUNNING edge keeps React Flow's own
+// marching-dash animation untouched (see coloredEdges in WorkbenchApp).
+export const PORT_DASHES: Record<PortKind, string | undefined> = {
+  image: undefined,
+  text: "7 4",
+  references: "0.5 5",
+  mask: "11 3 2 3",
 };
 
 // ---------------------------------------------------------------------------

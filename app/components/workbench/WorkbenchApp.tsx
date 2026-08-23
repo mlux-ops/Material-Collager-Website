@@ -43,9 +43,10 @@ import { connectionIsValid, nodeKindsForWire, useWorkbenchStore } from "./store"
 import { Spotlight } from "./Spotlight";
 import { instantiateTemplate, TEMPLATES, type TemplateId } from "./templates";
 import { useModalDismiss } from "./useModalDismiss";
+import { awaitTransitionSettled } from "@/app/lib/route-ready";
 import { SiteNavigation } from "../SiteNavigation";
 import styles from "./workbench.module.css";
-import { acceptedKindsFor, PORT_COLORS, specFor, type NodeKind, type PortKind, type WorkbenchNode } from "./types";
+import { acceptedKindsFor, PORT_COLORS, PORT_DASHES, specFor, type NodeKind, type PortKind, type WorkbenchNode } from "./types";
 
 function bytesLabel(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -352,7 +353,17 @@ function CanvasInner({
         const outputs = specFor(source.data.kind).outputs;
         const port = outputs.find((candidate) => candidate.id === edge.sourceHandle) ?? outputs[0];
         if (!port) return edge;
-        return { ...edge, animated, style: { ...edge.style, stroke: PORT_COLORS[port.kind] } };
+        // Plotter-ink wire language: every wire is true black; the port kind
+        // reads from the dash pattern (PORT_DASHES) instead of a hue. A
+        // running edge skips the pattern so React Flow's own marching-dash
+        // animation looks the same for every kind.
+        const style: React.CSSProperties = { ...edge.style, stroke: PORT_COLORS[port.kind] };
+        const dash = PORT_DASHES[port.kind];
+        if (!animated && dash) {
+          style.strokeDasharray = dash;
+          if (port.kind === "references") style.strokeLinecap = "round";
+        }
+        return { ...edge, animated, style };
       }),
     [nodes, edges],
   );
@@ -818,6 +829,99 @@ function CanvasInner({
   );
 }
 
+// How long the node dither-in can possibly run: animation duration (620ms)
+// plus the capped stagger ladder (660ms, workbench.module.css) plus margin.
+const NODE_DITHER_MS = 1_350;
+// The wire draw-on that follows: each edge's stroke fills in from its source
+// node along the path (owner: "the color is filled in over a second or two
+// along the connecting path"), lightly staggered in edge order.
+const WIRE_DRAW_MS = 1_500;
+const WIRE_STAGGER_MS = 60;
+const WIRE_STAGGER_CAP_MS = 420;
+
+// The restored graph's load reveal. Nodes dither into existence — the same
+// Bayer ordered dissolve the Library placeholders resolve through — and only
+// then do the wires draw themselves in. Phases: "pending" keeps restored
+// nodes AND edges invisible from their very first paint (they mount during
+// the wipe's hold, well before the reveal should start); "run" swaps in the
+// staggered node mask animation once the graph is restored AND the page wipe
+// has settled (the wipe suspends rendering — an animation started under it
+// would land already finished), edges still hidden; "wires" lets the edges
+// show but each path is already fully dashed out (prepped below while still
+// hidden, so the class flip can't flash a drawn wire) and then transitions
+// its dash offset to 0 — the classic SVG draw-on, which grows from the path
+// start, i.e. from the source node toward the target. "done" removes every
+// class and inline style so later adds render instantly and the run-time
+// marching-dash edge animation is untouched.
+function useLoadRevealPhase(restored: boolean): "pending" | "run" | "wires" | "done" {
+  const [phase, setPhase] = useState<"pending" | "run" | "wires" | "done">("pending");
+  useEffect(() => {
+    if (!restored) return;
+    let cancelled = false;
+    const timers: number[] = [];
+    // Every phase change happens inside the promise continuation (a
+    // microtask, never synchronous in the effect). Reduced motion skips
+    // straight to "done" — the stylesheet's reduced-motion block also keeps
+    // .ditherPending inert there, so nothing was ever hidden to begin with.
+    void awaitTransitionSettled().then(() => {
+      if (cancelled) return;
+      if (
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
+        useWorkbenchStore.getState().nodes.length === 0
+      ) {
+        setPhase("done");
+        return;
+      }
+      setPhase("run");
+      timers.push(window.setTimeout(() => {
+        if (cancelled) return;
+        // Prep while the edges are still opacity-0 under .ditherRun: hide
+        // every wire behind its own full dash offset so the flip to "wires"
+        // (which removes the hiding class) cannot flash a drawn wire. The
+        // pre-seed dasharray is React's own inline style (the plotter-ink
+        // kind pattern from coloredEdges) — remembered so cleanup can put it
+        // back; clearing to "" would leave the wire solid until some
+        // unrelated re-render rewrote the style prop.
+        const paths = Array.from(document.querySelectorAll<SVGPathElement>(".react-flow__edge-path"));
+        for (const path of paths) {
+          const length = path.getTotalLength();
+          path.dataset.prevDash = path.style.strokeDasharray;
+          path.style.strokeDasharray = `${length}`;
+          path.style.strokeDashoffset = `${length}`;
+        }
+        setPhase("wires");
+        // Next task, after the "wires" commit has painted the (invisible)
+        // strokes: transition each offset to 0. Setting the transition only
+        // now, a full style recalc after the offset was seeded, is what
+        // makes it animate instead of jumping.
+        timers.push(window.setTimeout(() => {
+          if (cancelled) return;
+          paths.forEach((path, index) => {
+            const delay = Math.min(index * WIRE_STAGGER_MS, WIRE_STAGGER_CAP_MS);
+            path.style.transition = `stroke-dashoffset ${WIRE_DRAW_MS}ms cubic-bezier(0.45, 0, 0.25, 1) ${delay}ms`;
+            path.style.strokeDashoffset = "0";
+          });
+        }, 60));
+        timers.push(window.setTimeout(() => {
+          if (cancelled) return;
+          for (const path of paths) {
+            path.style.transition = "";
+            path.style.strokeDasharray = path.dataset.prevDash ?? "";
+            path.style.strokeDashoffset = "";
+            delete path.dataset.prevDash;
+          }
+          setPhase("done");
+        }, 60 + WIRE_DRAW_MS + WIRE_STAGGER_CAP_MS + 160));
+      }, NODE_DITHER_MS));
+    });
+    return () => {
+      cancelled = true;
+      for (const timer of timers) window.clearTimeout(timer);
+    };
+  }, [restored]);
+  return phase;
+}
+
 export default function WorkbenchApp() {
   const loadIntoStore = useWorkbenchStore((state) => state.loadGraph);
   const setRestoreBlockedInStore = useWorkbenchStore((state) => state.setRestoreBlocked);
@@ -831,6 +935,7 @@ export default function WorkbenchApp() {
   const [retrying, setRetrying] = useState(false);
   const [retryToken, setRetryToken] = useState(0);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const ditherPhase = useLoadRevealPhase(restored);
   const hasRestored = useRef(false);
   const graphIdRef = useRef(DEFAULT_GRAPH_ID);
 
@@ -1048,7 +1153,7 @@ export default function WorkbenchApp() {
         }
       />
       <div className={styles.canvasWrap}>
-        <div className={styles.canvasFlow}>
+        <div className={`${styles.canvasFlow}${ditherPhase === "pending" ? ` ${styles.ditherPending}` : ditherPhase === "run" ? ` ${styles.ditherRun}` : ""}`}>
           <ReactFlowProvider>
             <CanvasInner restored={restored} switchGraph={switchGraph} cancelPendingSaves={cancelPendingTimers} />
           </ReactFlowProvider>

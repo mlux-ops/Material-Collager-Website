@@ -347,9 +347,22 @@ html:active-view-transition .site-navigation {
   overflow-y: auto;
 }
 
-/* The bar's soft shadow, cast only onto the glass: a strip pinned to the
-   top of the pane's clip window, above the sliding pane. It fades in fast
-   the moment the slide begins and lifts with the pane on close. */
+/* The bar's shadow, cast only onto the glass: a strip pinned to the top of
+   the pane's clip window, above the sliding pane. It fades in fast the
+   moment the slide begins and lifts with the pane on close.
+
+   Owner: a single box-shadow "doesn't read as a 3D plane". A real slab over
+   a glass sheet casts two distinguishable things — a hard contact line at
+   the edge (umbra) and a long ambient wash (penumbra) — and the sheet's own
+   cut edge catches the light. Three background layers, top to bottom:
+     1. a 1px specular lip — the glass edge lit under the bar,
+     2. a tight 3px umbra directly below it — the bar pressing overhead,
+     3. an easing-curve scrim decaying to true zero — ambient occlusion in
+        the air gap. Eased stops, not a two-stop gradient, whose visible
+        start/end edges are the same "CSS shadow" tell as a lone Gaussian.
+   A gradient is the physically right shape here: full-width bar over a
+   parallel plane means pure vertical falloff with no silhouette corners —
+   and it is cheaper than any box-shadow (no blur passes at all). */
 @keyframes menu-shadow-in {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -362,11 +375,27 @@ html:active-view-transition .site-navigation {
 
 .wordmark-menu-shadow {
   position: absolute;
-  top: -24px;
+  top: 0;
   left: 0;
   right: 0;
-  height: 24px;
-  box-shadow: 0 12px 22px rgb(0 0 0 / 16%);
+  height: 34px;
+  background:
+    linear-gradient(rgb(255 255 255 / 55%), rgb(255 255 255 / 0%) 1px),
+    linear-gradient(rgb(0 0 0 / 0%) 1px, rgb(0 0 0 / 22%) 1px, rgb(0 0 0 / 0%) 4px),
+    linear-gradient(
+      rgb(0 0 0 / 15%) 0%,
+      rgb(0 0 0 / 11.1%) 19%,
+      rgb(0 0 0 / 8.1%) 34%,
+      rgb(0 0 0 / 5.8%) 47%,
+      rgb(0 0 0 / 4.2%) 56.5%,
+      rgb(0 0 0 / 2.9%) 65%,
+      rgb(0 0 0 / 1.9%) 73%,
+      rgb(0 0 0 / 1.2%) 80.2%,
+      rgb(0 0 0 / 0.7%) 86.1%,
+      rgb(0 0 0 / 0.3%) 91%,
+      rgb(0 0 0 / 0.1%) 95.2%,
+      rgb(0 0 0 / 0%) 100%
+    );
   pointer-events: none;
   z-index: 1;
   animation: menu-shadow-in 180ms ease-out both;
@@ -380,25 +409,33 @@ html:active-view-transition .site-navigation {
   animation: menu-slide-up 440ms var(--wipe-ease, cubic-bezier(0.22, 1, 0.36, 1)) both; /* owner: ~15% slower */
 }
 
+/* Rows sit flush: each option's rectangle shares its top and bottom edges
+   with its neighbors (owner) — the old 18px grid gap moved into the button's
+   vertical padding, so the text rhythm is unchanged while the hover rects
+   tile edge-to-edge. */
 .wordmark-menu-rows {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 18px;
+  gap: 0;
 }
 
 .wordmark-menu-rows li {
   min-height: 18px;
 }
 
-/* Each option is a see-through glass rectangle: hovering slowly tints the
-   glass toward black — the translucency never changes, only the tone — and
-   moving on lets the previous rectangle fade back on the same curve. */
+/* Each option is a see-through glass rectangle: hovering fades in the
+   owner's Velaris gradient (an animated WebGL simplex-noise wash, mounted
+   per-row by WordmarkMenu only while needed) and the previous rectangle
+   fades back on the same curve. The plain black tint stays underneath as
+   the reduced-motion / no-WebGL fallback. */
 .wordmark-menu-row-btn {
+  position: relative;
+  overflow: hidden;
   display: block;
   width: 100%;
-  padding: 10px 14px;
+  padding: 19px 14px;
   border: 0;
   background: rgb(0 0 0 / 0%);
   cursor: pointer;
@@ -409,6 +446,49 @@ html:active-view-transition .site-navigation {
 .wordmark-menu-row-btn:hover,
 .wordmark-menu-row-btn:focus-visible {
   background: rgb(0 0 0 / 16%);
+}
+
+.wordmark-row-glow {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 420ms var(--ease-smooth-out, ease-out);
+  pointer-events: none;
+}
+
+.wordmark-row-glow-in {
+  opacity: 1;
+}
+
+@starting-style {
+  .wordmark-row-glow-in {
+    opacity: 0;
+  }
+}
+
+/* The label rides above the gradient and flips to paper white while the
+   dark wash is actually mounted (:has) — the reduced-motion / no-WebGL
+   fallback keeps the light tint, where the ink must stay black.
+   DitherTextIn's resolved span carries an inline ink color, hence the
+   !important; hover happens well after the dither. */
+.wordmark-row-label {
+  position: relative;
+  z-index: 1;
+  display: block;
+}
+
+/* Gate on the ACTIVE glow (-in), not the mounted one: during the fade-out
+   grace the glow element is still mounted while the dark wash fades away,
+   and white ink over the re-emerging light glass made the label vanish for
+   a beat. Leaving flips back fast (120ms, the base rule) while the wash is
+   still dark; entering eases over 220ms. */
+.wordmark-menu-row-btn .wordmark-row-label span {
+  transition: color 120ms var(--ease-smooth-out, ease-out);
+}
+
+.wordmark-menu-row-btn:has(.wordmark-row-glow-in) .wordmark-row-label span {
+  color: #fff !important;
+  transition: color 220ms var(--ease-smooth-out, ease-out);
 }
 
 @media (prefers-reduced-motion: reduce) {

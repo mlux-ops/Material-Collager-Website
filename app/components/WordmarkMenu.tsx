@@ -15,8 +15,34 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { DitherTextIn } from "./DitherTextIn";
+import Velaris from "./ui/velaris";
 
 const ROWS = ["OPTION 1", "OPTION 2", "OPTION 3", "OPTION 4", "OPTION 5", "OPTION 6"];
+
+/* Per-row Velaris palettes over a WHITE background — each row also gets its
+   own seed, so pattern AND palette are unique per option. Rows 1-3 are the
+   owner's Rechroma exports (oklch converted to sRGB hex); rows 4-6 are
+   curated to sit alongside them on paper. Module-scope constants: a fresh
+   array literal per render would re-init the WebGL context on every hover
+   state change. */
+const VELARIS_BG = "#000000";
+
+/* Owner pick from the dither mockup round: fine riso — 1px color dither,
+   two levels per channel, on every row. Module-scope constant so hover
+   re-renders never re-init the WebGL context. */
+const ROW_DITHER = { cell: 1, levels: 2 };
+const ROW_PALETTES: string[][] = [
+  ["#fab9b3", "#8ddbe3", "#cec3fa"], // 1 - sunlit starfish / milk waterfall / heather
+  ["#a1de9f", "#f9185b", "#a36fff"], // 2 - fresh avocado / habanero / orchid
+  ["#5f8df8", "#c46aca", "#42ac4c"], // 3 - lupine / linen bubblegum / matcha
+  ["#d9a441", "#cd6543", "#4a5560"], // 4 - ochre / terracotta / slate ink
+  ["#3a7ca5", "#7ac9bc", "#e8c98f"], // 5 - cerulean / sea glass / sand
+  ["#1a1a1a", "#7a7a7a", "#c9c9c9"], // 6 - house monochrome inks
+];
+
+/* How long a just-left row keeps its gradient mounted so it can fade out —
+   matches the 420ms opacity transition in effects.css plus a beat. */
+const GLOW_FADE_MS = 460;
 
 export function WordmarkMenu({
   onRequestClose,
@@ -29,6 +55,29 @@ export function WordmarkMenu({
   const [closing, setClosing] = useState(false);
   const [landed, setLanded] = useState(false);
   const closeTimer = useRef<number | null>(null);
+  // Velaris gradient hover: the animated gradient is mounted per-row, only
+  // while that row is hovered/focused plus a fade-out grace — so at most two
+  // WebGL canvases (the hot row and the one fading back) ever run at once.
+  const [hotRow, setHotRow] = useState<number | null>(null);
+  const [fadingRow, setFadingRow] = useState<number | null>(null);
+  const fadeTimer = useRef<number | null>(null);
+
+  const enterRow = useCallback((index: number) => {
+    // Reduced motion keeps the plain black-tint hover (still styled in CSS)
+    // instead of a perpetually animating canvas.
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    setHotRow(index);
+  }, []);
+
+  const leaveRow = useCallback((index: number) => {
+    setHotRow((current) => (current === index ? null : current));
+    setFadingRow(index);
+    if (fadeTimer.current !== null) window.clearTimeout(fadeTimer.current);
+    fadeTimer.current = window.setTimeout(() => {
+      fadeTimer.current = null;
+      setFadingRow(null);
+    }, GLOW_FADE_MS);
+  }, []);
 
   const requestClose = useCallback(() => {
     if (closeTimer.current !== null) return;
@@ -45,9 +94,10 @@ export function WordmarkMenu({
   }, [onRequestClose]);
 
   // Mounted only while open (SiteNavigation renders it conditionally), so
-  // every open starts fresh; unmount clears any in-flight close timer.
+  // every open starts fresh; unmount clears any in-flight timers.
   useEffect(() => () => {
     if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
+    if (fadeTimer.current !== null) window.clearTimeout(fadeTimer.current);
   }, []);
 
   useEffect(() => {
@@ -89,8 +139,25 @@ export function WordmarkMenu({
           {ROWS.map((row, i) =>
             landed ? (
               <li key={row}>
-                <button type="button" className="wordmark-menu-row-btn">
-                  <DitherTextIn text={row} delay={i * 70} duration={505} cell={1} fontSize={13.2} />
+                <button
+                  type="button"
+                  className="wordmark-menu-row-btn"
+                  onPointerEnter={() => enterRow(i)}
+                  onPointerLeave={() => leaveRow(i)}
+                  onFocus={() => enterRow(i)}
+                  onBlur={() => leaveRow(i)}
+                >
+                  {(hotRow === i || fadingRow === i) && (
+                    <span
+                      className={hotRow === i ? "wordmark-row-glow wordmark-row-glow-in" : "wordmark-row-glow"}
+                      aria-hidden="true"
+                    >
+                      <Velaris height="100%" bg={VELARIS_BG} colors={ROW_PALETTES[i % ROW_PALETTES.length]} seed={i + 1} dither={ROW_DITHER} />
+                    </span>
+                  )}
+                  <span className="wordmark-row-label">
+                    <DitherTextIn text={row} delay={i * 70} duration={505} cell={1} fontSize={13.2} />
+                  </span>
                 </button>
               </li>
             ) : (
