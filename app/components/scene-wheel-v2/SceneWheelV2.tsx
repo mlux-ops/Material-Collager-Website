@@ -15,6 +15,7 @@ import { SiteNavigation } from "../SiteNavigation";
 import { RouteReady } from "../RouteReady";
 import { DitherReveal } from "../DitherReveal";
 import { awaitTransitionSettled } from "@/app/lib/route-ready.ts";
+import { motionReduced } from "@/app/lib/site-settings.ts";
 import {
   captureAndStoreThumbs,
   fetchServerThumbs,
@@ -114,7 +115,7 @@ export default function SceneWheelV2() {
   const closeTimer = useRef<number | null>(null);
   const requestCloseViewer = useCallback(() => {
     if (closeTimer.current !== null) return; // already leaving
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (motionReduced()) {
       setSelectedItem(null);
       return;
     }

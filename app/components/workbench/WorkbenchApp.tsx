@@ -44,6 +44,7 @@ import { Spotlight } from "./Spotlight";
 import { instantiateTemplate, TEMPLATES, type TemplateId } from "./templates";
 import { useModalDismiss } from "./useModalDismiss";
 import { awaitTransitionSettled } from "@/app/lib/route-ready";
+import { motionReduced, potatoMode } from "@/app/lib/site-settings";
 import { SiteNavigation } from "../SiteNavigation";
 import styles from "./workbench.module.css";
 import { acceptedKindsFor, PORT_COLORS, PORT_DASHES, specFor, type NodeKind, type PortKind, type WorkbenchNode } from "./types";
@@ -865,10 +866,10 @@ function useLoadRevealPhase(restored: boolean): "pending" | "run" | "wires" | "d
     // .ditherPending inert there, so nothing was ever hidden to begin with.
     void awaitTransitionSettled().then(() => {
       if (cancelled) return;
-      if (
-        window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
-        useWorkbenchStore.getState().nodes.length === 0
-      ) {
+      // Potato machine skips the whole reveal: it is decorative, and the
+      // dither plus the per-wire draw are the most GPU-hungry moments the
+      // workbench has.
+      if (motionReduced() || potatoMode() || useWorkbenchStore.getState().nodes.length === 0) {
         setPhase("done");
         return;
       }

@@ -17,6 +17,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { motionReduced, subscribeSettings } from "@/app/lib/site-settings";
 
 // 4x4 Bayer ordered-dither matrix, values 0..15 (divide by 16 for threshold).
 const BAYER4 = [
@@ -154,10 +155,16 @@ export function DitherReveal({
 
   useEffect(() => {
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const update = () => setReducedMotion(mq.matches);
+    // Either source can flip at runtime: the OS preference, or the site's own
+    // reduce-motion setting (subscribeSettings).
+    const update = () => setReducedMotion(motionReduced());
     update();
     mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
+    const unsubscribe = subscribeSettings(update);
+    return () => {
+      mq.removeEventListener("change", update);
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {

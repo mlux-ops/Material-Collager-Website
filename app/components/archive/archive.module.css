@@ -1,0 +1,82 @@
+.page {
+  min-height: 100vh;
+  background: var(--mono-off-white, #fafafa);
+  color: #000;
+  /* Clears the fixed 58px nav bar. */
+  padding: 96px 28px 56px;
+}
+
+.head {
+  max-width: 1280px;
+  margin: 0 auto 30px;
+}
+
+.title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.subtitle {
+  margin: 6px 0 0;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgb(0 0 0 / 55%);
+}
+
+.notice {
+  max-width: 1280px;
+  margin: 48px auto;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* Masonry via CSS columns: items keep their natural aspect and flow down
+   each column, so mixed generation sizes never fight a fixed row height. */
+.grid {
+  max-width: 1280px;
+  margin: 0 auto;
+  columns: 3;
+  column-gap: 22px;
+}
+
+.item {
+  break-inside: avoid;
+  margin: 0 0 22px;
+}
+
+/* The white plate framing each collage — same language as the viewer panel's
+   figure (white sheet, hairline border, breathing room). */
+.plate {
+  padding: 10px;
+  background: #fff;
+  border: 1px solid rgb(0 0 0 / 12%);
+}
+
+.caption {
+  margin-top: 7px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 1000px) {
+  .grid {
+    columns: 2;
+  }
+}
+
+@media (max-width: 640px) {
+  .page {
+    padding: 84px 16px 40px;
+  }
+
+  .grid {
+    columns: 1;
+  }
+}

@@ -112,6 +112,10 @@
      whereas a pure transform stays on the compositor at the display's
      refresh rate. The block is solid ink, so scaling has no visual cost. */
   width: 100px;
+  /* Opaque, deepest black (owner: every black on the site is #000000). The
+     pill paints BENEATH the labels and the labels invert themselves against
+     it — see .nav-pill-link below — so this surface stays exactly #000000
+     while the label over it still reads white at every frame. */
   background: var(--ink, #000000);
   z-index: 0;
   transform-origin: left center;
@@ -119,14 +123,39 @@
   will-change: transform;
 }
 
+/* The labels carry the inversion instead of the pill: painted white and
+   composited with difference, a label over the black pill resolves to pure
+   white, and the same label over the near-white bar resolves to ink. The
+   colour therefore follows the pill's ACTUAL position every frame, with no
+   timing to get wrong — colouring the active label on commit (the old way)
+   flipped it white while the pill still had its whole slide to travel, so
+   the destination sat white-on-white and read as a flash. */
 .nav-pill-link {
   position: relative;
   z-index: 1;
-  transition: color var(--duration-fast) var(--ease-smooth-out);
+  color: #ffffff;
+  mix-blend-mode: difference;
 }
 
-.nav-pill-link[data-active="true"] {
-  color: var(--background, #eceeea);
+/* The blend owns the inverted look, so every per-link chip and colour swap
+   from globals.css (.active / :hover / :focus-visible) is superseded — they
+   would fight the inversion and reintroduce the mid-slide flash. White here
+   is the pre-blend ink: it resolves to black on the bar, white on the pill.
+   Specificity beats those rules deliberately. */
+.site-navigation nav a.nav-pill-link,
+.site-navigation nav a.nav-pill-link.active,
+.site-navigation nav a.nav-pill-link:hover,
+.site-navigation nav a.nav-pill-link:focus-visible {
+  background: transparent;
+  color: #ffffff;
+  transition: none;
+}
+
+/* Hover affordance without a competing chip. */
+.site-navigation nav a.nav-pill-link:hover,
+.site-navigation nav a.nav-pill-link:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -430,14 +459,27 @@ html:active-view-transition .site-navigation {
    per-row by WordmarkMenu only while needed) and the previous rectangle
    fades back on the same curve. The plain black tint stays underneath as
    the reduced-motion / no-WebGL fallback. */
-.wordmark-menu-row-btn {
+/* The row container owns the gradient box and, for expandable rows, the
+   height: clicking VENDORS/SITES/SETTINGS extends this box downward (inline
+   height from WordmarkMenu) and the rows below are pushed down by the same
+   transition; leaving the box collapses it back BEFORE the glow fades. */
+.wordmark-menu-row {
   position: relative;
   overflow: hidden;
+  transition: height 300ms var(--ease-smooth-out, ease-out);
+}
+
+.wordmark-menu-row-btn {
+  position: relative;
+  z-index: 1;
   display: block;
   width: 100%;
   padding: 19px 14px;
   border: 0;
   background: rgb(0 0 0 / 0%);
+  color: inherit;
+  font: inherit;
+  text-decoration: none;
   cursor: pointer;
   text-align: left;
   transition: background-color 420ms var(--ease-smooth-out, ease-out);
@@ -446,6 +488,61 @@ html:active-view-transition .site-navigation {
 .wordmark-menu-row-btn:hover,
 .wordmark-menu-row-btn:focus-visible {
   background: rgb(0 0 0 / 16%);
+}
+
+/* Child links inside an expanded box: same face as the row labels
+   (DitherTextIn rasterizes at weight 750 / 13.2px / 1.6px tracking). */
+.wordmark-sub-list {
+  position: relative;
+  z-index: 1;
+  display: grid;
+}
+
+.wordmark-sub-link {
+  display: block;
+  padding: 8px 14px 8px 27px;
+  font-size: 13.2px;
+  font-weight: 750;
+  letter-spacing: 1.6px;
+  line-height: 18px;
+  text-transform: uppercase;
+  text-decoration: none;
+  text-align: left;
+  color: var(--ink, #000000);
+}
+
+a.wordmark-sub-link:hover,
+a.wordmark-sub-link:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.wordmark-sub-inert {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Settings rows: label left, current value right; each click cycles. */
+.wordmark-sub-control {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.wordmark-sub-value {
+  opacity: 0.62;
+  white-space: nowrap;
+}
+
+.wordmark-sub-control:hover .wordmark-sub-value,
+.wordmark-sub-control:focus-visible .wordmark-sub-value {
+  opacity: 1;
 }
 
 .wordmark-row-glow {
@@ -482,13 +579,18 @@ html:active-view-transition .site-navigation {
    and white ink over the re-emerging light glass made the label vanish for
    a beat. Leaving flips back fast (120ms, the base rule) while the wash is
    still dark; entering eases over 220ms. */
-.wordmark-menu-row-btn .wordmark-row-label span {
+.wordmark-menu-row .wordmark-row-label span {
   transition: color 120ms var(--ease-smooth-out, ease-out);
 }
 
-.wordmark-menu-row-btn:has(.wordmark-row-glow-in) .wordmark-row-label span {
+.wordmark-menu-row:has(.wordmark-row-glow-in) .wordmark-row-label span {
   color: #fff !important;
   transition: color 220ms var(--ease-smooth-out, ease-out);
+}
+
+/* Child links share the label's ink-to-white flip over the active gradient. */
+.wordmark-menu-row:has(.wordmark-row-glow-in) .wordmark-sub-link {
+  color: #fff;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -498,4 +600,34 @@ html:active-view-transition .site-navigation {
   .wordmark-menu-leaving-shadow {
     animation: none;
   }
+
+  .wordmark-menu-row {
+    transition: none;
+  }
 }
+
+/* ---------------------------------------------------------------------
+ * Site setting: REDUCE MOTION (app/lib/site-settings.ts writes the
+ * attribute). Mirrors the media-query blocks above for people who ask for
+ * it in the menu rather than in their OS; the JS side reads the same
+ * preference through motionReduced(), so canvas dithers, the page wipe and
+ * the pill's slide all follow suit.
+ * ------------------------------------------------------------------- */
+html[data-reduce-motion="1"] .wordmark-menu,
+html[data-reduce-motion="1"] .wordmark-menu-leaving,
+html[data-reduce-motion="1"] .wordmark-menu-shadow,
+html[data-reduce-motion="1"] .wordmark-menu-leaving-shadow {
+  animation: none;
+}
+
+html[data-reduce-motion="1"] .wordmark-menu-row,
+html[data-reduce-motion="1"] .wordmark-row-glow,
+html[data-reduce-motion="1"] .nav-pill {
+  transition: none;
+}
+
+/* Potato machine: WordmarkMenu unmounts the gradient outright (it subscribes
+   to the setting), so there is deliberately no display:none rule here — a
+   hidden-but-present canvas would still satisfy the label's
+   :has(.wordmark-row-glow-in) white flip and leave white text on the light
+   tint. The hovered row falls back to the plain black glass tint. */

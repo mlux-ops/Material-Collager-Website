@@ -4,12 +4,29 @@ import assert from "node:assert/strict";
 const {
   markRouteReady,
   awaitRouteReady,
+  budgetFor,
+  READY_BUDGET_MS,
   _resetRouteReadyForTests,
   setActiveTransition,
   awaitTransitionSettled,
 } = await import("../app/lib/route-ready.ts");
 
 test.beforeEach(() => _resetRouteReadyForTests());
+
+test("the workbench holds longer than the standard budget", () => {
+  // Its readiness waits on a real dynamic chunk, not just a mount; when the
+  // standard budget won that race the wipe landed on the loading veil, which
+  // is the full-screen flash the owner reported.
+  assert.ok(budgetFor("/workbench") > READY_BUDGET_MS);
+  assert.equal(budgetFor("/workbench/"), budgetFor("/workbench"));
+  assert.equal(budgetFor("/workbench?x=1"), budgetFor("/workbench"));
+});
+
+test("every other route keeps the standard budget", () => {
+  for (const path of ["/", "/generator", "/archive", "/unknown"]) {
+    assert.equal(budgetFor(path), READY_BUDGET_MS);
+  }
+});
 
 test("resolves 'ready' when the route signals readiness", async () => {
   const wait = awaitRouteReady("/generator", 500);

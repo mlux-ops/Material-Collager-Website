@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { motionReduced } from "@/app/lib/site-settings";
 
 const BAYER4 = [
   [0, 8, 2, 10],
@@ -49,9 +50,7 @@ export function DitherTextIn({
   const [done, setDone] = useState(false);
   // Client-only component (mounts on menu open), so the media query is safe
   // to read in the initializer; guarded anyway for any future SSR path.
-  const [reduced] = useState(
-    () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-  );
+  const [reduced] = useState(() => motionReduced());
 
   useEffect(() => {
     if (done || reduced) return;

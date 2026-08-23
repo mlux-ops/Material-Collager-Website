@@ -8,29 +8,95 @@
  * page wipe) until it rests against the bottom of the screen, where it stays
  * until the wordmark is clicked again, the user clicks outside the panel, or
  * presses Escape — each close slides it back up. Once the slide lands, the
- * placeholder rows (OPTION 1…) dither into existence in tiny ink dots
- * (DitherTextIn), staggered top to bottom.
+ * row labels dither into existence in tiny ink dots (DitherTextIn),
+ * staggered top to bottom.
+ *
+ * Rows (owner spec):
+ *  - external links (SHB STUDIO PORTAL, EMAIL, and every vendor/site child)
+ *    open in a new tab;
+ *  - VENDORS / SITES / SETTINGS are expandable: clicking extends the row's
+ *    gradient box downward to fit its child links (rows below are pushed
+ *    down by the same height transition), and moving the mouse out of the
+ *    box slides it back up to default size BEFORE the gradient fades away;
+ *  - ARCHIVE routes to /archive through the plotter wipe (TransitionLink).
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { DitherTextIn } from "./DitherTextIn";
+import { TransitionLink } from "./TransitionLink";
 import Velaris from "./ui/velaris";
+import {
+  cycleLanding,
+  cycleWipeSpeed,
+  getSettings,
+  landingLabel,
+  motionReduced,
+  potatoMode,
+  setSettings,
+  subscribeSettings,
+  type SiteSettings,
+} from "@/app/lib/site-settings";
 
-const ROWS = ["OPTION 1", "OPTION 2", "OPTION 3", "OPTION 4", "OPTION 5", "OPTION 6"];
+type MenuChild = { label: string; href?: string };
+type MenuRow =
+  | { label: string; kind: "external"; href: string }
+  | { label: string; kind: "route"; href: string }
+  | { label: string; kind: "expand"; children: MenuChild[] }
+  | { label: string; kind: "settings"; controls: number };
 
-/* Per-row Velaris palettes over a WHITE background — each row also gets its
-   own seed, so pattern AND palette are unique per option. Rows 1-3 are the
-   owner's Rechroma exports (oklch converted to sRGB hex); rows 4-6 are
-   curated to sit alongside them on paper. Module-scope constants: a fresh
-   array literal per render would re-init the WebGL context on every hover
-   state change. */
+const ROWS: MenuRow[] = [
+  { label: "SHB STUDIO PORTAL", kind: "external", href: "https://epc.shb.studio" },
+  { label: "EMAIL", kind: "external", href: "https://www.gmail.com" },
+  {
+    label: "VENDORS",
+    kind: "expand",
+    children: [
+      { label: "FERGUSON HOME", href: "https://fergusonhome.com" },
+      { label: "LIGHTOLOGY", href: "https://www.lightology.com" },
+      { label: "STUDIO41", href: "https://www.s41tradeconnect.com" },
+      { label: "ABT", href: "https://www.abt.com" },
+    ],
+  },
+  {
+    label: "SITES",
+    kind: "expand",
+    children: [
+      { label: "SMARTSHEET", href: "https://www.smartsheet.com" },
+      { label: "FIELDWIRE", href: "https://www.fieldwire.com" },
+      { label: "OPENSPACE", href: "https://www.openspace.ai" },
+      { label: "ADAPTIVE", href: "https://www.adaptive.build" },
+    ],
+  },
+  { label: "ARCHIVE", kind: "route", href: "/archive" },
+  // Four live controls (see SettingsControls): reduce motion, potato machine,
+  // wipe speed, landing page.
+  { label: "SETTINGS", kind: "settings", controls: 4 },
+];
+
+/** Child-row count for the box's expanded height, whatever the row kind. */
+function childCount(row: MenuRow): number {
+  if (row.kind === "expand") return row.children.length;
+  if (row.kind === "settings") return row.controls;
+  return 0;
+}
+
+/* How long a just-left row keeps its gradient mounted so it can fade out —
+   matches the 420ms opacity transition in effects.css plus a beat. */
+const GLOW_FADE_MS = 460;
+/* Geometry shared with effects.css: header row 56px (19px padding + 18px
+   label box), each child link 34px, plus a bottom inset on the open box. */
+const ROW_H = 56;
+const SUB_H = 34;
+const OPEN_PAD = 10;
+
+/* Per-row Velaris palettes over the black background — each row also gets
+   its own seed, so pattern AND palette are unique per option. Rows 1-3 are
+   the owner's Rechroma exports (oklch converted to sRGB hex); rows 4-6 are
+   curated to sit alongside them. Module-scope constants: a fresh array
+   literal per render would re-init the WebGL context on every hover state
+   change. */
 const VELARIS_BG = "#000000";
-
-/* Owner pick from the dither mockup round: fine riso — 1px color dither,
-   two levels per channel, on every row. Module-scope constant so hover
-   re-renders never re-init the WebGL context. */
-const ROW_DITHER = { cell: 1, levels: 2 };
 const ROW_PALETTES: string[][] = [
   ["#fab9b3", "#8ddbe3", "#cec3fa"], // 1 - sunlit starfish / milk waterfall / heather
   ["#a1de9f", "#f9185b", "#a36fff"], // 2 - fresh avocado / habanero / orchid
@@ -40,9 +106,9 @@ const ROW_PALETTES: string[][] = [
   ["#1a1a1a", "#7a7a7a", "#c9c9c9"], // 6 - house monochrome inks
 ];
 
-/* How long a just-left row keeps its gradient mounted so it can fade out —
-   matches the 420ms opacity transition in effects.css plus a beat. */
-const GLOW_FADE_MS = 460;
+/* Owner pick from the dither mockup round: fine riso — 1px color dither,
+   two levels per channel, on every row. */
+const ROW_DITHER = { cell: 1, levels: 2 };
 
 export function WordmarkMenu({
   onRequestClose,
@@ -60,16 +126,24 @@ export function WordmarkMenu({
   // WebGL canvases (the hot row and the one fading back) ever run at once.
   const [hotRow, setHotRow] = useState<number | null>(null);
   const [fadingRow, setFadingRow] = useState<number | null>(null);
+  // Which expandable row is currently extended (one at a time).
+  const [expandedRow, setExpandedRow] = useState<number | null>(null);
+  // Potato machine drops the WebGL gradients entirely (the plain black glass
+  // tint still marks the hovered row). Subscribed, not read once: toggling it
+  // from the SETTINGS row below must unmount the gradient immediately — and
+  // the label's white flip is keyed on the gradient being mounted, so a
+  // hidden-but-present canvas would leave white text on the light tint.
+  const [potato, setPotato] = useState(() => potatoMode());
+  useEffect(() => subscribeSettings(() => setPotato(potatoMode())), []);
   const fadeTimer = useRef<number | null>(null);
+  // Set when a child link is activated: opening a link in a new tab pulls
+  // focus away, and the browser fires pointerleave on the row as it goes —
+  // which used to collapse the box, so returning to the tab found the section
+  // shut and only the first link ever appeared to work. Swallow exactly that
+  // leave, briefly, so the box is still open when the user comes back.
+  const keepOpen = useRef<number | null>(null);
 
-  const enterRow = useCallback((index: number) => {
-    // Reduced motion keeps the plain black-tint hover (still styled in CSS)
-    // instead of a perpetually animating canvas.
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    setHotRow(index);
-  }, []);
-
-  const leaveRow = useCallback((index: number) => {
+  const finishLeave = useCallback((index: number) => {
     setHotRow((current) => (current === index ? null : current));
     setFadingRow(index);
     if (fadeTimer.current !== null) window.clearTimeout(fadeTimer.current);
@@ -79,9 +153,61 @@ export function WordmarkMenu({
     }, GLOW_FADE_MS);
   }, []);
 
+  const enterRow = useCallback((index: number) => {
+    // Reduced motion keeps the plain black-tint hover (still styled in CSS)
+    // instead of a perpetually animating canvas.
+    if (motionReduced()) return;
+    setHotRow(index);
+  }, []);
+
+  const holdOpen = useCallback(() => {
+    if (keepOpen.current !== null) window.clearTimeout(keepOpen.current);
+    keepOpen.current = window.setTimeout(() => {
+      keepOpen.current = null;
+    }, 900);
+  }, []);
+
+  const leaveRow = useCallback((index: number) => {
+    if (keepOpen.current !== null) {
+      // A child link was just activated — this leave is the focus loss, not
+      // the user moving the mouse out of the box.
+      window.clearTimeout(keepOpen.current);
+      keepOpen.current = null;
+      return;
+    }
+    // Owner: an expanded box stays open (and lit) until its header is
+    // clicked again — moving the pointer away no longer closes it, so the
+    // links inside stay reachable for as long as they are wanted.
+    if (expandedRow === index) return;
+    finishLeave(index);
+  }, [expandedRow, finishLeave]);
+
+  // Header click: open this row, or close it if it is already open. Closing
+  // hands the row back to normal hover behaviour; opening a different row
+  // closes the previous one and lets its gradient fade unless it is hovered.
+  const toggleRow = useCallback((index: number) => {
+    setExpandedRow((open) => {
+      if (open === index) return null;
+      if (open !== null && open !== index) {
+        const previous = open;
+        // Defer: never call the fade path during another row's state update.
+        window.setTimeout(() => finishLeave(previous), 0);
+      }
+      return index;
+    });
+  }, [finishLeave]);
+
+  // Mounted only while open (SiteNavigation renders it conditionally), so
+  // every open starts fresh; unmount clears any in-flight timers.
+  useEffect(() => () => {
+    if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
+    if (fadeTimer.current !== null) window.clearTimeout(fadeTimer.current);
+    if (keepOpen.current !== null) window.clearTimeout(keepOpen.current);
+  }, []);
+
   const requestClose = useCallback(() => {
     if (closeTimer.current !== null) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (motionReduced()) {
       onRequestClose();
       return;
     }
@@ -92,13 +218,6 @@ export function WordmarkMenu({
       onRequestClose();
     }, 440);
   }, [onRequestClose]);
-
-  // Mounted only while open (SiteNavigation renders it conditionally), so
-  // every open starts fresh; unmount clears any in-flight timers.
-  useEffect(() => () => {
-    if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
-    if (fadeTimer.current !== null) window.clearTimeout(fadeTimer.current);
-  }, []);
 
   useEffect(() => {
     if (closeSignal <= 0) return;
@@ -113,6 +232,14 @@ export function WordmarkMenu({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [requestClose]);
+
+  const label = (text: string, index: number) => (
+    <span className="wordmark-row-label">
+      <DitherTextIn text={text} delay={index * 70} duration={505} cell={1} fontSize={13.2} />
+    </span>
+  );
+
+  const openHeight = (row: MenuRow) => ROW_H + childCount(row) * SUB_H + OPEN_PAD;
 
   // Portaled to <body>: the nav header's backdrop-filter would otherwise
   // become the containing block for these fixed elements, trapping the
@@ -138,30 +265,109 @@ export function WordmarkMenu({
         <ul className="wordmark-menu-rows">
           {ROWS.map((row, i) =>
             landed ? (
-              <li key={row}>
-                <button
-                  type="button"
-                  className="wordmark-menu-row-btn"
+              <li key={row.label}>
+                <div
+                  className="wordmark-menu-row"
+                  style={{ height: expandedRow === i ? openHeight(row) : ROW_H }}
                   onPointerEnter={() => enterRow(i)}
                   onPointerLeave={() => leaveRow(i)}
-                  onFocus={() => enterRow(i)}
-                  onBlur={() => leaveRow(i)}
                 >
-                  {(hotRow === i || fadingRow === i) && (
+                  {/* An expanded row keeps its gradient lit for as long as it
+                      stays open — the box and its wash are one object. */}
+                  {(hotRow === i || fadingRow === i || expandedRow === i) && !potato && (
                     <span
-                      className={hotRow === i ? "wordmark-row-glow wordmark-row-glow-in" : "wordmark-row-glow"}
+                      className={
+                        hotRow === i || expandedRow === i
+                          ? "wordmark-row-glow wordmark-row-glow-in"
+                          : "wordmark-row-glow"
+                      }
                       aria-hidden="true"
+                      /* Fixed at the row's FULL open height, never the current
+                         one: resizing a WebGL canvas clears it to black and
+                         re-derives the noise field from the new aspect, which
+                         read as a black flash plus a slight zoom every time a
+                         box opened or closed. At a constant size the gradient
+                         just keeps running and the growing box reveals more
+                         of it — which is all the owner wanted. */
+                      style={{ height: openHeight(row) }}
                     >
-                      <Velaris height="100%" bg={VELARIS_BG} colors={ROW_PALETTES[i % ROW_PALETTES.length]} seed={i + 1} dither={ROW_DITHER} />
+                      <Velaris
+                        height="100%"
+                        bg={VELARIS_BG}
+                        colors={ROW_PALETTES[i % ROW_PALETTES.length]}
+                        seed={i + 1}
+                        dither={ROW_DITHER}
+                      />
                     </span>
                   )}
-                  <span className="wordmark-row-label">
-                    <DitherTextIn text={row} delay={i * 70} duration={505} cell={1} fontSize={13.2} />
-                  </span>
-                </button>
+                  {row.kind === "external" ? (
+                    <a
+                      className="wordmark-menu-row-btn"
+                      href={row.href}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                    >
+                      {label(row.label, i)}
+                    </a>
+                  ) : row.kind === "route" ? (
+                    <TransitionLink className="wordmark-menu-row-btn" href={row.href}>
+                      {label(row.label, i)}
+                    </TransitionLink>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="wordmark-menu-row-btn"
+                        aria-expanded={expandedRow === i}
+                        onClick={() => toggleRow(i)}
+                        onFocus={() => enterRow(i)}
+                        onBlur={(event) => {
+                          // Focus moving to a child link or control inside
+                          // this same box is not leaving the row — collapsing
+                          // there is exactly what made every link after the
+                          // first unreachable.
+                          if (event.currentTarget.parentElement?.contains(event.relatedTarget as Node | null)) return;
+                          leaveRow(i);
+                        }}
+                      >
+                        {label(row.label, i)}
+                      </button>
+                      {/* Always mounted (revealed by the row's height) so the
+                          collapse can animate over real content. */}
+                      <div className="wordmark-sub-list" aria-hidden={expandedRow !== i}>
+                        {row.kind === "settings" ? (
+                          <SettingsControls open={expandedRow === i} onCommit={holdOpen} />
+                        ) : (
+                          row.children.map((child) =>
+                            child.href ? (
+                              <a
+                                key={child.label}
+                                className="wordmark-sub-link"
+                                href={child.href}
+                                target="_blank"
+                                rel="noreferrer noopener"
+                                tabIndex={expandedRow === i ? 0 : -1}
+                                /* pointerdown, not click: the focus shift (and
+                                   the blur that used to collapse the box)
+                                   happens on mousedown, before click fires. */
+                                onPointerDown={holdOpen}
+                              >
+                                {child.label}
+                              </a>
+                            ) : (
+                              <span key={child.label} className="wordmark-sub-link wordmark-sub-inert">
+                                {child.label}
+                              </span>
+                            ),
+                          )
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
               </li>
             ) : (
-              <li key={row} aria-hidden="true" />
+              <li key={row.label} aria-hidden="true" />
             ),
           )}
         </ul>
@@ -169,6 +375,69 @@ export function WordmarkMenu({
       </div>
     </>,
     document.body,
+  );
+}
+
+/**
+ * The four live site settings, rendered as cycling rows inside the SETTINGS
+ * box: each click advances the value and persists it immediately (there is no
+ * apply/save step). Reduce motion also reflects the OS preference, so a
+ * machine that already asks for reduced motion reads ON with the setting off.
+ */
+function SettingsControls({ open, onCommit }: { open: boolean; onCommit: () => void }) {
+  const [settings, setLocal] = useState<SiteSettings>(() => getSettings());
+  useEffect(() => subscribeSettings(() => setLocal(getSettings())), []);
+  const osReduced = motionReduced() && !settings.reduceMotion;
+
+  const rows: { key: string; label: string; value: string; note?: string; onClick: () => void }[] = [
+    {
+      key: "motion",
+      label: "REDUCE MOTION",
+      value: settings.reduceMotion || osReduced ? "ON" : "OFF",
+      note: osReduced ? "SYSTEM" : undefined,
+      onClick: () => setSettings({ reduceMotion: !settings.reduceMotion }),
+    },
+    {
+      key: "potato",
+      label: "POTATO MACHINE",
+      value: settings.potato ? "ON" : "OFF",
+      onClick: () => setSettings({ potato: !settings.potato }),
+    },
+    {
+      key: "wipe",
+      label: "WIPE SPEED",
+      value: settings.wipeSpeed.toUpperCase(),
+      onClick: () => setSettings({ wipeSpeed: cycleWipeSpeed(settings.wipeSpeed) }),
+    },
+    {
+      key: "landing",
+      label: "LANDING PAGE",
+      value: landingLabel(settings.landing),
+      onClick: () => setSettings({ landing: cycleLanding(settings.landing) }),
+    },
+  ];
+
+  return (
+    <>
+      {rows.map((row) => (
+        <button
+          key={row.key}
+          type="button"
+          className="wordmark-sub-link wordmark-sub-control"
+          tabIndex={open ? 0 : -1}
+          /* Same guard the child links use, on pointerdown so it lands before
+             the focus shift — otherwise cycling a setting collapsed the box. */
+          onPointerDown={onCommit}
+          onClick={row.onClick}
+        >
+          <span>{row.label}</span>
+          <span className="wordmark-sub-value">
+            {row.value}
+            {row.note ? ` · ${row.note}` : ""}
+          </span>
+        </button>
+      ))}
+    </>
   );
 }
 

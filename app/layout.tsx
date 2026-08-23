@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
+import { SettingsBoot } from "./components/SettingsBoot";
 import "./motion-tokens.css";
 import "./globals.css";
 import "./effects.css";
@@ -46,6 +47,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.variable} antialiased`}>
+        <SettingsBoot />
         {children}
         <div className="grain-overlay" aria-hidden />
       </body>
