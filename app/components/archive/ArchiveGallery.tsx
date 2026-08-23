@@ -104,19 +104,11 @@ export function ArchiveGallery() {
   return (
     <main className={styles.page}>
       <RouteReady path="/archive" />
-      <SiteNavigation
-        active={null}
-        className="generator-navigation"
-        right={
-          <div className="generator-status" aria-label="Archive size">
-            <span>{items ? `${items.length} collage${items.length === 1 ? "" : "s"}` : "Loading…"}</span>
-          </div>
-        }
-      />
-      <header className={styles.head}>
-        <h1 className={styles.title}>Archive</h1>
-        <p className={styles.subtitle}>Every collage in the library, newest first.</p>
-      </header>
+      {/* The bar exactly as every other page renders it: no per-page class,
+          no right-hand status, and the ink pill seated on LIBRARY — the
+          archive IS the library's contents, and passing "no active item"
+          hid the pill and made this bar the odd one out. */}
+      <SiteNavigation active="library" />
       {failed ? (
         <p className={styles.notice}>The archive could not be loaded. Refresh to try again.</p>
       ) : items && items.length === 0 ? (
@@ -192,8 +184,14 @@ function ArchivePlate({ item, eager }: { item: ArchiveItem; eager?: boolean }) {
   const revealed = inView && loaded;
 
   return (
-    <figure className={styles.item}>
-      <div ref={ref} className={styles.plate} style={{ aspectRatio: String(ratio) }}>
+    <div className={styles.item}>
+      {/* The ratio box is a PLACEHOLDER only, so the grid does not reflow
+          while photos arrive. Once a photo is decoded the box is dropped and
+          the image sizes itself, so every collage is shown at its own native
+          ratio and nothing is ever cropped — the API's orientation guess
+          can't be right for a workbench-saved render, and cropping the
+          owner's collages to fit a guess is not acceptable. */}
+      <div ref={ref} className={styles.plate} style={loaded ? undefined : { aspectRatio: String(ratio) }}>
         {/* An un-arrived photo says so. Before this, a plate whose image was
             still in flight (or lazily not yet requested) was an empty white
             frame — indistinguishable from a collage that had gone missing. */}
@@ -225,8 +223,7 @@ function ArchivePlate({ item, eager }: { item: ArchiveItem; eager?: boolean }) {
           }}
         />
       </div>
-      <figcaption className={styles.caption}>{item.title}</figcaption>
-    </figure>
+    </div>
   );
 }
 
