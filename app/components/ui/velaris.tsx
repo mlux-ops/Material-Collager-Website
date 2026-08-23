@@ -7,8 +7,13 @@
  * Vendored from the owner's chosen component and adapted to this codebase:
  * the project doesn't use Tailwind or the shadcn structure, so the `cn`
  * helper from "@/lib/utils" and the utility classes are replaced with plain
- * inline styles (visually identical). The WebGL core — shaders, uniforms,
- * resize handling — is the original, unchanged.
+ * inline styles (visually identical).
+ *
+ * One extension over the original (owner request): a `seed` prop, fed to the
+ * shader as u_seed, offsets the noise domain and the time phase so every
+ * instance shows a genuinely different pattern — the original always
+ * rendered the same field. The shader accepts exactly FOUR colors
+ * (u_colors[4]) plus a background (u_bg).
  */
 
 import { useEffect, useRef } from "react";
@@ -29,6 +34,7 @@ varying vec2 vUv;
 uniform vec2  u_resolution;
 uniform float u_time;
 uniform float u_grain;
+uniform float u_seed;
 uniform vec3  u_colors[4];
 uniform vec3  u_bg;
 
@@ -66,11 +72,15 @@ void main() {
   vec2 p = uv - 0.5;
   p.x *= ratio;
 
-  float t = u_time * 0.1;
+  float t = u_time * 0.1 + u_seed * 43.7;
 
-  float n1 = snoise(p * 0.4 + vec2(t * 0.2, -t * 0.3));
-  float n2 = snoise(p * 0.55 + vec2(-t * 0.15, t * 0.25) + n1 * 0.25);
-  float n3 = snoise(p * 0.75 + vec2(t * 0.1, -t * 0.2) + n2 * 0.2);
+  // Seed offsets the noise DOMAIN only (q), never p itself — dist/vignette/
+  // glow below must stay centered on the element.
+  vec2 q = p + vec2(u_seed * 7.31, u_seed * 3.17);
+
+  float n1 = snoise(q * 0.4 + vec2(t * 0.2, -t * 0.3));
+  float n2 = snoise(q * 0.55 + vec2(-t * 0.15, t * 0.25) + n1 * 0.25);
+  float n3 = snoise(q * 0.75 + vec2(t * 0.1, -t * 0.2) + n2 * 0.2);
 
   vec3 col = u_bg;
 
@@ -96,9 +106,12 @@ void main() {
 
 export interface VelarisProps {
   bg?: string;
+  /** Exactly four are used (u_colors[4]); extras are ignored. */
   colors?: string[];
   speed?: number;
   grain?: number;
+  /** Any number; each value renders a different noise pattern and phase. */
+  seed?: number;
   height?: string;
   className?: string;
   children?: React.ReactNode;
@@ -120,6 +133,7 @@ const Velaris = ({
   colors = DEFAULT_COLORS,
   speed = 2.0,
   grain = 0.3,
+  seed = 0,
   height = "100vh",
   className,
   children,
@@ -167,6 +181,7 @@ const Velaris = ({
       res: gl.getUniformLocation(program, "u_resolution"),
       time: gl.getUniformLocation(program, "u_time"),
       grain: gl.getUniformLocation(program, "u_grain"),
+      seed: gl.getUniformLocation(program, "u_seed"),
       colors: gl.getUniformLocation(program, "u_colors"),
       bg: gl.getUniformLocation(program, "u_bg"),
     };
@@ -186,6 +201,7 @@ const Velaris = ({
       gl.uniform2f(locs.res, canvas.width, canvas.height);
       gl.uniform1f(locs.time, t * 0.001 * speed);
       gl.uniform1f(locs.grain, grain);
+      gl.uniform1f(locs.seed, seed);
       gl.uniform3f(locs.bg, ...hexToRgb(bg));
 
       const flat = new Float32Array(colors.slice(0, 4).flatMap(hexToRgb));
@@ -200,7 +216,7 @@ const Velaris = ({
       ro.disconnect();
       cancelAnimationFrame(raf);
     };
-  }, [bg, colors, speed, grain]);
+  }, [bg, colors, speed, grain, seed]);
 
   return (
     <div

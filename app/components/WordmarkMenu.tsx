@@ -19,6 +19,19 @@ import Velaris from "./ui/velaris";
 
 const ROWS = ["OPTION 1", "OPTION 2", "OPTION 3", "OPTION 4", "OPTION 5", "OPTION 6"];
 
+/* Per-row Velaris palettes (the shader takes exactly four colors over the
+   black bg) — each row also gets its own seed, so pattern AND palette are
+   unique per option. Module-scope constants: a fresh array literal per
+   render would re-init the WebGL context on every hover state change. */
+const ROW_PALETTES: string[][] = [
+  ["#86efac", "#4ade80", "#059669", "#000000"], // emerald (the component's own)
+  ["#93c5fd", "#3b82f6", "#1e3a8a", "#000000"], // ultramarine
+  ["#fcd34d", "#f97316", "#7c2d12", "#000000"], // ember
+  ["#d8b4fe", "#a855f7", "#4c1d95", "#000000"], // orchid
+  ["#fda4af", "#f43f5e", "#881337", "#000000"], // rose
+  ["#e5e5e5", "#a3a3a3", "#404040", "#000000"], // silver (house monochrome)
+];
+
 /* How long a just-left row keeps its gradient mounted so it can fade out —
    matches the 420ms opacity transition in effects.css plus a beat. */
 const GLOW_FADE_MS = 460;
@@ -131,7 +144,7 @@ export function WordmarkMenu({
                       className={hotRow === i ? "wordmark-row-glow wordmark-row-glow-in" : "wordmark-row-glow"}
                       aria-hidden="true"
                     >
-                      <Velaris height="100%" />
+                      <Velaris height="100%" colors={ROW_PALETTES[i % ROW_PALETTES.length]} seed={i + 1} />
                     </span>
                   )}
                   <span className="wordmark-row-label">
