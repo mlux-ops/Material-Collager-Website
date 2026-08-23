@@ -119,7 +119,15 @@ export function WordmarkMenu({
   closeSignal?: number;
 }) {
   const [closing, setClosing] = useState(false);
-  const [landed, setLanded] = useState(false);
+  // Rows stay as empty placeholders until `landed` flips true. Normally that
+  // happens on the slide animation's animationend — but reduced motion sets
+  // `animation: none` on .wordmark-menu, so that event never fires and the
+  // WHOLE panel (including this SETTINGS row) stayed blank forever, with no
+  // way back to turn the setting off. Two independent fixes: skip straight
+  // to landed when motion is already reduced at mount, and a belt-and-braces
+  // fallback timer so a future animation-name mismatch or a browser that
+  // skips the event can never brick the menu again.
+  const [landed, setLanded] = useState(() => motionReduced());
   const closeTimer = useRef<number | null>(null);
   // Velaris gradient hover: the animated gradient is mounted per-row, only
   // while that row is hovered/focused plus a fade-out grace — so at most two
@@ -224,6 +232,16 @@ export function WordmarkMenu({
     const t = window.setTimeout(requestClose, 0); // defer: no sync setState in effects
     return () => window.clearTimeout(t);
   }, [closeSignal, requestClose]);
+
+  // Fallback in case animationend never fires for any other reason (a name
+  // mismatch, a backgrounded tab throttling rAF/animations, a future CSS
+  // edit) — 1400ms covers the slowest configured wipe speed (980ms) with
+  // margin. No-op once the real event has already landed.
+  useEffect(() => {
+    if (landed) return;
+    const t = window.setTimeout(() => setLanded(true), 1400);
+    return () => window.clearTimeout(t);
+  }, [landed]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
