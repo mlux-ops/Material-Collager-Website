@@ -1,5 +1,15 @@
+/* This page scrolls ITSELF rather than relying on the document, because the
+   document cannot scroll on a wide display: globals.css sets
+   `body { overflow: hidden }`, and only `@media (max-width: 1280px)` flips
+   it back to auto — body overflow propagates to the viewport, so above
+   1280px the archive was clipped to a single screenful with no way to reach
+   the rest (the owner's ~2560px monitor showed ~15 collages and would not
+   scroll). Owning the scroll here fixes it at every width without touching
+   a global rule the library and generator depend on. */
 .page {
-  min-height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
   background: var(--mono-off-white, #fafafa);
   color: #000;
   /* Clears the fixed 58px nav bar, which stays put while this page scrolls. */
