@@ -21,14 +21,16 @@ function warmLibraryChunk() {
   void fetch("/api/library", { cache: "no-store" })
     .then((r) => (r.ok ? r.json() : null))
     .then((payload: unknown) => {
-      const records = Array.isArray((payload as { records?: unknown })?.records)
-        ? ((payload as { records: { imageUrl?: string }[] }).records)
+      // The API returns { ok, items } — this read `records` for a while,
+      // which silently warmed zero images.
+      const items = Array.isArray((payload as { items?: unknown })?.items)
+        ? ((payload as { items: { imageUrl?: string }[] }).items)
         : [];
-      for (const record of records.slice(0, 8)) {
-        if (typeof record.imageUrl !== "string") continue;
+      for (const item of items.slice(0, 8)) {
+        if (typeof item.imageUrl !== "string") continue;
         const img = new Image();
         img.decoding = "async";
-        img.src = record.imageUrl;
+        img.src = item.imageUrl;
       }
     })
     .catch(() => {});
@@ -61,7 +63,8 @@ export function SiteNavigation({
   className,
   right,
 }: {
-  active: SiteNavigationActive;
+  /** null = no nav item is current (e.g. the Archive) — the pill hides. */
+  active: SiteNavigationActive | null;
   className?: string;
   right?: ReactNode;
 }) {

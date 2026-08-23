@@ -5,8 +5,10 @@
  * tests/transitions-link-guards.test.mjs).
  */
 
-/** The three main surfaces in progression order. Forward = moving right. */
-export const NAV_ORDER = ["/", "/generator", "/workbench"] as const;
+/** The main surfaces in progression order. Forward = moving right. The
+ * archive sits past the workbench: entering it from anywhere wipes forward,
+ * leaving it wipes back. */
+export const NAV_ORDER = ["/", "/generator", "/workbench", "/archive"] as const;
 
 export type NavDirection = "forward" | "back" | "none";
 

@@ -430,14 +430,27 @@ html:active-view-transition .site-navigation {
    per-row by WordmarkMenu only while needed) and the previous rectangle
    fades back on the same curve. The plain black tint stays underneath as
    the reduced-motion / no-WebGL fallback. */
-.wordmark-menu-row-btn {
+/* The row container owns the gradient box and, for expandable rows, the
+   height: clicking VENDORS/SITES/SETTINGS extends this box downward (inline
+   height from WordmarkMenu) and the rows below are pushed down by the same
+   transition; leaving the box collapses it back BEFORE the glow fades. */
+.wordmark-menu-row {
   position: relative;
   overflow: hidden;
+  transition: height 300ms var(--ease-smooth-out, ease-out);
+}
+
+.wordmark-menu-row-btn {
+  position: relative;
+  z-index: 1;
   display: block;
   width: 100%;
   padding: 19px 14px;
   border: 0;
   background: rgb(0 0 0 / 0%);
+  color: inherit;
+  font: inherit;
+  text-decoration: none;
   cursor: pointer;
   text-align: left;
   transition: background-color 420ms var(--ease-smooth-out, ease-out);
@@ -446,6 +459,38 @@ html:active-view-transition .site-navigation {
 .wordmark-menu-row-btn:hover,
 .wordmark-menu-row-btn:focus-visible {
   background: rgb(0 0 0 / 16%);
+}
+
+/* Child links inside an expanded box: same face as the row labels
+   (DitherTextIn rasterizes at weight 750 / 13.2px / 1.6px tracking). */
+.wordmark-sub-list {
+  position: relative;
+  z-index: 1;
+  display: grid;
+}
+
+.wordmark-sub-link {
+  display: block;
+  padding: 8px 14px 8px 27px;
+  font-size: 13.2px;
+  font-weight: 750;
+  letter-spacing: 1.6px;
+  line-height: 18px;
+  text-transform: uppercase;
+  text-decoration: none;
+  text-align: left;
+  color: var(--ink, #000000);
+}
+
+a.wordmark-sub-link:hover,
+a.wordmark-sub-link:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.wordmark-sub-inert {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .wordmark-row-glow {
@@ -482,13 +527,18 @@ html:active-view-transition .site-navigation {
    and white ink over the re-emerging light glass made the label vanish for
    a beat. Leaving flips back fast (120ms, the base rule) while the wash is
    still dark; entering eases over 220ms. */
-.wordmark-menu-row-btn .wordmark-row-label span {
+.wordmark-menu-row .wordmark-row-label span {
   transition: color 120ms var(--ease-smooth-out, ease-out);
 }
 
-.wordmark-menu-row-btn:has(.wordmark-row-glow-in) .wordmark-row-label span {
+.wordmark-menu-row:has(.wordmark-row-glow-in) .wordmark-row-label span {
   color: #fff !important;
   transition: color 220ms var(--ease-smooth-out, ease-out);
+}
+
+/* Child links share the label's ink-to-white flip over the active gradient. */
+.wordmark-menu-row:has(.wordmark-row-glow-in) .wordmark-sub-link {
+  color: #fff;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -497,5 +547,9 @@ html:active-view-transition .site-navigation {
   .wordmark-menu-shadow,
   .wordmark-menu-leaving-shadow {
     animation: none;
+  }
+
+  .wordmark-menu-row {
+    transition: none;
   }
 }
