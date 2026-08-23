@@ -3,17 +3,40 @@
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { RouteReady } from "@/app/components/RouteReady";
+import { SiteNavigation } from "@/app/components/SiteNavigation";
 
 const WorkbenchApp = dynamic(() => import("@/app/components/workbench/WorkbenchApp"), {
   ssr: false,
   loading: () => <WorkbenchVeil />,
 });
 
+/**
+ * The pre-app screen, shaped like the workbench rather than like a blank
+ * page: the persistent nav bar (the owner's header-consistency rule — the
+ * bar must never blink out) over the paper and its 22px dot grid, matching
+ * the React Flow <Background> the real canvas draws. A bare white <main>
+ * here is what read as a "full-screen white flash" whenever the readiness
+ * hold ran out before the chunk landed.
+ */
 function WorkbenchVeil() {
   return (
-    <main style={{ display: "grid", placeItems: "center", height: "100dvh" }}>
-      <p style={{ fontSize: 11, letterSpacing: "0.1575px", textTransform: "uppercase" }}>Loading workbench…</p>
-    </main>
+    <div style={{ height: "100dvh", paddingTop: 58, background: "var(--mono-off-white, #fafafa)", overflow: "hidden" }}>
+      <SiteNavigation active="workbench" className="generator-navigation" />
+      <div
+        aria-busy="true"
+        style={{
+          height: "100%",
+          display: "grid",
+          placeItems: "center",
+          backgroundImage: "radial-gradient(#d0d0d0 1.4px, transparent 1.4px)",
+          backgroundSize: "22px 22px",
+        }}
+      >
+        <p style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgb(0 0 0 / 45%)" }}>
+          Loading workbench…
+        </p>
+      </div>
+    </div>
   );
 }
 

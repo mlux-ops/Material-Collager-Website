@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { WordmarkMenu } from "./WordmarkMenu";
 import { TransitionLink } from "./TransitionLink";
 import { useNavPillSlide } from "./useNavPillSlide";
@@ -50,6 +50,21 @@ const WARMERS: Record<string, () => void> = {
   "/workbench": warmWorkbenchChunk,
 };
 
+// Hover warming only helps when there IS a hover: a decisive click, a touch
+// tap, or a keyboard activation reaches the link with the chunk still cold,
+// and the workbench's readiness hold is gated on that chunk — which is how
+// the loading veil (and its full-screen flash) still surfaced. So warm the
+// heavy chunk once the current page has gone idle too. Import only: no fetch,
+// no GL, nothing observable (FR-011), and imports are idempotent.
+function warmOnIdle() {
+  const run = () => warmWorkbenchChunk();
+  const idle = (window as unknown as {
+    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+  }).requestIdleCallback;
+  if (typeof idle === "function") idle(run, { timeout: 2500 });
+  else window.setTimeout(run, 1800);
+}
+
 export type SiteNavigationActive = "library" | "generator" | "workbench";
 
 // The one shared top bar for all three pages (Library, Generator, Workbench).
@@ -72,6 +87,13 @@ export function SiteNavigation({
   const [menuCloseSignal, setMenuCloseSignal] = useState(0);
   const trackRef = useRef<HTMLElement>(null);
   const pillRef = useRef<HTMLSpanElement>(null);
+  // Every page carries this bar, so this is "once the visitor is settled on
+  // whatever page they landed on". Skipped on the workbench itself, where the
+  // chunk is by definition already loading.
+  useEffect(() => {
+    if (active === "workbench") return;
+    warmOnIdle();
+  }, [active]);
   // The black block is one element that slides between the three links rather
   // than a background that blinks from one link to the next.
   useNavPillSlide(trackRef, pillRef, active);

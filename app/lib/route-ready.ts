@@ -22,6 +22,25 @@ export type RouteReadyOutcome = "ready" | "timeout" | "superseded";
  * See specs/20260821-page-transitions-upgrade/research.md (T001). */
 export const READY_BUDGET_MS = 900;
 
+/**
+ * The workbench earns a longer hold than the other routes: its readiness is
+ * gated on a real dynamic chunk (WorkbenchApp + xyflow) fetching AND
+ * evaluating, not just a mount, so on a cold cache or a slow link it can
+ * outrun the standard budget — and the wipe then lands on the loading veil,
+ * which is the full-screen flash the owner keeps seeing. Holding the
+ * outgoing page longer is exactly the owner's own design for this route
+ * ("wait for it to load, then wipe at normal speed"); hover/idle warming
+ * (SiteNavigation) means the hold is usually imperceptible anyway.
+ */
+const ROUTE_BUDGET_MS: Record<string, number> = {
+  "/workbench": 1600,
+};
+
+/** Readiness budget for a destination route. */
+export function budgetFor(path: string): number {
+  return ROUTE_BUDGET_MS[normalizeRoutePath(path)] ?? READY_BUDGET_MS;
+}
+
 interface PendingWait {
   path: string;
   resolve: (outcome: RouteReadyOutcome) => void;

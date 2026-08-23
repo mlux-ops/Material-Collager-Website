@@ -112,39 +112,42 @@
      whereas a pure transform stays on the compositor at the display's
      refresh rate. The block is solid ink, so scaling has no visual cost. */
   width: 100px;
-  /* Painted WHITE and composited with difference, which inverts everything
-     under it: the near-white bar becomes ink, and the ink label beneath
-     becomes paper. So the pill is a solid black block whose label is white
-     exactly where the pill actually is, at every frame of the slide.
-     Colouring the active label instead (the old approach) could not stay in
-     sync — the label flipped white the instant the route committed while the
-     pill still had 250ms of travel left, so the destination sat white-on-
-     white and read as a flash. Requires the pill to paint ABOVE the links
-     (it inverts them), hence z-index 1 + pointer-events none. */
-  background: #ffffff;
-  mix-blend-mode: difference;
-  pointer-events: none;
-  z-index: 1;
+  /* Opaque, deepest black (owner: every black on the site is #000000). The
+     pill paints BENEATH the labels and the labels invert themselves against
+     it — see .nav-pill-link below — so this surface stays exactly #000000
+     while the label over it still reads white at every frame. */
+  background: var(--ink, #000000);
+  z-index: 0;
   transform-origin: left center;
   transition: transform var(--duration-fast) var(--ease-smooth-out);
   will-change: transform;
 }
 
+/* The labels carry the inversion instead of the pill: painted white and
+   composited with difference, a label over the black pill resolves to pure
+   white, and the same label over the near-white bar resolves to ink. The
+   colour therefore follows the pill's ACTUAL position every frame, with no
+   timing to get wrong — colouring the active label on commit (the old way)
+   flipped it white while the pill still had its whole slide to travel, so
+   the destination sat white-on-white and read as a flash. */
 .nav-pill-link {
   position: relative;
-  z-index: 0;
+  z-index: 1;
+  color: #ffffff;
+  mix-blend-mode: difference;
 }
 
-/* The pill now owns the inverted look, so the links stay ink-black in every
-   state — the per-link black chip from globals.css (.active / :hover /
-   :focus-visible) would otherwise fight it and reintroduce the mid-slide
-   colour swap. Specificity beats those rules deliberately. */
+/* The blend owns the inverted look, so every per-link chip and colour swap
+   from globals.css (.active / :hover / :focus-visible) is superseded — they
+   would fight the inversion and reintroduce the mid-slide flash. White here
+   is the pre-blend ink: it resolves to black on the bar, white on the pill.
+   Specificity beats those rules deliberately. */
 .site-navigation nav a.nav-pill-link,
 .site-navigation nav a.nav-pill-link.active,
 .site-navigation nav a.nav-pill-link:hover,
 .site-navigation nav a.nav-pill-link:focus-visible {
   background: transparent;
-  color: var(--mono-black, #000000);
+  color: #ffffff;
   transition: none;
 }
 

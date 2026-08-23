@@ -10,6 +10,7 @@
     "build": "vinext build",
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "typecheck": "tsc --noEmit",
     "test:scene-lab": "node --experimental-strip-types --test tests/scene-lab.test.mjs",
     "test:access": "node --experimental-strip-types --test tests/access-jwt.test.mjs",
     "test:workbench-export-import": "node --experimental-strip-types --test tests/workbench-export-import.test.mjs",

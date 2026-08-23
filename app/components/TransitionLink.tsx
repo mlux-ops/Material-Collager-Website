@@ -28,7 +28,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { type ComponentProps, type MouseEvent } from "react";
 import { navDirection, shouldStartViewTransition } from "@/app/lib/nav-direction.ts";
-import { awaitRouteReady, READY_BUDGET_MS, setActiveTransition } from "@/app/lib/route-ready.ts";
+import { awaitRouteReady, budgetFor, setActiveTransition } from "@/app/lib/route-ready.ts";
 import { motionReduced } from "@/app/lib/site-settings.ts";
 import { logTransition, observeTransition } from "@/app/lib/transition-debug.ts";
 
@@ -68,7 +68,7 @@ export function TransitionLink({ href, onClick, ...rest }: Props) {
 
     const vt = document.startViewTransition(async () => {
       router.push(href);
-      const outcome = await awaitRouteReady(href, READY_BUDGET_MS);
+      const outcome = await awaitRouteReady(href, budgetFor(href));
       logTransition(outcome, href);
       // One macrotask so any effects queued behind the readiness mark flush.
       // NOT requestAnimationFrame: rendering is suspended inside this update

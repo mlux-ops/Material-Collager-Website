@@ -84,9 +84,6 @@ function childCount(row: MenuRow): number {
 /* How long a just-left row keeps its gradient mounted so it can fade out —
    matches the 420ms opacity transition in effects.css plus a beat. */
 const GLOW_FADE_MS = 460;
-/* Height transition of an expanding row (effects.css .wordmark-menu-row). An
-   expanded row collapses for this long BEFORE its glow starts fading. */
-const COLLAPSE_MS = 300;
 /* Geometry shared with effects.css: header row 56px (19px padding + 18px
    label box), each child link 34px, plus a bottom inset on the open box. */
 const ROW_H = 56;
@@ -139,8 +136,6 @@ export function WordmarkMenu({
   const [potato, setPotato] = useState(() => potatoMode());
   useEffect(() => subscribeSettings(() => setPotato(potatoMode())), []);
   const fadeTimer = useRef<number | null>(null);
-  // A leave deferred while its row's box collapses back to default height.
-  const pendingLeave = useRef<{ index: number; timer: number } | null>(null);
   // Set when a child link is activated: opening a link in a new tab pulls
   // focus away, and the browser fires pointerleave on the row as it goes —
   // which used to collapse the box, so returning to the tab found the section
@@ -159,14 +154,9 @@ export function WordmarkMenu({
   }, []);
 
   const enterRow = useCallback((index: number) => {
-    // Re-entering a row whose deferred leave hasn't fired yet keeps its glow.
-    if (pendingLeave.current !== null) {
-      window.clearTimeout(pendingLeave.current.timer);
-      pendingLeave.current = null;
-    }
     // Reduced motion keeps the plain black-tint hover (still styled in CSS)
     // instead of a perpetually animating canvas.
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (motionReduced()) return;
     setHotRow(index);
   }, []);
 
@@ -185,35 +175,39 @@ export function WordmarkMenu({
       keepOpen.current = null;
       return;
     }
-    if (expandedRow === index) {
-      // Owner spec: the box slides back up to default size FIRST, then the
-      // gradient fades away like normal.
-      setExpandedRow(null);
-      if (pendingLeave.current !== null) window.clearTimeout(pendingLeave.current.timer);
-      pendingLeave.current = {
-        index,
-        timer: window.setTimeout(() => {
-          pendingLeave.current = null;
-          finishLeave(index);
-        }, COLLAPSE_MS),
-      };
-      return;
-    }
+    // Owner: an expanded box stays open (and lit) until its header is
+    // clicked again — moving the pointer away no longer closes it, so the
+    // links inside stay reachable for as long as they are wanted.
+    if (expandedRow === index) return;
     finishLeave(index);
   }, [expandedRow, finishLeave]);
+
+  // Header click: open this row, or close it if it is already open. Closing
+  // hands the row back to normal hover behaviour; opening a different row
+  // closes the previous one and lets its gradient fade unless it is hovered.
+  const toggleRow = useCallback((index: number) => {
+    setExpandedRow((open) => {
+      if (open === index) return null;
+      if (open !== null && open !== index) {
+        const previous = open;
+        // Defer: never call the fade path during another row's state update.
+        window.setTimeout(() => finishLeave(previous), 0);
+      }
+      return index;
+    });
+  }, [finishLeave]);
 
   // Mounted only while open (SiteNavigation renders it conditionally), so
   // every open starts fresh; unmount clears any in-flight timers.
   useEffect(() => () => {
     if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
     if (fadeTimer.current !== null) window.clearTimeout(fadeTimer.current);
-    if (pendingLeave.current !== null) window.clearTimeout(pendingLeave.current.timer);
     if (keepOpen.current !== null) window.clearTimeout(keepOpen.current);
   }, []);
 
   const requestClose = useCallback(() => {
     if (closeTimer.current !== null) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (motionReduced()) {
       onRequestClose();
       return;
     }
@@ -278,9 +272,15 @@ export function WordmarkMenu({
                   onPointerEnter={() => enterRow(i)}
                   onPointerLeave={() => leaveRow(i)}
                 >
-                  {(hotRow === i || fadingRow === i) && !potato && (
+                  {/* An expanded row keeps its gradient lit for as long as it
+                      stays open — the box and its wash are one object. */}
+                  {(hotRow === i || fadingRow === i || expandedRow === i) && !potato && (
                     <span
-                      className={hotRow === i ? "wordmark-row-glow wordmark-row-glow-in" : "wordmark-row-glow"}
+                      className={
+                        hotRow === i || expandedRow === i
+                          ? "wordmark-row-glow wordmark-row-glow-in"
+                          : "wordmark-row-glow"
+                      }
                       aria-hidden="true"
                       /* Fixed at the row's FULL open height, never the current
                          one: resizing a WebGL canvas clears it to black and
@@ -319,7 +319,7 @@ export function WordmarkMenu({
                         type="button"
                         className="wordmark-menu-row-btn"
                         aria-expanded={expandedRow === i}
-                        onClick={() => setExpandedRow((open) => (open === i ? null : i))}
+                        onClick={() => toggleRow(i)}
                         onFocus={() => enterRow(i)}
                         onBlur={(event) => {
                           // Focus moving to a child link or control inside
