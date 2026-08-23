@@ -6,6 +6,7 @@
 // fires the real onClose once the exit animation has played.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { motionReduced } from "@/app/lib/site-settings";
 
 // Mirrors --modal-close-dur in app/motion-tokens.css (150ms). Kept as a
 // constant rather than read via getComputedStyle so the hook stays sync-safe.
@@ -35,7 +36,7 @@ export function useModalDismiss(onClose: () => void): { closing: boolean; reques
 
   const requestClose = useCallback(() => {
     if (timeoutRef.current !== null) return; // already closing — ignore repeat dismissals
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (motionReduced()) {
       onCloseRef.current();
       return;
     }

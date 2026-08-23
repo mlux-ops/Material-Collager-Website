@@ -36,6 +36,7 @@
  */
 
 import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
+import { motionReduced } from "@/app/lib/site-settings";
 
 // Each page mounts its own nav, so without help the pill would simply appear
 // at the destination. Remembering the previous page's active key at module
@@ -83,7 +84,7 @@ export function useNavPillSlide(
     const fromLink = fromKey && fromKey !== activeKey
       ? track.querySelector<HTMLElement>(`[data-nav-key="${CSS.escape(fromKey)}"]`)
       : null;
-    if (fromLink && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (fromLink && !motionReduced()) {
       // Seat on the previous route's item without animating, then let the
       // CSS transition carry it to the new one on the next frame.
       const previousTransition = pill.style.transition;

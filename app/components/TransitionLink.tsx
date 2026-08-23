@@ -29,6 +29,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { type ComponentProps, type MouseEvent } from "react";
 import { navDirection, shouldStartViewTransition } from "@/app/lib/nav-direction.ts";
 import { awaitRouteReady, READY_BUDGET_MS, setActiveTransition } from "@/app/lib/route-ready.ts";
+import { motionReduced } from "@/app/lib/site-settings.ts";
 import { logTransition, observeTransition } from "@/app/lib/transition-debug.ts";
 
 type Props = ComponentProps<typeof Link> & { href: string };
@@ -50,13 +51,12 @@ export function TransitionLink({ href, onClick, ...rest }: Props) {
       button: event.button,
       samePath: href === pathname,
       hasViewTransitionAPI: typeof document.startViewTransition === "function",
-      prefersReducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+      prefersReducedMotion: motionReduced(),
     });
     if (!proceed) {
       if (event.defaultPrevented) return;
       if (!document.startViewTransition) logTransition("no-view-transition-api");
-      else if (window.matchMedia("(prefers-reduced-motion: reduce)").matches)
-        logTransition("reduced-motion");
+      else if (motionReduced()) logTransition("reduced-motion");
       return; // plain navigation (next/link or the browser handles it)
     }
 

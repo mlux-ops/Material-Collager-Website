@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { motionReduced } from "@/app/lib/site-settings";
 
 export type CountUpProps = {
   value: number;
@@ -32,7 +33,7 @@ export function CountUp({ value, from = 0, className, format, rootMargin = "0px"
     const el = ref.current;
     if (!el) return;
 
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reducedMotion = motionReduced();
 
     const run = () => {
       if (hasRun.current) return;

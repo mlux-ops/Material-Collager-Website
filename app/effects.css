@@ -112,8 +112,19 @@
      whereas a pure transform stays on the compositor at the display's
      refresh rate. The block is solid ink, so scaling has no visual cost. */
   width: 100px;
-  background: var(--ink, #000000);
-  z-index: 0;
+  /* Painted WHITE and composited with difference, which inverts everything
+     under it: the near-white bar becomes ink, and the ink label beneath
+     becomes paper. So the pill is a solid black block whose label is white
+     exactly where the pill actually is, at every frame of the slide.
+     Colouring the active label instead (the old approach) could not stay in
+     sync — the label flipped white the instant the route committed while the
+     pill still had 250ms of travel left, so the destination sat white-on-
+     white and read as a flash. Requires the pill to paint ABOVE the links
+     (it inverts them), hence z-index 1 + pointer-events none. */
+  background: #ffffff;
+  mix-blend-mode: difference;
+  pointer-events: none;
+  z-index: 1;
   transform-origin: left center;
   transition: transform var(--duration-fast) var(--ease-smooth-out);
   will-change: transform;
@@ -121,12 +132,27 @@
 
 .nav-pill-link {
   position: relative;
-  z-index: 1;
-  transition: color var(--duration-fast) var(--ease-smooth-out);
+  z-index: 0;
 }
 
-.nav-pill-link[data-active="true"] {
-  color: var(--background, #eceeea);
+/* The pill now owns the inverted look, so the links stay ink-black in every
+   state — the per-link black chip from globals.css (.active / :hover /
+   :focus-visible) would otherwise fight it and reintroduce the mid-slide
+   colour swap. Specificity beats those rules deliberately. */
+.site-navigation nav a.nav-pill-link,
+.site-navigation nav a.nav-pill-link.active,
+.site-navigation nav a.nav-pill-link:hover,
+.site-navigation nav a.nav-pill-link:focus-visible {
+  background: transparent;
+  color: var(--mono-black, #000000);
+  transition: none;
+}
+
+/* Hover affordance without a competing chip. */
+.site-navigation nav a.nav-pill-link:hover,
+.site-navigation nav a.nav-pill-link:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -493,6 +519,29 @@ a.wordmark-sub-link:focus-visible {
   cursor: default;
 }
 
+/* Settings rows: label left, current value right; each click cycles. */
+.wordmark-sub-control {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.wordmark-sub-value {
+  opacity: 0.62;
+  white-space: nowrap;
+}
+
+.wordmark-sub-control:hover .wordmark-sub-value,
+.wordmark-sub-control:focus-visible .wordmark-sub-value {
+  opacity: 1;
+}
+
 .wordmark-row-glow {
   position: absolute;
   inset: 0;
@@ -553,3 +602,29 @@ a.wordmark-sub-link:focus-visible {
     transition: none;
   }
 }
+
+/* ---------------------------------------------------------------------
+ * Site setting: REDUCE MOTION (app/lib/site-settings.ts writes the
+ * attribute). Mirrors the media-query blocks above for people who ask for
+ * it in the menu rather than in their OS; the JS side reads the same
+ * preference through motionReduced(), so canvas dithers, the page wipe and
+ * the pill's slide all follow suit.
+ * ------------------------------------------------------------------- */
+html[data-reduce-motion="1"] .wordmark-menu,
+html[data-reduce-motion="1"] .wordmark-menu-leaving,
+html[data-reduce-motion="1"] .wordmark-menu-shadow,
+html[data-reduce-motion="1"] .wordmark-menu-leaving-shadow {
+  animation: none;
+}
+
+html[data-reduce-motion="1"] .wordmark-menu-row,
+html[data-reduce-motion="1"] .wordmark-row-glow,
+html[data-reduce-motion="1"] .nav-pill {
+  transition: none;
+}
+
+/* Potato machine: WordmarkMenu unmounts the gradient outright (it subscribes
+   to the setting), so there is deliberately no display:none rule here — a
+   hidden-but-present canvas would still satisfy the label's
+   :has(.wordmark-row-glow-in) white flip and leave white text on the light
+   tint. The hovered row falls back to the plain black glass tint. */

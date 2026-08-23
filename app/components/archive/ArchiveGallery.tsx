@@ -28,6 +28,7 @@ import { DitherReveal } from "../DitherReveal";
 import { RouteReady } from "../RouteReady";
 import { SiteNavigation } from "../SiteNavigation";
 import { awaitTransitionSettled } from "@/app/lib/route-ready";
+import { potatoMode } from "@/app/lib/site-settings";
 import styles from "./archive.module.css";
 
 type ArchiveItem = {
@@ -99,6 +100,7 @@ function ArchivePlate({ item }: { item: ArchiveItem }) {
   // placeholders). The probe warms the browser cache, so the reveal's own
   // load is instant.
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  const [potato] = useState(() => potatoMode());
 
   useEffect(() => {
     const el = ref.current;
@@ -141,7 +143,17 @@ function ArchivePlate({ item }: { item: ArchiveItem }) {
         className={styles.plate}
         style={{ aspectRatio: dims ? `${dims.w} / ${dims.h}` : "3 / 2" }}
       >
-        {dims ? (
+        {dims && potato ? (
+          // Potato machine: skip the per-image canvas dither entirely.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={item.imageUrl}
+            alt={item.title}
+            width={dims.w}
+            height={dims.h}
+            style={{ display: "block", width: "100%", height: "auto" }}
+          />
+        ) : dims ? (
           <DitherReveal
             src={item.imageUrl}
             alt={item.title}
