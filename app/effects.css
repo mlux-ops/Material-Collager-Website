@@ -421,10 +421,14 @@ html:active-view-transition .site-navigation {
   min-height: 18px;
 }
 
-/* Each option is a see-through glass rectangle: hovering slowly tints the
-   glass toward black — the translucency never changes, only the tone — and
-   moving on lets the previous rectangle fade back on the same curve. */
+/* Each option is a see-through glass rectangle: hovering fades in the
+   owner's Velaris gradient (an animated WebGL simplex-noise wash, mounted
+   per-row by WordmarkMenu only while needed) and the previous rectangle
+   fades back on the same curve. The plain black tint stays underneath as
+   the reduced-motion / no-WebGL fallback. */
 .wordmark-menu-row-btn {
+  position: relative;
+  overflow: hidden;
   display: block;
   width: 100%;
   padding: 10px 14px;
@@ -438,6 +442,39 @@ html:active-view-transition .site-navigation {
 .wordmark-menu-row-btn:hover,
 .wordmark-menu-row-btn:focus-visible {
   background: rgb(0 0 0 / 16%);
+}
+
+.wordmark-row-glow {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 420ms var(--ease-smooth-out, ease-out);
+  pointer-events: none;
+}
+
+.wordmark-row-glow-in {
+  opacity: 1;
+}
+
+@starting-style {
+  .wordmark-row-glow-in {
+    opacity: 0;
+  }
+}
+
+/* The label rides above the gradient and flips to paper white for contrast
+   against the dark wash. DitherTextIn's resolved span carries an inline ink
+   color, hence the !important — hover happens well after the dither. */
+.wordmark-row-label {
+  position: relative;
+  z-index: 1;
+  display: block;
+}
+
+.wordmark-menu-row-btn:hover .wordmark-row-label span,
+.wordmark-menu-row-btn:focus-visible .wordmark-row-label span {
+  color: #fff !important;
+  transition: color 420ms var(--ease-smooth-out, ease-out);
 }
 
 @media (prefers-reduced-motion: reduce) {

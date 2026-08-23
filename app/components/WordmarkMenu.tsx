@@ -15,8 +15,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { DitherTextIn } from "./DitherTextIn";
+import Velaris from "./ui/velaris";
 
 const ROWS = ["OPTION 1", "OPTION 2", "OPTION 3", "OPTION 4", "OPTION 5", "OPTION 6"];
+
+/* How long a just-left row keeps its gradient mounted so it can fade out —
+   matches the 420ms opacity transition in effects.css plus a beat. */
+const GLOW_FADE_MS = 460;
 
 export function WordmarkMenu({
   onRequestClose,
@@ -29,6 +34,29 @@ export function WordmarkMenu({
   const [closing, setClosing] = useState(false);
   const [landed, setLanded] = useState(false);
   const closeTimer = useRef<number | null>(null);
+  // Velaris gradient hover: the animated gradient is mounted per-row, only
+  // while that row is hovered/focused plus a fade-out grace — so at most two
+  // WebGL canvases (the hot row and the one fading back) ever run at once.
+  const [hotRow, setHotRow] = useState<number | null>(null);
+  const [fadingRow, setFadingRow] = useState<number | null>(null);
+  const fadeTimer = useRef<number | null>(null);
+
+  const enterRow = useCallback((index: number) => {
+    // Reduced motion keeps the plain black-tint hover (still styled in CSS)
+    // instead of a perpetually animating canvas.
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    setHotRow(index);
+  }, []);
+
+  const leaveRow = useCallback((index: number) => {
+    setHotRow((current) => (current === index ? null : current));
+    setFadingRow(index);
+    if (fadeTimer.current !== null) window.clearTimeout(fadeTimer.current);
+    fadeTimer.current = window.setTimeout(() => {
+      fadeTimer.current = null;
+      setFadingRow(null);
+    }, GLOW_FADE_MS);
+  }, []);
 
   const requestClose = useCallback(() => {
     if (closeTimer.current !== null) return;
@@ -45,9 +73,10 @@ export function WordmarkMenu({
   }, [onRequestClose]);
 
   // Mounted only while open (SiteNavigation renders it conditionally), so
-  // every open starts fresh; unmount clears any in-flight close timer.
+  // every open starts fresh; unmount clears any in-flight timers.
   useEffect(() => () => {
     if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
+    if (fadeTimer.current !== null) window.clearTimeout(fadeTimer.current);
   }, []);
 
   useEffect(() => {
@@ -89,8 +118,25 @@ export function WordmarkMenu({
           {ROWS.map((row, i) =>
             landed ? (
               <li key={row}>
-                <button type="button" className="wordmark-menu-row-btn">
-                  <DitherTextIn text={row} delay={i * 70} duration={505} cell={1} fontSize={13.2} />
+                <button
+                  type="button"
+                  className="wordmark-menu-row-btn"
+                  onPointerEnter={() => enterRow(i)}
+                  onPointerLeave={() => leaveRow(i)}
+                  onFocus={() => enterRow(i)}
+                  onBlur={() => leaveRow(i)}
+                >
+                  {(hotRow === i || fadingRow === i) && (
+                    <span
+                      className={hotRow === i ? "wordmark-row-glow wordmark-row-glow-in" : "wordmark-row-glow"}
+                      aria-hidden="true"
+                    >
+                      <Velaris height="100%" />
+                    </span>
+                  )}
+                  <span className="wordmark-row-label">
+                    <DitherTextIn text={row} delay={i * 70} duration={505} cell={1} fontSize={13.2} />
+                  </span>
                 </button>
               </li>
             ) : (
