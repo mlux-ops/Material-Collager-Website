@@ -41,7 +41,30 @@ type ArchiveItem = {
   aspectRatio?: number;
 };
 
-const COLUMNS = 3;
+/* Column count by viewport. The referenced gallery is three columns at its
+   demo width; on a 2560px display that left the archive as a narrow strip
+   with more empty margin than content, so wide screens get a fourth (and
+   the CSS widens the grid to match). Kept in JS because the round-robin
+   distribution below has to agree with the CSS column count. */
+const COLUMN_QUERIES: [string, number][] = [
+  ["(min-width: 1700px)", 4],
+  ["(max-width: 620px)", 1],
+  ["(max-width: 900px)", 2],
+];
+
+function useColumnCount(): number {
+  const [columns, setColumns] = useState(3);
+  useEffect(() => {
+    const lists = COLUMN_QUERIES.map(([query, count]) => [window.matchMedia(query), count] as const);
+    const sync = () => setColumns(lists.find(([list]) => list.matches)?.[1] ?? 3);
+    sync();
+    for (const [list] of lists) list.addEventListener("change", sync);
+    return () => {
+      for (const [list] of lists) list.removeEventListener("change", sync);
+    };
+  }, []);
+  return columns;
+}
 
 export function ArchiveGallery() {
   const [items, setItems] = useState<ArchiveItem[] | null>(null);
@@ -71,11 +94,12 @@ export function ArchiveGallery() {
   // Round-robin into columns (the reference's own structure): each column is
   // an independent stack, so mixed portrait/landscape ratios never fight a
   // shared row height.
+  const columnCount = useColumnCount();
   const columns = useMemo(() => {
-    const buckets: ArchiveItem[][] = Array.from({ length: COLUMNS }, () => []);
-    (items ?? []).forEach((item, index) => buckets[index % COLUMNS].push(item));
+    const buckets: ArchiveItem[][] = Array.from({ length: columnCount }, () => []);
+    (items ?? []).forEach((item, index) => buckets[index % columnCount].push(item));
     return buckets;
-  }, [items]);
+  }, [items, columnCount]);
 
   return (
     <main className={styles.page}>
@@ -98,11 +122,14 @@ export function ArchiveGallery() {
       ) : items && items.length === 0 ? (
         <p className={styles.notice}>Nothing in the library yet — generated collages land here.</p>
       ) : (
-        <div className={styles.grid}>
+        <div className={styles.grid} style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}>
           {columns.map((column, index) => (
             <div className={styles.column} key={index}>
-              {column.map((item) => (
-                <ArchivePlate key={item.id} item={item} />
+              {column.map((item, row) => (
+                // The first row of every column loads eagerly: those are
+                // on screen immediately, and waiting for the lazy scheduler
+                // there is a visible delay on arrival.
+                <ArchivePlate key={item.id} item={item} eager={row === 0} />
               ))}
             </div>
           ))}
@@ -112,10 +139,12 @@ export function ArchiveGallery() {
   );
 }
 
-function ArchivePlate({ item }: { item: ArchiveItem }) {
+function ArchivePlate({ item, eager }: { item: ArchiveItem; eager?: boolean }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
   const [inView, setInView] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
   // Ratio from the API, refined from the decoded image if it disagrees (a
   // workbench-saved render has no orientation in its payload, so it lands on
   // the default until its own dimensions are known).
@@ -132,23 +161,52 @@ function ArchivePlate({ item }: { item: ArchiveItem }) {
           observer.disconnect();
         }
       },
-      { rootMargin: "300px" },
+      // Generous: a full-resolution collage takes real time to arrive, and
+      // an empty plate scrolling into view reads as missing content rather
+      // than as something still loading. Start well before it is seen.
+      { rootMargin: "1400px" },
     );
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+
+  // An image already in the browser cache finishes BEFORE React attaches its
+  // onLoad handler, so that event never arrives and the photo stays at
+  // opacity 0 forever — which is why a revisit (or anything the library had
+  // already fetched) showed only some of the collages. Ask the element
+  // directly instead of waiting to be told.
+  useEffect(() => {
+    const image = imgRef.current;
+    if (!image || loaded) return;
+    if (image.complete) {
+      if (image.naturalWidth > 0) {
+        const actual = image.naturalWidth / image.naturalHeight;
+        if (Math.abs(actual - ratio) / ratio > 0.02) setRatio(actual);
+        setLoaded(true);
+      } else {
+        setFailed(true); // completed with no pixels = it errored
+      }
+    }
+  }, [loaded, ratio]);
 
   const revealed = inView && loaded;
 
   return (
     <figure className={styles.item}>
       <div ref={ref} className={styles.plate} style={{ aspectRatio: String(ratio) }}>
+        {/* An un-arrived photo says so. Before this, a plate whose image was
+            still in flight (or lazily not yet requested) was an empty white
+            frame — indistinguishable from a collage that had gone missing. */}
+        {!loaded && !failed && <span className={styles.pending} aria-hidden="true" />}
+        {failed && <span className={styles.unavailable}>Preview unavailable</span>}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
+          ref={imgRef}
           src={item.imageUrl}
           alt={item.title}
-          loading="lazy"
+          loading={eager ? "eager" : "lazy"}
           decoding="async"
+          onError={() => setFailed(true)}
           className={[
             styles.image,
             revealed ? styles.imageIn : "",
