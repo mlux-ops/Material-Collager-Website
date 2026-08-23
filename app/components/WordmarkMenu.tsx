@@ -19,17 +19,20 @@ import Velaris from "./ui/velaris";
 
 const ROWS = ["OPTION 1", "OPTION 2", "OPTION 3", "OPTION 4", "OPTION 5", "OPTION 6"];
 
-/* Per-row Velaris palettes (the shader takes exactly four colors over the
-   black bg) — each row also gets its own seed, so pattern AND palette are
-   unique per option. Module-scope constants: a fresh array literal per
-   render would re-init the WebGL context on every hover state change. */
+/* Per-row Velaris palettes over a WHITE background — each row also gets its
+   own seed, so pattern AND palette are unique per option. Rows 1-3 are the
+   owner's Rechroma exports (oklch converted to sRGB hex); rows 4-6 are
+   curated to sit alongside them on paper. Module-scope constants: a fresh
+   array literal per render would re-init the WebGL context on every hover
+   state change. */
+const VELARIS_BG = "#ffffff";
 const ROW_PALETTES: string[][] = [
-  ["#86efac", "#4ade80", "#059669", "#000000"], // emerald (the component's own)
-  ["#93c5fd", "#3b82f6", "#1e3a8a", "#000000"], // ultramarine
-  ["#fcd34d", "#f97316", "#7c2d12", "#000000"], // ember
-  ["#d8b4fe", "#a855f7", "#4c1d95", "#000000"], // orchid
-  ["#fda4af", "#f43f5e", "#881337", "#000000"], // rose
-  ["#e5e5e5", "#a3a3a3", "#404040", "#000000"], // silver (house monochrome)
+  ["#fab9b3", "#8ddbe3", "#cec3fa"], // 1 - sunlit starfish / milk waterfall / heather
+  ["#a1de9f", "#f9185b", "#a36fff"], // 2 - fresh avocado / habanero / orchid
+  ["#5f8df8", "#c46aca", "#42ac4c"], // 3 - lupine / linen bubblegum / matcha
+  ["#d9a441", "#cd6543", "#4a5560"], // 4 - ochre / terracotta / slate ink
+  ["#3a7ca5", "#7ac9bc", "#e8c98f"], // 5 - cerulean / sea glass / sand
+  ["#1a1a1a", "#7a7a7a", "#c9c9c9"], // 6 - house monochrome inks
 ];
 
 /* How long a just-left row keeps its gradient mounted so it can fade out —
@@ -144,7 +147,7 @@ export function WordmarkMenu({
                       className={hotRow === i ? "wordmark-row-glow wordmark-row-glow-in" : "wordmark-row-glow"}
                       aria-hidden="true"
                     >
-                      <Velaris height="100%" colors={ROW_PALETTES[i % ROW_PALETTES.length]} seed={i + 1} />
+                      <Velaris height="100%" bg={VELARIS_BG} colors={ROW_PALETTES[i % ROW_PALETTES.length]} seed={i + 1} />
                     </span>
                   )}
                   <span className="wordmark-row-label">

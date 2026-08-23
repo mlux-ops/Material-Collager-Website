@@ -95,7 +95,11 @@ void main() {
   float glow = smoothstep(0.8, 0.0, dist) * 0.3;
   col += u_colors[1] * glow;
 
-  col = mix(col * 0.2, col, vignette);
+  /* Edge fade generalized for light backgrounds: the original col * 0.2
+     fades edges toward BLACK, which is exactly mix(black, col, 0.2) — so on
+     a black bg this line is identical, and on a white bg the edges wash out
+     toward the paper instead of going dark. */
+  col = mix(mix(u_bg, col, 0.2), col, vignette);
 
   float grain = fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453 + u_time);
   col += (grain - 0.5) * u_grain * 0.1;
@@ -204,7 +208,11 @@ const Velaris = ({
       gl.uniform1f(locs.seed, seed);
       gl.uniform3f(locs.bg, ...hexToRgb(bg));
 
-      const flat = new Float32Array(colors.slice(0, 4).flatMap(hexToRgb));
+      // The shader declares exactly vec3 u_colors[4]; a shorter palette is
+      // padded by repeating its last color (an unset slot would read black).
+      const four = colors.slice(0, 4);
+      while (four.length < 4) four.push(four[four.length - 1] ?? bg);
+      const flat = new Float32Array(four.flatMap(hexToRgb));
       gl.uniform3fv(locs.colors, flat);
 
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
