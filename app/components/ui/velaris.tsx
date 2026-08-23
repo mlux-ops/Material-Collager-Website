@@ -150,7 +150,10 @@ const Velaris = ({
     const container = containerRef.current;
     if (!canvas || !container) return;
 
-    const gl = canvas.getContext("webgl");
+    // alpha: false — the rectangle is fully opaque, never blended with
+    // whatever sits behind the canvas (owner: no transparency on the
+    // gradient background).
+    const gl = canvas.getContext("webgl", { alpha: false });
     if (!gl) return;
 
     const createShader = (type: number, src: string) => {

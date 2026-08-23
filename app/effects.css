@@ -409,12 +409,16 @@ html:active-view-transition .site-navigation {
   animation: menu-slide-up 440ms var(--wipe-ease, cubic-bezier(0.22, 1, 0.36, 1)) both; /* owner: ~15% slower */
 }
 
+/* Rows sit flush: each option's rectangle shares its top and bottom edges
+   with its neighbors (owner) — the old 18px grid gap moved into the button's
+   vertical padding, so the text rhythm is unchanged while the hover rects
+   tile edge-to-edge. */
 .wordmark-menu-rows {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 18px;
+  gap: 0;
 }
 
 .wordmark-menu-rows li {
@@ -431,7 +435,7 @@ html:active-view-transition .site-navigation {
   overflow: hidden;
   display: block;
   width: 100%;
-  padding: 10px 14px;
+  padding: 19px 14px;
   border: 0;
   background: rgb(0 0 0 / 0%);
   cursor: pointer;
@@ -462,12 +466,20 @@ html:active-view-transition .site-navigation {
   }
 }
 
-/* The label rides above the gradient; the wash is white-based, so the ink
-   stays black — no color flip needed. */
+/* The label rides above the gradient and flips to paper white while the
+   dark wash is actually mounted (:has) — the reduced-motion / no-WebGL
+   fallback keeps the light tint, where the ink must stay black.
+   DitherTextIn's resolved span carries an inline ink color, hence the
+   !important; hover happens well after the dither. */
 .wordmark-row-label {
   position: relative;
   z-index: 1;
   display: block;
+}
+
+.wordmark-menu-row-btn:has(.wordmark-row-glow) .wordmark-row-label span {
+  color: #fff !important;
+  transition: color 220ms var(--ease-smooth-out, ease-out);
 }
 
 @media (prefers-reduced-motion: reduce) {

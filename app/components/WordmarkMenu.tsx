@@ -25,7 +25,7 @@ const ROWS = ["OPTION 1", "OPTION 2", "OPTION 3", "OPTION 4", "OPTION 5", "OPTIO
    curated to sit alongside them on paper. Module-scope constants: a fresh
    array literal per render would re-init the WebGL context on every hover
    state change. */
-const VELARIS_BG = "#ffffff";
+const VELARIS_BG = "#000000";
 const ROW_PALETTES: string[][] = [
   ["#fab9b3", "#8ddbe3", "#cec3fa"], // 1 - sunlit starfish / milk waterfall / heather
   ["#a1de9f", "#f9185b", "#a36fff"], // 2 - fresh avocado / habanero / orchid
