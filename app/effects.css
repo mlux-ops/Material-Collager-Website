@@ -477,7 +477,16 @@ html:active-view-transition .site-navigation {
   display: block;
 }
 
-.wordmark-menu-row-btn:has(.wordmark-row-glow) .wordmark-row-label span {
+/* Gate on the ACTIVE glow (-in), not the mounted one: during the fade-out
+   grace the glow element is still mounted while the dark wash fades away,
+   and white ink over the re-emerging light glass made the label vanish for
+   a beat. Leaving flips back fast (120ms, the base rule) while the wash is
+   still dark; entering eases over 220ms. */
+.wordmark-menu-row-btn .wordmark-row-label span {
+  transition: color 120ms var(--ease-smooth-out, ease-out);
+}
+
+.wordmark-menu-row-btn:has(.wordmark-row-glow-in) .wordmark-row-label span {
   color: #fff !important;
   transition: color 220ms var(--ease-smooth-out, ease-out);
 }
