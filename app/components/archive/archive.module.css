@@ -2,13 +2,13 @@
   min-height: 100vh;
   background: var(--mono-off-white, #fafafa);
   color: #000;
-  /* Clears the fixed 58px nav bar. */
-  padding: 96px 28px 56px;
+  /* Clears the fixed 58px nav bar, which stays put while this page scrolls. */
+  padding: 96px 16px 64px;
 }
 
 .head {
-  max-width: 1280px;
-  margin: 0 auto 30px;
+  max-width: 1024px;
+  margin: 0 auto 26px;
 }
 
 .title {
@@ -28,34 +28,67 @@
 }
 
 .notice {
-  max-width: 1280px;
+  max-width: 1024px;
   margin: 48px auto;
   font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
-/* Masonry via CSS columns: items keep their natural aspect and flow down
-   each column, so mixed generation sizes never fight a fixed row height. */
+/* Three independent column stacks with even gaps (the referenced gallery's
+   own structure), so portrait and landscape renders sit together without a
+   shared row height. */
 .grid {
-  max-width: 1280px;
+  display: grid;
+  gap: 24px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  max-width: 1024px;
   margin: 0 auto;
-  columns: 3;
-  column-gap: 22px;
+}
+
+.column {
+  display: grid;
+  gap: 24px;
+  align-content: start;
 }
 
 .item {
-  break-inside: avoid;
-  margin: 0 0 22px;
+  margin: 0;
 }
 
-/* The white plate framing each collage — same language as the viewer panel's
-   figure (white sheet, hairline border, breathing room). */
+/* The aspect box: sized from the API's ratio before anything loads, so the
+   page never reflows as images arrive. */
+/* Square corners on purpose: the referenced gallery rounds its tiles, but
+   this site ends with a global `border-radius: 0 !important` law ("every
+   edge is a hard 90° corner"), so a radius here would be dead code. The
+   reference's structure — three column stacks, even gaps, aspect boxes,
+   reveal on scroll — is what carries over. */
 .plate {
-  padding: 10px;
-  background: #fff;
+  position: relative;
+  width: 100%;
+  overflow: hidden;
   border: 1px solid rgb(0 0 0 / 12%);
+  background: #fff;
 }
+
+.image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+}
+
+.imageIn {
+  opacity: 1;
+  transition: opacity var(--duration-slow, 600ms) var(--ease-smooth-out, ease-out);
+}
+
+/* The house Bayer reveal lives in app/effects.css as the GLOBAL class
+   .archive-image-dither, not here: CSS Modules rewrites every
+   animation-name it finds in a module, so `animation: mc-bayer-dissolve`
+   became `_mc-bayer-dissolve_<hash>` — a name nothing defines — and the
+   reveal silently did nothing (computed mask-image: none). */
 
 .caption {
   margin-top: 7px;
@@ -65,18 +98,24 @@
   text-transform: uppercase;
 }
 
-@media (max-width: 1000px) {
+@media (max-width: 900px) {
   .grid {
-    columns: 2;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 620px) {
   .page {
-    padding: 84px 16px 40px;
+    padding: 84px 14px 44px;
   }
 
   .grid {
-    columns: 1;
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .imageIn {
+    transition: none;
   }
 }
