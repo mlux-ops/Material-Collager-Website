@@ -6,8 +6,13 @@
   padding: 96px 16px 64px;
 }
 
+/* Content width. The reference's own demo width (1024px) left a 2560px
+   display mostly margin, so this scales with the viewport and only stops
+   at a width where a collage is still comfortably readable. The header
+   tracks the grid so their left edges line up. */
 .head {
-  max-width: 1024px;
+  width: min(1800px, 100%);
+  max-width: 100%;
   margin: 0 auto 26px;
 }
 
@@ -28,7 +33,7 @@
 }
 
 .notice {
-  max-width: 1024px;
+  width: min(1800px, 100%);
   margin: 48px auto;
   font-size: 11px;
   letter-spacing: 0.1em;
@@ -38,11 +43,12 @@
 /* Three independent column stacks with even gaps (the referenced gallery's
    own structure), so portrait and landscape renders sit together without a
    shared row height. */
+/* grid-template-columns is set inline by the component so the CSS column
+   count and the round-robin distribution can never disagree. */
 .grid {
   display: grid;
   gap: 24px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  max-width: 1024px;
+  width: min(1800px, 100%);
   margin: 0 auto;
 }
 
@@ -98,19 +104,30 @@
   text-transform: uppercase;
 }
 
-@media (max-width: 900px) {
-  .grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+/* Still arriving: a faint ordered-dot field, so an unloaded plate reads as
+   loading rather than as a collage that vanished. */
+.pending {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgb(0 0 0 / 18%) 0.8px, transparent 0.8px);
+  background-size: 6px 6px;
+  opacity: 0.5;
+}
+
+.unavailable {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(0 0 0 / 38%);
 }
 
 @media (max-width: 620px) {
   .page {
     padding: 84px 14px 44px;
-  }
-
-  .grid {
-    grid-template-columns: minmax(0, 1fr);
   }
 }
 
