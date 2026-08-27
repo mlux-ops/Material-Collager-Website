@@ -70,6 +70,7 @@ export const ITEM_PRESETS: Record<CollageType, CollageItemInput[]> = {
     { id: "countertop", role: "countertop stone sample", required: true },
     { id: "faucet", role: "kitchen faucet or fixture", required: true },
     { id: "hardware", role: "cabinet hardware", required: true },
+    { id: "light_fixture", role: "pendant or ceiling light fixture", required: false },
     { id: "flooring", role: "flooring sample", required: true },
   ],
   appliance_collage: [
@@ -84,6 +85,7 @@ export const ITEM_PRESETS: Record<CollageType, CollageItemInput[]> = {
     { id: "shower_head", role: "shower head and wall arm", required: true },
     { id: "valve_trim", role: "shower valve trim", required: true },
     { id: "cabinet_hardware", role: "cabinet hardware pull or knob", required: false },
+    { id: "light_fixture", role: "vanity or wall light fixture", required: false },
     { id: "vanity_wood", role: "wood vanity sample", required: true },
     { id: "main_tile", role: "main bathroom tile", required: true },
     { id: "countertop", role: "vanity countertop stone", required: true },
