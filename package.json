@@ -19,6 +19,8 @@
     "test:transitions": "node --experimental-strip-types --test tests/*.test.mjs",
     "db:generate": "drizzle-kit generate",
     "test:release-readiness": "node --test tests/release-readiness.test.mjs",
+    "autoboard": "node --experimental-strip-types scripts/autoboard/cli.mjs",
+    "test:autoboard": "node --experimental-strip-types --test tests/autoboard-*.test.mjs",
     "validate:rights": "node scripts/validate-release-collage-rights.mjs",
     "validate:library": "node scripts/validate-release-library.mjs",
     "qa:scaffold": "node scripts/create-release-qa-run.mjs"

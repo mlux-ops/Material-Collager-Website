@@ -88,6 +88,7 @@ export const ITEM_PRESETS: Record<CollageType, CollageItemInput[]> = {
     { id: "light_fixture", role: "vanity or wall light fixture", required: false },
     { id: "vanity_wood", role: "wood vanity sample", required: true },
     { id: "main_tile", role: "main bathroom tile", required: true },
+    { id: "accent_tile", role: "accent or secondary bathroom tile", required: false },
     { id: "countertop", role: "vanity countertop stone", required: true },
   ],
   bathroom_tile_collage: [

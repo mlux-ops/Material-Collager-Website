@@ -1,0 +1,16 @@
+{
+  "_readme": "Room -> tile codes for bathroom_fixture_collage boards, sourced from the 'Wieland Selections Book' (Project 25-006, issued 2026-08-24) — the v4 Elm Surfaces tile schedule, an APPROVED DESIGN DIRECTION (spa primaries, one color pop or 3D-texture move per secondary, muted calm tones, no stone-look veining) but still release status HOLD: quote-pending against the $37,761.80 material allowance, with 9 open items (finish decision, drains, rough-in sign-off, powder fixture SKUs, grout). mainTile = that room's wet/feature wall tile; accentTile = its niche accent where one is confirmed (open for both Primaries — the schedule explicitly has not assigned a niche accent for either Primary bath yet, so none is set here; do not guess one in). Codes reference tiles.mjs's index of H:/Games/1529 Wieland - Master Library/Tile/tiles/ — every material named in the schedule (Cortar, Tones, Vera Forma, Haze, Clara collections) matches a real photo there. Triplex Bath 5 is not one of the schedule's eleven tiled rooms and is deliberately left unassigned.",
+  "assignments": {
+    "penthouse::primary bath": { "mainTile": "WT1", "accentTile": "WT2" },
+    "triplex::primary bath": { "mainTile": "WT3", "accentTile": "WT4" },
+    "penthouse::bath 2": { "mainTile": "WT5", "accentTile": "AT2" },
+    "penthouse::bath 3": { "mainTile": "WT6", "accentTile": "AT2" },
+    "penthouse::bath 4": { "mainTile": "WT9", "accentTile": "AT1" },
+    "triplex::bath 2": { "mainTile": "WT7", "accentTile": "AT2" },
+    "triplex::bath 3": { "mainTile": "WT8", "accentTile": "AT2" },
+    "triplex::bath 4": { "mainTile": "WT10", "accentTile": "AT1" },
+    "penthouse::powder room": { "mainTile": "WT11" },
+    "triplex::powder room": { "mainTile": "WT12" },
+    "triplex::powder 2": { "mainTile": "WT13" }
+  }
+}

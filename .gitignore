@@ -67,3 +67,9 @@ public/screenshot.png
 # Pipeline runtime state and quarantined stale git locks
 /.task/
 /_quarantine/
+
+# Autoboard run output (plans, candidate renders, review sheets)
+/autoboard-runs/
+
+# Autoboard's own image overlay for items uploaded via the review UI
+/scripts/autoboard/uploaded-images/
