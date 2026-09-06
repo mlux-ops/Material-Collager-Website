@@ -5,9 +5,11 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
+  customItemsForRoom,
   decodeUploadedImage,
   isValidTileCode,
   sanitizeNamePart,
+  saveCustomItem,
   saveUploadedRowImage,
   saveUploadedTileImage,
   uploadedImagesFor,
@@ -86,5 +88,32 @@ test("saveUploadedTileImage writes <CODE>_<name>.<ext> and refuses to overwrite 
       saveUploadedTileImage(libraryRoot, "WT14", "New Material", Buffer.from("other-bytes"), ".jpg"),
       (error) => error.status === 400 && /already exists/.test(error.message),
     );
+  });
+});
+
+test("customItemsForRoom is empty until an item is saved, then reflects it — scoped per room", async () => {
+  await withTempRoot(async (root) => {
+    assert.deepEqual(customItemsForRoom("penthouse::bath 2", root), []);
+
+    const saved = await saveCustomItem(
+      "penthouse::bath 2",
+      { name: "Custom Robe Hook", brand: "Acme", notes: "matte black" },
+      Buffer.from("photo-bytes"),
+      ".jpg",
+      root,
+    );
+    assert.match(saved.id, /^custom-\d+$/);
+    assert.equal(readFileSync(saved.imagePath, "utf8"), "photo-bytes");
+
+    const items = customItemsForRoom("penthouse::bath 2", root);
+    assert.equal(items.length, 1);
+    assert.equal(items[0].id, saved.id);
+    assert.equal(items[0].name, "Custom Robe Hook");
+    assert.equal(items[0].brand, "Acme");
+    assert.equal(items[0].notes, "matte black");
+    assert.equal(items[0].imagePath, saved.imagePath);
+
+    // A different room's library is unaffected.
+    assert.deepEqual(customItemsForRoom("penthouse::bath 3", root), []);
   });
 });

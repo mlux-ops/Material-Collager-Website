@@ -30,6 +30,7 @@ export function renderReviewPage() {
   .slot-card .name { font-size: 0.85rem; margin: 0.2rem 0; line-height: 1.3; min-height: 2.4em; }
   .slot-card .brand { font-size: 0.72rem; color: var(--muted); }
   .slot-card .overridden { display: inline-block; margin-top: 0.3rem; font-size: 0.68rem; color: var(--danger); }
+  .slot-card .low-res { display: inline-block; margin-top: 0.3rem; margin-right: 0.3rem; padding: 0.05rem 0.35rem; font-size: 0.66rem; color: #92400e; background: #fef3c7; border-radius: 4px; }
   .slot-card .actions { display: flex; gap: 0.4rem; margin-top: 0.5rem; }
   button { font-size: 0.75rem; padding: 0.3rem 0.6rem; border: 1px solid var(--line); background: #f5f5f2; border-radius: 4px; cursor: pointer; }
   button:hover { background: #ebebe6; }
@@ -46,6 +47,14 @@ export function renderReviewPage() {
   .upload-card input[type="text"] { font-size: 0.75rem; padding: 0.3rem; border: 1px solid var(--line); border-radius: 4px; width: 100%; }
   .upload-card input[type="file"] { font-size: 0.7rem; width: 100%; }
   .upload-card .error { color: var(--danger); font-size: 0.7rem; }
+  .hero-control { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.8rem; font-size: 0.8rem; }
+  .hero-control select { font-size: 0.78rem; padding: 0.25rem 0.4rem; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+  .add-slot-panel { margin-top: 1rem; }
+  .add-slot-toggle { font-size: 0.78rem; }
+  .add-slot-form { flex-direction: column; gap: 0.5rem; max-width: 360px; margin-top: 0.6rem; padding: 0.8rem; background: var(--surface); border: 1px dashed var(--line); border-radius: 8px; }
+  .add-slot-form input[type="text"] { font-size: 0.8rem; padding: 0.35rem; border: 1px solid var(--line); border-radius: 4px; width: 100%; }
+  .add-slot-form label { display: flex; align-items: center; font-size: 0.8rem; gap: 0.3rem; }
+  .add-slot-form .error { color: var(--danger); font-size: 0.75rem; }
   #status { position: fixed; bottom: 1rem; right: 1rem; background: #14532d; color: #fff; padding: 0.5rem 0.9rem; border-radius: 6px; font-size: 0.8rem; opacity: 0; transition: opacity 0.2s; z-index: 20; }
   #status.error { background: var(--danger); }
   #status.show { opacity: 1; }
@@ -131,8 +140,72 @@ function renderBoard(board) {
   return el("section", { className: "board", id: "board-" + board.id }, [
     el("h2", { text: board.title }),
     el("div", { className: "meta", text: board.collageType + " \\u00b7 " + board.items.length + " slot(s)" }),
+    renderHeroControl(board),
     slots,
+    renderAddSlotPanel(board),
   ]);
+}
+
+// Finding F3a: lets the reviewer pin which slot anchors the composition
+// instead of always trusting heroFor's ranked auto-pick.
+function renderHeroControl(board) {
+  const hasManualHero = Boolean(board.heroItemId);
+  const select = el("select", { className: "hero-select" });
+  board.items.forEach((item) => {
+    const showDefaultTag = !hasManualHero && item.slotId === board.defaultHeroItemId;
+    select.appendChild(el("option", { value: item.slotId, text: item.slotId + (showDefaultTag ? " (default)" : "") }));
+  });
+  select.value = board.heroItemId || board.defaultHeroItemId;
+
+  select.addEventListener("change", async () => {
+    const boardId = board.id;
+    const slotId = select.value;
+    try {
+      const response = await fetch("/api/set-hero", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ boardId: boardId, slotId: slotId }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Set hero failed");
+      updateBoardInPlan(boardId, data.board);
+      showStatus("Hero item set \\u2014 " + slotId + ".");
+    } catch (error) {
+      showStatus(error.message, true);
+    }
+  });
+
+  const resetButton = el("button", { className: "hero-reset", text: "Reset to default" });
+  resetButton.disabled = !hasManualHero;
+  resetButton.addEventListener("click", async () => {
+    const boardId = board.id;
+    try {
+      const response = await fetch("/api/set-hero", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ boardId: boardId, slotId: null }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Reset hero failed");
+      updateBoardInPlan(boardId, data.board);
+      showStatus("Hero item reset to default for " + boardId + ".");
+    } catch (error) {
+      showStatus(error.message, true);
+    }
+  });
+
+  return el("div", { className: "hero-control" }, [
+    el("label", { text: "Hero item:" }),
+    select,
+    resetButton,
+  ]);
+}
+
+function updateBoardInPlan(boardId, updatedBoard) {
+  const index = plan.boards.findIndex((entry) => entry.id === boardId);
+  plan.boards[index] = updatedBoard;
+  const section = document.getElementById("board-" + boardId);
+  section.replaceWith(renderBoard(updatedBoard));
 }
 
 function renderSlotCard(board, item) {
@@ -143,16 +216,90 @@ function renderSlotCard(board, item) {
     el("div", { className: "name", text: item.name || "(unnamed)" }),
     el("div", { className: "brand", text: item.brand || "" }),
   ]);
+  const meta = item.imageMeta && item.imageMeta[0];
+  if (meta && !meta.error && Math.min(meta.width, meta.height) < 600) {
+    body.appendChild(el("div", { className: "low-res", text: "low-res " + meta.width + "x" + meta.height }));
+  }
   if (item.overriddenAt) {
     body.appendChild(el("div", { className: "overridden", text: "manually changed" }));
     body.appendChild(el("button", { "data-action": "reset", "data-board": board.id, "data-slot": item.slotId, text: "Reset to auto-pick" }));
   }
   const actions = el("div", { className: "actions" }, [
     el("button", { "data-action": "change", "data-board": board.id, "data-slot": item.slotId, text: "Change" }),
+    el("button", { "data-action": "remove-slot", "data-board": board.id, "data-slot": item.slotId, text: "Remove" }),
   ]);
   body.appendChild(actions);
   const card = el("article", { className: "slot-card", "data-board": board.id, "data-slot": item.slotId }, [img, body]);
   return card;
+}
+
+// A collapsed-by-default "+ Add slot" panel at the bottom of each board —
+// creates an entirely new item (not one of the board type's preset slots),
+// requiring an image up front since there's no "auto-pick" to fall back on.
+function renderAddSlotPanel(board) {
+  const toggleButton = el("button", { className: "add-slot-toggle", text: "+ Add slot" });
+  const form = el("div", { className: "add-slot-form" });
+  form.style.display = "none";
+
+  const slotIdInput = el("input", { type: "text", placeholder: "Slot ID, e.g. wall_art (letters/numbers/underscore)" });
+  const roleInput = el("input", { type: "text", placeholder: "Role, e.g. decorative wall art" });
+  const requiredLabel = el("label", {}, [
+    el("input", { type: "checkbox" }),
+    el("span", { text: " Required" }),
+  ]);
+  const requiredCheckbox = requiredLabel.querySelector("input");
+  const nameInput = el("input", { type: "text", placeholder: "Item name" });
+  const brandInput = el("input", { type: "text", placeholder: "Brand (optional)" });
+  const notesInput = el("input", { type: "text", placeholder: "Notes (optional)" });
+  const fileInput = el("input", { type: "file", accept: "image/png,image/jpeg,image/webp" });
+  const errorText = el("div", { className: "error" });
+  const submitButton = el("button", { text: "Add slot" });
+
+  toggleButton.addEventListener("click", () => {
+    form.style.display = form.style.display === "none" ? "flex" : "none";
+  });
+
+  submitButton.addEventListener("click", async () => {
+    const slotId = slotIdInput.value.trim();
+    const role = roleInput.value.trim();
+    const name = nameInput.value.trim();
+    const brand = brandInput.value.trim();
+    const notes = notesInput.value.trim();
+    const file = fileInput.files[0];
+    if (!slotId || !name || !file) { errorText.textContent = "Slot ID, name, and a file are all required."; return; }
+    submitButton.disabled = true;
+    errorText.textContent = "";
+    try {
+      const dataBase64 = await fileToBase64(file);
+      const response = await fetch("/api/add-slot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          boardId: board.id, slotId: slotId, role: role, required: requiredCheckbox.checked,
+          name: name, brand: brand, notes: notes, mimeType: file.type, dataBase64: dataBase64,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Add slot failed");
+      showStatus("Added slot '" + slotId + "'.");
+      await loadPlan();
+    } catch (error) {
+      errorText.textContent = error.message;
+      submitButton.disabled = false;
+    }
+  });
+
+  form.appendChild(el("div", {}, [slotIdInput]));
+  form.appendChild(el("div", {}, [roleInput]));
+  form.appendChild(requiredLabel);
+  form.appendChild(el("div", {}, [nameInput]));
+  form.appendChild(el("div", {}, [brandInput]));
+  form.appendChild(el("div", {}, [notesInput]));
+  form.appendChild(el("div", {}, [fileInput]));
+  form.appendChild(submitButton);
+  form.appendChild(errorText);
+
+  return el("div", { className: "add-slot-panel" }, [toggleButton, form]);
 }
 
 async function openPicker(boardId, slotId) {
@@ -184,9 +331,7 @@ async function openPicker(boardId, slotId) {
     ]));
   });
   if (data.slotKind === "tile") grid.appendChild(renderAddTileCard());
-  if (!data.options.length && data.slotKind !== "tile") {
-    grid.appendChild(el("p", { text: "No candidate items found in this room." }));
-  }
+  else grid.appendChild(renderAddCustomItemCard());
 }
 
 function fileToBase64(file) {
@@ -277,6 +422,53 @@ function renderAddTileCard() {
   ]);
 }
 
+// Row-slot equivalent of "Add a new tile" — a brand-new fixture item that has
+// no Smartsheet row at all, scoped to this board's room.
+function renderAddCustomItemCard() {
+  const nameInput = el("input", { type: "text", placeholder: "Item name" });
+  const brandInput = el("input", { type: "text", placeholder: "Brand (optional)" });
+  const notesInput = el("input", { type: "text", placeholder: "Notes (optional)" });
+  const fileInput = el("input", { type: "file", accept: "image/png,image/jpeg,image/webp" });
+  const errorText = el("div", { className: "error" });
+  const button = el("button", { text: "Add & select" });
+  button.addEventListener("click", async () => {
+    const name = nameInput.value.trim();
+    const brand = brandInput.value.trim();
+    const notes = notesInput.value.trim();
+    const file = fileInput.files[0];
+    if (!name || !file) { errorText.textContent = "Name and a file are required."; return; }
+    const boardId = activeBoardId;
+    const slotId = activeSlotId;
+    button.disabled = true;
+    errorText.textContent = "";
+    try {
+      const dataBase64 = await fileToBase64(file);
+      const response = await fetch("/api/add-custom-item", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ boardId: boardId, slotId: slotId, name: name, brand: brand, notes: notes, mimeType: file.type, dataBase64: dataBase64 }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Upload failed");
+      updateItemInPlan(boardId, data.item);
+      closePicker();
+      showStatus("Added '" + name + "' and selected it.");
+    } catch (error) {
+      errorText.textContent = error.message;
+      button.disabled = false;
+    }
+  });
+  return el("div", { className: "option upload-card" }, [
+    el("div", { className: "label", text: "Add a new item (not in the manifest)" }),
+    nameInput,
+    brandInput,
+    notesInput,
+    fileInput,
+    button,
+    errorText,
+  ]);
+}
+
 function closePicker() {
   document.getElementById("modal-backdrop").style.display = "none";
   document.getElementById("modal").style.display = "none";
@@ -319,6 +511,22 @@ async function resetSlot(boardId, slotId) {
   }
 }
 
+async function removeSlotAction(boardId, slotId) {
+  try {
+    const response = await fetch("/api/remove-slot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ boardId: boardId, slotId: slotId }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Remove failed");
+    showStatus("Removed slot '" + slotId + "'.");
+    await loadPlan();
+  } catch (error) {
+    showStatus(error.message, true);
+  }
+}
+
 function updateItemInPlan(boardId, updatedItem) {
   const board = plan.boards.find((entry) => entry.id === boardId);
   const index = board.items.findIndex((entry) => entry.slotId === updatedItem.slotId);
@@ -332,6 +540,8 @@ document.addEventListener("click", (event) => {
   if (changeBtn) { openPicker(changeBtn.getAttribute("data-board"), changeBtn.getAttribute("data-slot")); return; }
   const resetBtn = event.target.closest('[data-action="reset"]');
   if (resetBtn) { resetSlot(resetBtn.getAttribute("data-board"), resetBtn.getAttribute("data-slot")); return; }
+  const removeBtn = event.target.closest('[data-action="remove-slot"]');
+  if (removeBtn) { removeSlotAction(removeBtn.getAttribute("data-board"), removeBtn.getAttribute("data-slot")); return; }
   const option = event.target.closest(".option");
   if (option) {
     const kind = option.getAttribute("data-kind");

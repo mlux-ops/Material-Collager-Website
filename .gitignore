@@ -73,3 +73,7 @@ public/screenshot.png
 
 # Autoboard's own image overlay for items uploaded via the review UI
 /scripts/autoboard/uploaded-images/
+
+# Autoboard's local library of brand-new (not-in-the-manifest) items added
+# via the review UI's "Add a new item" card
+/scripts/autoboard/custom-items/

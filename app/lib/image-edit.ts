@@ -29,7 +29,10 @@ export type ImageEditRequest = {
   size: string;
   quality: ImageQuality;
   background: "opaque";
-  output_format: "png";
+  output_format: "png" | "jpeg" | "webp";
+  // 0-100; OpenAI applies this only to jpeg/webp and ignores it for png, so
+  // createImageEdit only sends it alongside those two formats.
+  output_compression?: number;
   // Number of candidates to generate in one call (1-10). Input tokens are
   // charged once per request, so n>1 beats n separate calls.
   n?: number;
@@ -101,6 +104,9 @@ export async function createImageEdit(
       form.append("quality", body.quality);
       form.append("background", body.background);
       form.append("output_format", body.output_format);
+      if (body.output_compression !== undefined && (body.output_format === "jpeg" || body.output_format === "webp")) {
+        form.append("output_compression", String(body.output_compression));
+      }
       if (body.n && body.n > 1) form.append("n", String(body.n));
       // GPT Image 2 uses high-fidelity image inputs automatically and rejects input_fidelity.
       for (const reference of body.references) {

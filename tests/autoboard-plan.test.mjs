@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { validateCollageRequest } from "../app/lib/collage.ts";
 import { normalizeRoomLabel, parseCsv, csvObjects, emptyGaps } from "../scripts/autoboard/lib/source.mjs";
-import { assignSlots, boardTypesForRoom, buildBoards, extractBrand } from "../scripts/autoboard/lib/match.mjs";
+import { assignSlots, boardTypesForRoom, buildBoards, extractBrand, extractTier } from "../scripts/autoboard/lib/match.mjs";
 import { boardPayload, boardReferenceFiles, heroFor, DEFAULT_VARIANTS } from "../scripts/autoboard/lib/variants.mjs";
 
 function row(overrides) {
@@ -162,7 +162,10 @@ test("buildBoards injects main_tile and accent_tile from tileAssignments + tileI
   const accentTile = board.items.find((item) => item.slotId === "accent_tile");
   assert.equal(mainTile.name, "Cortar Bone Reed");
   assert.equal(mainTile.images[0], "/fake/WT2.jpg");
-  assert.match(mainTile.notes, /HOLD/);
+  // The schedule sentence is provenance (bookkeeping for the human reviewer),
+  // not a model-facing note — see Finding F4.
+  assert.match(mainTile.provenance, /HOLD/);
+  assert.equal(mainTile.notes, "");
   assert.equal(mainTile.brand, "Elm Surfaces");
   assert.equal(mainTile.required, true);
   assert.equal(accentTile.name, "Clara Caviar");
@@ -276,4 +279,60 @@ test("extractBrand recognizes known manufacturers", () => {
   assert.equal(extractBrand("Brizo Odin Articulating Kitchen Faucet"), "Brizo");
   assert.equal(extractBrand("Miele 24- ADA Panel Ready Dishwasher"), "Miele");
   assert.equal(extractBrand("Generic No-Name Pull"), "");
+});
+
+// Finding F7: Smartsheet item names are typed in every casing under the sun,
+// but the returned brand must always use the manufacturer's own display
+// casing (e.g. "Hansgrohe"), not whatever casing happened to be typed.
+test("extractBrand is case-insensitive and returns canonical display casing", () => {
+  assert.equal(extractBrand("hansgrohe Vivenis Widespread Bathroom Faucet"), "Hansgrohe");
+  assert.equal(extractBrand("HANSGROHE Vivenis Widespread Bathroom Faucet"), "Hansgrohe");
+  assert.equal(extractBrand("Hansgrohe Vivenis Widespread Bathroom Faucet"), "Hansgrohe");
+  assert.equal(extractBrand("grohe essence lavatory faucet"), "GROHE");
+});
+
+test("extractBrand recognizes Emtek door hardware", () => {
+  assert.equal(extractBrand("Emtek Stuttgart Brass Modern Passage Leverset"), "Emtek");
+});
+
+// Finding F6: good/better/best alternates are typed as a prefix on the item
+// name itself, e.g. "-Better- option - Duo Pendant" — that prefix belongs on
+// item.tier, not on the product name shown/sent to the model.
+test("extractTier strips a leading good/better/best marker and records the tier", () => {
+  assert.deepEqual(extractTier("-Better- option - Duo Pendant"), { name: "Duo Pendant", tier: "better" });
+  assert.deepEqual(extractTier("-Good- option - Duo Pendant"), { name: "Duo Pendant", tier: "good" });
+  assert.deepEqual(extractTier("-Best- option - Duo Pendant"), { name: "Duo Pendant", tier: "best" });
+  // No marker: name passes through unchanged, tier is absent (undefined).
+  assert.deepEqual(extractTier("Brizo Odin Lavatory Faucet"), { name: "Brizo Odin Lavatory Faucet", tier: undefined });
+});
+
+test("buildBoards splits the good/better/best marker off item.name into item.tier", () => {
+  const rows = [
+    row({ rowId: "1", itemName: "-Better- option - Duo Pendant", costCode: "26 51 Lighting Fixtures - M" }),
+    row({ rowId: "2", itemName: "Brizo Round Showerhead" }),
+  ];
+  const { boards } = buildBoards(rows, { resolveImages: (rowId) => [`/fake/${rowId}.png`], gaps: emptyGaps() });
+  const board = boards.find((entry) => entry.collageType === "bathroom_fixture_collage");
+  const lightFixture = board.items.find((item) => item.slotId === "light_fixture");
+  assert.equal(lightFixture.name, "Duo Pendant");
+  assert.equal(lightFixture.tier, "better");
+  // an item with no tier marker never gets the key at all
+  const showerHead = board.items.find((item) => item.slotId === "shower_head");
+  assert.equal(showerHead.name, "Brizo Round Showerhead");
+  assert.ok(!("tier" in showerHead));
+});
+
+// Finding F1 regression: a long item name must reach item.name verbatim (the
+// old .slice(0, 80) truncation in match.mjs's board-building path is gone).
+test("buildBoards never truncates a long item name", () => {
+  const longName = "Brizo Odin Single-Handle Widespread Lavatory Faucet With Matching Pop-Up Drain Assembly In Matte Black Finish";
+  assert.ok(longName.length > 80);
+  const rows = [
+    row({ rowId: "1", itemName: longName }),
+    row({ rowId: "2", itemName: "Brizo Round Showerhead" }),
+  ];
+  const { boards } = buildBoards(rows, { resolveImages: (rowId) => [`/fake/${rowId}.png`], gaps: emptyGaps() });
+  const board = boards.find((entry) => entry.collageType === "bathroom_fixture_collage");
+  const faucet = board.items.find((item) => item.slotId === "vanity_faucet");
+  assert.equal(faucet.name, longName);
 });

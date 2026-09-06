@@ -12,6 +12,7 @@ export const COMPOSITIONS = ["editorial", "structured", "catalog"] as const;
 export const DENSITIES = ["airy", "balanced", "layered"] as const;
 export const STYLING_OPTIONS = ["materials_only", "botanical_linen"] as const;
 export const LIGHTING_OPTIONS = ["soft_daylight", "crisp_studio"] as const;
+export const OUTPUT_FORMATS = ["png", "jpeg", "webp"] as const;
 
 export const MAX_REFERENCE_IMAGES = 16;
 export const MAX_REFERENCE_FILE_BYTES = 50 * 1024 * 1024;
@@ -24,6 +25,7 @@ export type Composition = (typeof COMPOSITIONS)[number];
 export type Density = (typeof DENSITIES)[number];
 export type StylingOption = (typeof STYLING_OPTIONS)[number];
 export type LightingOption = (typeof LIGHTING_OPTIONS)[number];
+export type OutputFormat = (typeof OUTPUT_FORMATS)[number];
 
 export type CollageItemInput = {
   id: string;
@@ -61,6 +63,12 @@ export type CollageRequestInput = {
   // as contradictory instructions.
   layoutReferenceMode?: "approved-draft" | "uploaded-collage";
   renderKind?: "draft" | "studio" | "final";
+  // Requested OpenAI output_format for a non-final render (a Final render is
+  // always PNG regardless of this value; see resolvedOutputFormat). Defaults
+  // to "png".
+  outputFormat?: OutputFormat;
+  // Only meaningful for jpeg/webp; OpenAI accepts 0-100 and ignores it for png.
+  outputCompression?: number;
   items: CollageItemInput[];
 };
 
@@ -165,6 +173,14 @@ export function validateCollageRequest(request: CollageRequestInput) {
   if (!LIGHTING_OPTIONS.includes(resolvedLighting(request))) {
     throw new Error("Choose a supported lighting option.");
   }
+  if (request.outputFormat !== undefined && !OUTPUT_FORMATS.includes(request.outputFormat)) {
+    throw new Error("Choose a supported output format.");
+  }
+  if (request.outputCompression !== undefined) {
+    if (!Number.isInteger(request.outputCompression) || request.outputCompression < 0 || request.outputCompression > 100) {
+      throw new Error("Output compression must be a whole number between 0 and 100.");
+    }
+  }
 
   const items = activeItems(request);
   if (!items.length) {
@@ -239,6 +255,15 @@ export function resolvedStyling(request: CollageRequestInput): StylingOption {
 
 export function resolvedLighting(request: CollageRequestInput): LightingOption {
   return request.lighting ?? "soft_daylight";
+}
+
+// Finals are always PNG regardless of what output format was requested: a
+// Final render (whether flagged via renderKind or via outputResolution, since
+// callers can set either) is the archival, library-visible artifact and must
+// not carry lossy compression.
+export function resolvedOutputFormat(request: CollageRequestInput): OutputFormat {
+  if (request.renderKind === "final" || request.outputResolution === "final") return "png";
+  return request.outputFormat ?? "png";
 }
 
 export function resolvedSize(request: CollageRequestInput) {
@@ -325,6 +350,27 @@ export function buildGenerationPrompt(request: CollageRequestInput) {
       ? "Keep the layout master's existing emphasis; do not promote a different item to anchor."
       : "Choose the most visually substantial referenced item as the anchor without diminishing any other requested item.";
 
+  // The four supporting-view bullets only make sense once some item actually
+  // has a supporting view; a single-image-per-item board has nothing for them
+  // to describe, so emitting them anyway is noise the model has to discard.
+  const fidelityBullets = [
+    `- Include every mapped item exactly once as a distinct collage element. The item IDs are the complete object list; nothing outside them earns a place on the canvas.`,
+    ...(supportingTotal > 0
+      ? [
+          `- A supporting view is another photograph of the SAME physical item shown in that item's primary view: the same faucet, the same tile, the same slab, at a different angle, crop, distance, or lighting. It is a guide for constructing that one object, never a second object.`,
+          `- Build each item as one object and read all of its views into it: take identity, color, and finish from the primary view, and use every supporting view to resolve geometry, hidden faces, component count, edge profile, thickness, pattern scale, and any detail the primary view leaves ambiguous. Where they disagree, the primary view decides.`,
+          `- Never place a supporting view on the canvas as its own element: no duplicate, mirrored twin, rotated second copy, alternate colorway, alternate size, inset, exploded part, detail vignette, corner swatch, or spare fragment beside the object it describes.`,
+          `- If two objects on the canvas would trace back to one item ID, that is a defect: keep the one built from the primary view and remove the other.`,
+        ]
+      : []),
+    `- Preserve recognizable product identity, silhouette, component count, proportions, edge profile, hardware geometry, finish temperature, sheen, grain direction, veining, pattern scale, texture, and color.`,
+    `- Remove source backgrounds cleanly, but do not redesign, simplify, mirror, recolor, or substitute the referenced item.`,
+    `- Metadata clarifies identity and role. If metadata and a visible reference appear to conflict, preserve the visible reference and do not invent a compromise.`,
+    `- Do not create generic stand-ins. Do not add a material, fixture, appliance, sample, or placeholder that is absent from the reference map.`,
+    `- Keep each item readable. Overlap may crop only a small nonessential edge; never cover a defining product feature or most of a sample.`,
+    `- Do not repeat an item unless separate mapped item IDs explicitly request it.`,
+  ];
+
   return [
     "GOAL",
     "Create one finished, photorealistic interior-design material collage that feels art-directed, restrained, and publication-ready for a leading architecture and interiors magazine.",
@@ -349,17 +395,7 @@ export function buildGenerationPrompt(request: CollageRequestInput) {
         : "",
     ].filter(Boolean).join(" "),
     "REFERENCE FIDELITY - NON-NEGOTIABLE",
-    `- Include every mapped item exactly once as a distinct collage element. The item IDs are the complete object list; nothing outside them earns a place on the canvas.
-- A supporting view is another photograph of the SAME physical item shown in that item's primary view: the same faucet, the same tile, the same slab, at a different angle, crop, distance, or lighting. It is a guide for constructing that one object, never a second object.
-- Build each item as one object and read all of its views into it: take identity, color, and finish from the primary view, and use every supporting view to resolve geometry, hidden faces, component count, edge profile, thickness, pattern scale, and any detail the primary view leaves ambiguous. Where they disagree, the primary view decides.
-- Never place a supporting view on the canvas as its own element: no duplicate, mirrored twin, rotated second copy, alternate colorway, alternate size, inset, exploded part, detail vignette, corner swatch, or spare fragment beside the object it describes.
-- If two objects on the canvas would trace back to one item ID, that is a defect: keep the one built from the primary view and remove the other.
-- Preserve recognizable product identity, silhouette, component count, proportions, edge profile, hardware geometry, finish temperature, sheen, grain direction, veining, pattern scale, texture, and color.
-- Remove source backgrounds cleanly, but do not redesign, simplify, mirror, recolor, or substitute the referenced item.
-- Metadata clarifies identity and role. If metadata and a visible reference appear to conflict, preserve the visible reference and do not invent a compromise.
-- Do not create generic stand-ins. Do not add a material, fixture, appliance, sample, or placeholder that is absent from the reference map.
-- Keep each item readable. Overlap may crop only a small nonessential edge; never cover a defining product feature or most of a sample.
-- Do not repeat an item unless separate mapped item IDs explicitly request it.`,
+    fidelityBullets.join("\n"),
     "PHOTOGRAPHY AND FINISH",
     `- True overhead camera with corrected perspective; no oblique room scene and no rendered interior.
 - Seamless pure white background (#FFFFFF) with no gray cast, vignette, border, frame, or colored surface.

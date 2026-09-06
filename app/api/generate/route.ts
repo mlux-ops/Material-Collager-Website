@@ -4,8 +4,10 @@ import {
   buildGenerationPrompt,
   buildSummary,
   resolvedOrientation,
+  resolvedOutputFormat,
   resolvedSize,
   type CollageRequestInput,
+  type OutputFormat,
   validateCollageRequest,
 } from "@/app/lib/collage";
 import {
@@ -29,6 +31,12 @@ import {
 import { persistGenerationOutput, type RenderKind } from "@/app/lib/generation-jobs";
 
 export const runtime = "edge";
+
+const OUTPUT_MIME_TYPES: Record<OutputFormat, string> = {
+  png: "image/png",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+};
 
 export async function POST(request: Request) {
   let diagnostics: GenerationDiagnostics | undefined;
@@ -101,6 +109,7 @@ export async function POST(request: Request) {
       mimeType: reference.blob.type,
     }));
     const requestedSize = resolvedSize(payload);
+    const outputFormat = resolvedOutputFormat(payload);
 
     const imageRequest: ImageEditRequest = {
       model: "gpt-image-2",
@@ -109,7 +118,10 @@ export async function POST(request: Request) {
       size: requestedSize,
       quality: payload.quality,
       background: "opaque",
-      output_format: "png",
+      output_format: outputFormat,
+      ...(payload.outputCompression !== undefined && outputFormat !== "png"
+        ? { output_compression: payload.outputCompression }
+        : {}),
     };
     if (diagnosticMode) {
       const counts = [requestedDiagnosticCount];
@@ -124,6 +136,10 @@ export async function POST(request: Request) {
             references: preparedReferences.slice(0, count),
             size: "1024x1024",
             quality: "low",
+            // The diagnostic isolation render is a throwaway debugging aid,
+            // always PNG regardless of what the real render requested.
+            output_format: "png",
+            output_compression: undefined,
           }, diagnostics.attempts, false);
           diagnosticImageBase64 = testResult.data.data?.[0]?.b64_json;
           isolationResults.push({ referenceCount: count, outcome: "succeeded" });
@@ -175,7 +191,7 @@ export async function POST(request: Request) {
     try {
       stored = await persistGenerationOutput({
         imageBase64,
-        filename: safeOutputFilename(payload.outputFilename),
+        filename: safeOutputFilename(payload.outputFilename, outputFormat),
         format: usedStandardFallback ? standardSizeFor(payload) : requestedSize,
         prompt,
         payload: payload as unknown as Record<string, unknown>,
@@ -193,8 +209,8 @@ export async function POST(request: Request) {
       summary: buildSummary(payload),
       prompt,
       imageBase64,
-      mimeType: "image/png",
-      filename: safeOutputFilename(payload.outputFilename),
+      mimeType: OUTPUT_MIME_TYPES[outputFormat],
+      filename: safeOutputFilename(payload.outputFilename, outputFormat),
       usage: imageJson.usage,
       jobId: stored?.id,
       libraryVisible: stored?.libraryVisible ?? false,
@@ -258,8 +274,8 @@ function standardSizeFor(payload: CollageRequestInput) {
   return "1536x1024";
 }
 
-function safeOutputFilename(value?: string) {
-  const raw = value?.trim() || "material-collage.png";
-  const withExtension = raw.toLowerCase().endsWith(".png") ? raw : `${raw}.png`;
-  return withExtension.replace(/[<>:"/\\|?*]+/g, "_");
+function safeOutputFilename(value: string | undefined, format: OutputFormat) {
+  const extension = format === "jpeg" ? "jpg" : format;
+  const raw = (value?.trim() || "material-collage").replace(/\.(png|jpe?g|webp)$/i, "");
+  return `${raw}.${extension}`.replace(/[<>:"/\\|?*]+/g, "_");
 }

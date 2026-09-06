@@ -160,12 +160,12 @@ export async function persistGenerationOutput(input: {
     ? await DB.prepare("SELECT * FROM generation_jobs WHERE id = ? AND expires_at >= ?").bind(input.replaceJobId, Date.now()).first<JobRow>()
     : null;
   const id = existing?.id || crypto.randomUUID();
-  const outputKey = existing?.output_key || `generation-outputs/${id}.png`;
+  const outputKey = existing?.output_key || `generation-outputs/${id}.${outputExtension(input.filename)}`;
   const now = Date.now();
   const title = outputTitle(input.filename, input.collageType);
   // Never persist the caller's OpenAI API key with the job record.
   const payloadJson = JSON.stringify({ ...input.payload, apiKey: undefined });
-  await bucket.put(outputKey, base64Bytes(input.imageBase64), { httpMetadata: { contentType: "image/png" } });
+  await bucket.put(outputKey, base64Bytes(input.imageBase64), { httpMetadata: { contentType: mimeTypeForFilename(input.filename) } });
 
   if (existing) {
     await DB.prepare(`UPDATE generation_jobs SET
@@ -217,6 +217,16 @@ export async function persistGenerationOutput(input: {
   return publicJob(row);
 }
 
+// Attaches an accuracy-review ("QA") result to a previously stored job. Used
+// by /api/qa, which calls this only when the caller supplied a jobId; a
+// missing/expired row is not an error here, the route just reports it unpersisted.
+export async function updateGenerationQa(id: string, qa: unknown): Promise<boolean> {
+  const DB = await ensureJobStorage();
+  const result = await DB.prepare("UPDATE generation_jobs SET qa_json = ?, updated_at = ? WHERE id = ?")
+    .bind(JSON.stringify(qa), Date.now(), id).run();
+  return Boolean(result.meta.changes);
+}
+
 export async function setLibraryVisibility(id: string, visible: boolean) {
   const DB = await ensureJobStorage();
   await DB.prepare(`UPDATE generation_jobs SET library_visible = ?, updated_at = ?
@@ -257,6 +267,28 @@ export function publicJob(row: JobRow): GenerationJob {
     updatedAt: row.updated_at,
     expiresAt: row.expires_at,
   };
+}
+
+// output-format-aware R2 storage: the caller (app/api/generate/route.ts)
+// already resolves the right OpenAI output_format and hands us a filename
+// carrying the matching extension, so the R2 key and content type are
+// inferred from THAT filename rather than a second copy of the format enum.
+// Note this is unrelated to the "format" field elsewhere in this file, which
+// records the render's pixel-size string (e.g. "1536x1024").
+const OUTPUT_MIME_TYPES: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+};
+
+function outputExtension(filename: string) {
+  const match = /\.([a-z0-9]+)$/i.exec(filename);
+  return match ? match[1].toLowerCase() : "png";
+}
+
+function mimeTypeForFilename(filename: string) {
+  return OUTPUT_MIME_TYPES[outputExtension(filename)] || "image/png";
 }
 
 function outputTitle(filename: string, collageType?: string) {

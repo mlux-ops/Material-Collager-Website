@@ -24,10 +24,16 @@ const BOARD_KIND_SLUGS = {
   bathroom_tile_collage: "tile",
 };
 
+// Canonical on-brand display casing. Smartsheet item names mix ALL CAPS, all
+// lower, and Title Case for the same manufacturer, so matching below is
+// case-insensitive — but the string returned always uses the brand's own
+// styling (e.g. "Hansgrohe", not the sheet's literal casing) so prompts don't
+// read like "hansgrohe" sitting next to "Elm Surfaces".
 const KNOWN_BRANDS = [
-  "LG", "Miele", "Brizo", "BLANCO", "InSinkErator", "Kohler", "AXOR", "hansgrohe",
+  "LG", "Miele", "Brizo", "BLANCO", "InSinkErator", "Kohler", "AXOR", "Hansgrohe",
   "GROHE", "TOTO", "Duravit", "Delta", "Westbrass", "Thermador", "Zephyr",
   "Panasonic", "Victoria + Albert", "V+A", "Rohl", "House of Rohl", "Newport Brass",
+  "Emtek",
 ];
 
 // Rows matching any of these never belong on a presentation board, regardless
@@ -120,10 +126,23 @@ function slotMatches(collageType, slotId, row) {
 }
 
 export function extractBrand(itemName) {
+  const lowerName = itemName.toLowerCase();
   for (const brand of KNOWN_BRANDS) {
-    if (itemName.toLowerCase().startsWith(brand.toLowerCase())) return brand;
+    if (lowerName.startsWith(brand.toLowerCase())) return brand;
   }
   return "";
+}
+
+// Smartsheet's good/better/best alternates are typed as a prefix on the item
+// name itself, e.g. "-Better- option - Duo Pendant". That prefix is bookkeeping
+// for the sheet, not part of the product's name, so split it off: the tier
+// (lowercased) goes on item.tier and the rest becomes the actual name.
+const TIER_PREFIX_PATTERN = /^\s*-\s*(Good|Better|Best)\s*-\s*option\s*-\s*/i;
+
+export function extractTier(itemName) {
+  const match = TIER_PREFIX_PATTERN.exec(itemName);
+  if (!match) return { name: itemName, tier: undefined };
+  return { name: itemName.slice(match[0].length), tier: match[1].toLowerCase() };
 }
 
 // Assign a room's rows to a board type's preset slots, in preset order.
@@ -292,17 +311,20 @@ export function buildBoards(rows, options) {
           });
           continue;
         }
-        items.push({
+        const { name, tier } = extractTier(slot.row.itemName);
+        const item = {
           slotId: slot.preset.id,
           role: slot.preset.role,
           required: slot.preset.required,
           rowId: slot.row.rowId,
           sku: slot.row.sku,
-          brand: extractBrand(slot.row.itemName),
-          name: slot.row.itemName.slice(0, 80),
+          brand: extractBrand(name),
+          name,
           notes: slot.row.qty > 1 ? `quantity ${slot.row.qty}` : "",
           images,
-        });
+        };
+        if (tier) item.tier = tier;
+        items.push(item);
       }
 
       if (collageType === "bathroom_fixture_collage") {
@@ -337,7 +359,12 @@ export function buildBoards(rows, options) {
             sku: tile.code,
             brand: "Elm Surfaces",
             name: tile.materialName,
-            notes: "Wieland Selections Book v4 tile schedule — approved direction, quote-pending (release status HOLD). See scripts/autoboard/tile-assignments.json.",
+            notes: "",
+            // Bookkeeping for the human reviewer, not a model-facing instruction —
+            // kept off item.notes so it never reaches buildGenerationPrompt (see
+            // variants.mjs boardPayload, which sends only notes).
+            provenance:
+              "Wieland Selections Book v4 tile schedule — approved direction, quote-pending (release status HOLD). See scripts/autoboard/tile-assignments.json.",
             images: [tile.filePath],
           });
         }

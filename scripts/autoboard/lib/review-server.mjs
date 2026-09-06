@@ -8,11 +8,22 @@ import { readFile, writeFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 
-import { buildRoomIndex, libraryOptionsForSlot, applySelection, resetSelection, roomKeyFor, slotKind } from "./review-core.mjs";
+import { addSlot, buildRoomIndex, libraryOptionsForSlot, applySelection, removeSlot, resetSelection, roomKeyFor, slotKind } from "./review-core.mjs";
 import { makeDiskImageResolver } from "./match.mjs";
 import { indexTileCodes } from "./tiles.mjs";
 import { loadLibraryRows } from "./source.mjs";
-import { decodeUploadedImage, isValidTileCode, saveUploadedRowImage, saveUploadedTileImage, uploadsRootDir, withUploads } from "./uploads.mjs";
+import { heroFor } from "./variants.mjs";
+import {
+  customItemsForRoom,
+  customItemsRootDir,
+  decodeUploadedImage,
+  isValidTileCode,
+  saveCustomItem,
+  saveUploadedRowImage,
+  saveUploadedTileImage,
+  uploadsRootDir,
+  withUploads,
+} from "./uploads.mjs";
 
 const IMAGE_MIME = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp" };
 
@@ -39,7 +50,12 @@ export async function startReviewServer({ runDir, planPath, port, renderReviewPa
   const tileIndex = indexTileCodes(libraryRoot);
   const resolveImages = withUploads(makeDiskImageResolver(libraryRoot));
 
-  const allowedRoots = [path.resolve(libraryRoot), path.resolve(runDir), path.resolve(uploadsRootDir())];
+  const allowedRoots = [
+    path.resolve(libraryRoot),
+    path.resolve(runDir),
+    path.resolve(uploadsRootDir()),
+    path.resolve(customItemsRootDir()),
+  ];
   function isAllowedPath(candidate) {
     const resolved = path.resolve(candidate);
     return allowedRoots.some((root) => resolved === root || resolved.startsWith(root + path.sep));
@@ -59,18 +75,31 @@ export async function startReviewServer({ runDir, planPath, port, renderReviewPa
     return { ...item, kind: slotKind(item.slotId) };
   }
 
+  function customItemsForBoard(board) {
+    return customItemsForRoom(roomKeyFor(board.unitType, board.roomLabel));
+  }
+
+  // Finding F3a: exposes both the manual hero override (if any) and what
+  // heroFor would pick on its own, so the review UI can label the default
+  // and offer a way back to it.
+  function serializeBoard(board) {
+    return {
+      id: board.id,
+      title: board.title,
+      unitType: board.unitType,
+      roomLabel: board.roomLabel,
+      collageType: board.collageType,
+      items: board.items.map(serializeItem),
+      heroItemId: board.heroItemId ?? null,
+      defaultHeroItemId: heroFor(board.collageType, board.items.map((item) => item.slotId)),
+    };
+  }
+
   function serializePlan() {
     return {
       runId: plan.runId,
       source: plan.source,
-      boards: plan.boards.map((board) => ({
-        id: board.id,
-        title: board.title,
-        unitType: board.unitType,
-        roomLabel: board.roomLabel,
-        collageType: board.collageType,
-        items: board.items.map(serializeItem),
-      })),
+      boards: plan.boards.map(serializeBoard),
     };
   }
 
@@ -92,7 +121,10 @@ export async function startReviewServer({ runDir, planPath, port, renderReviewPa
       if (request.method === "GET" && url.pathname === "/api/library") {
         const board = findBoard(url.searchParams.get("boardId"));
         const slotId = url.searchParams.get("slotId");
-        const options = libraryOptionsForSlot({ board, slotId, roomIndex, tileIndex, resolveImages });
+        const options = libraryOptionsForSlot({
+          board, slotId, roomIndex, tileIndex, resolveImages,
+          customItems: customItemsForBoard(board),
+        });
         sendJson(response, 200, { slotKind: slotKind(slotId), options });
         return;
       }
@@ -113,7 +145,10 @@ export async function startReviewServer({ runDir, planPath, port, renderReviewPa
       if (request.method === "POST" && url.pathname === "/api/select") {
         const { boardId, slotId, choice } = JSON.parse(await readBody(request));
         const board = findBoard(boardId);
-        const item = applySelection({ board, slotId, choice, roomIndex, tileIndex, resolveImages });
+        const item = applySelection({
+          board, slotId, choice, roomIndex, tileIndex, resolveImages,
+          customItems: customItemsForBoard(board),
+        });
         await persistPlan();
         sendJson(response, 200, { item: serializeItem(item) });
         return;
@@ -125,6 +160,25 @@ export async function startReviewServer({ runDir, planPath, port, renderReviewPa
         const item = resetSelection({ board, slotId });
         await persistPlan();
         sendJson(response, 200, { item: serializeItem(item) });
+        return;
+      }
+
+      // Finding F3a: manually pin (or clear) which slot anchors the board's
+      // composition. Setting board.overriddenAt is what marks any existing
+      // candidate stale so the next `generate` re-renders it.
+      if (request.method === "POST" && url.pathname === "/api/set-hero") {
+        const { boardId, slotId } = JSON.parse(await readBody(request));
+        const board = findBoard(boardId);
+        if (slotId === null) {
+          delete board.heroItemId;
+        } else if (typeof slotId === "string" && board.items.some((item) => item.slotId === slotId)) {
+          board.heroItemId = slotId;
+        } else {
+          throw Object.assign(new Error(`Board "${boardId}" has no slot "${slotId}".`), { status: 400 });
+        }
+        board.overriddenAt = new Date().toISOString();
+        await persistPlan();
+        sendJson(response, 200, { board: serializeBoard(board) });
         return;
       }
 
@@ -168,6 +222,61 @@ export async function startReviewServer({ runDir, planPath, port, renderReviewPa
         const item = applySelection({ board, slotId, choice: { kind: "tile", code }, roomIndex, tileIndex, resolveImages });
         await persistPlan();
         sendJson(response, 200, { item: serializeItem(item) });
+        return;
+      }
+
+      // Adds a brand-new fixture item that has no Smartsheet row at all — the
+      // row-slot equivalent of "Add a new tile" — into a small local library
+      // scoped to this board's room, then selects it for this slot.
+      if (request.method === "POST" && url.pathname === "/api/add-custom-item") {
+        const { boardId, slotId, name, brand, notes, mimeType, dataBase64 } = JSON.parse(await readBody(request));
+        const board = findBoard(boardId);
+        if (!name || !String(name).trim()) {
+          throw Object.assign(new Error("Item name is required."), { status: 400 });
+        }
+        const { buffer, ext } = decodeUploadedImage({ mimeType, dataBase64 });
+        const saved = await saveCustomItem(
+          roomKeyFor(board.unitType, board.roomLabel),
+          { name: String(name).trim(), brand, notes },
+          buffer,
+          ext,
+        );
+        const item = applySelection({
+          board, slotId, choice: { kind: "row", rowId: `custom:${saved.id}` },
+          roomIndex, tileIndex, resolveImages, customItems: customItemsForBoard(board),
+        });
+        await persistPlan();
+        sendJson(response, 200, { item: serializeItem(item) });
+        return;
+      }
+
+      // Adds an entirely new slot to a board — not one of its preset slots,
+      // just an extra item to render. Requires an image up front (same
+      // storage as add-custom-item); there's no "auto-pick" for a slot that
+      // never existed at plan time.
+      if (request.method === "POST" && url.pathname === "/api/add-slot") {
+        const { boardId, slotId, role, required, name, brand, notes, mimeType, dataBase64 } = JSON.parse(await readBody(request));
+        const board = findBoard(boardId);
+        const { buffer, ext } = decodeUploadedImage({ mimeType, dataBase64 });
+        const saved = await saveCustomItem(
+          roomKeyFor(board.unitType, board.roomLabel),
+          { name: name || slotId, brand, notes },
+          buffer,
+          ext,
+        );
+        const item = addSlot(board, { slotId, role, required, name, brand, notes, imagePath: saved.imagePath });
+        await persistPlan();
+        sendJson(response, 200, { item: serializeItem(item) });
+        return;
+      }
+
+      // Removes a slot entirely (real deletion — see removeSlot's own note).
+      if (request.method === "POST" && url.pathname === "/api/remove-slot") {
+        const { boardId, slotId } = JSON.parse(await readBody(request));
+        const board = findBoard(boardId);
+        removeSlot(board, slotId);
+        await persistPlan();
+        sendJson(response, 200, { ok: true });
         return;
       }
 

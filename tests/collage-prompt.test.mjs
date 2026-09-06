@@ -33,8 +33,9 @@ test("a single-image item's label gets no primary/supporting split", () => {
   const prompt = buildGenerationPrompt(request({
     items: [{ id: "tile", role: "wall tile", imageKeys: ["d.png"] }],
   }));
-  // The standing fidelity rules always discuss supporting views; only the
-  // item's own map line must stay free of a split it doesn't have.
+  // This board's other item still has a supporting view, so the standing
+  // fidelity rules still discuss them; only the single-image item's own map
+  // line must stay free of a split it doesn't have.
   const label = prompt.split("\n").find((line) => line.includes('-> item "tile"'));
 
   assert.equal(label, 'Image 1 -> item "tile" (role: wall tile)');
@@ -73,4 +74,30 @@ test("the fidelity rules forbid rendering a supporting view as its own element",
   assert.match(prompt, /Never place a supporting view on the canvas as its own element/);
   assert.match(prompt, /two objects on the canvas would trace back to one item ID/);
   assert.match(prompt, /Where they disagree, the primary view decides/);
+});
+
+// F5: the four supporting-view fidelity bullets describe a concept
+// ("supporting view") that does not exist when every item has exactly one
+// reference image. Emitting them anyway is confusing noise for the model.
+test("a board with exactly one image per item never mentions supporting views", () => {
+  const prompt = buildGenerationPrompt(request({
+    items: [
+      { id: "faucet", role: "vanity faucet", imageKeys: ["a.png"] },
+      { id: "tile", role: "wall tile", imageKeys: ["b.png"] },
+    ],
+  }));
+
+  assert.doesNotMatch(prompt, /supporting view/i);
+});
+
+test("a board where one item has two images still states the supporting-view rules and count", () => {
+  const prompt = buildGenerationPrompt(request({
+    items: [
+      { id: "faucet", role: "vanity faucet", imageKeys: ["a.png", "b.png"] },
+      { id: "tile", role: "wall tile", imageKeys: ["c.png"] },
+    ],
+  }));
+
+  assert.match(prompt, /A supporting view is another photograph of the SAME physical item/);
+  assert.match(prompt, /1 of the 3 uploaded product images is a supporting view that add no object of their own/);
 });

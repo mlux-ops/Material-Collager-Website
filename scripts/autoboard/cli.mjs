@@ -33,6 +33,10 @@ import { boardPayload, boardReferenceFiles, variantsFromCount } from "./lib/vari
 import { uploadFileToOpenAI } from "./lib/openai-upload.mjs";
 import { startReviewServer } from "./lib/review-server.mjs";
 import { renderReviewPage } from "./lib/review-page.mjs";
+import { isStaleCandidate } from "./lib/review-core.mjs";
+import { prepareReferenceForUpload } from "./lib/transport.mjs";
+import { buildQaRequest, formatQaLine, runQa } from "./lib/qa-client.mjs";
+import { annotateReferenceMeta } from "./lib/image-meta.mjs";
 import {
   applyNoteOverrides,
   notesFilePath,
@@ -60,28 +64,87 @@ async function loadTileAssignments() {
   }
 }
 
-const MIME_BY_EXTENSION = {
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".png": "image/png",
-  ".webp": "image/webp",
-  ".gif": "image/gif",
-  ".bmp": "image/bmp",
-  ".tif": "image/tiff",
-  ".tiff": "image/tiff",
-};
+// Finding F12: the app's response carries the real output format (mimeType),
+// so the CLI derives a candidate's file extension from THAT rather than
+// assuming .png — outputFormat/outputCompression below can make it jpeg/webp.
+const EXTENSION_BY_MIME = { "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp" };
+function extensionForMime(mimeType) {
+  return EXTENSION_BY_MIME[mimeType] ?? ".png";
+}
+
+const DRAFT_RESOLUTIONS = new Set(["standard", "studio"]);
+// Standing rule (user preference, 2026-08-30): drafts render at the app's
+// "standard" canvas (1536x1024) by default — cheaper and faster than the
+// old "studio" (2048x1360) default, which stays one flag away.
+function resolveDraftResolution(values) {
+  const resolution = values.resolution ?? "standard";
+  if (!DRAFT_RESOLUTIONS.has(resolution)) {
+    throw new Error(`--resolution must be "standard" or "studio" (got "${resolution}").`);
+  }
+  return resolution;
+}
+
+const OUTPUT_FORMATS = new Set(["png", "jpeg", "webp"]);
+// Validated once up front (so --dry-run catches a bad flag without ever
+// reaching the network), then applied to each payload built in the loop.
+// variants.mjs's boardPayload isn't ours to extend, so outputFormat/
+// outputCompression are set directly on the payload it returns instead.
+function resolveFormatOptions(values) {
+  const options = {};
+  if (values.format !== undefined) {
+    if (!OUTPUT_FORMATS.has(values.format)) {
+      throw new Error(`--format must be one of png|jpeg|webp (got "${values.format}").`);
+    }
+    options.outputFormat = values.format;
+  }
+  if (values.compression !== undefined) {
+    const compression = Number(values.compression);
+    if (!Number.isInteger(compression) || compression < 0 || compression > 100) {
+      throw new Error(`--compression must be an integer between 0 and 100 (got "${values.compression}").`);
+    }
+    options.outputCompression = compression;
+  }
+  return options;
+}
+
+function resizeNote(count) {
+  return count ? ` (${count} ref${count === 1 ? "" : "s"} resized)` : "";
+}
 
 function usage() {
   console.log(`Usage:
   autoboard plan     [--offline] [--unit <name>] [--room <name>] [--variants <n>]
                      [--library-root <path>] [--images-per-item <n>] [--min-slots <n>]
   autoboard generate --run <run-id> [--dry-run] [--boards <id,id>] [--quality <q>]
-                     [--base-url <url>] [--force]
+                     [--resolution standard|studio] [--format png|jpeg|webp]
+                     [--compression <0-100>] [--base-url <url>] [--force]
+                     [--no-qa] [--qa-model <name>]
+                     Drafts render at "standard" (1536x1024) by default; pass
+                     --resolution studio for the old 2048x1360 draft canvas.
+                     After each saved candidate, calls the app's /api/qa
+                     endpoint for an automated accuracy check against its
+                     reference photos (never fails the render — pass --no-qa
+                     to skip it, or --qa-model to request a specific model).
   autoboard redraft  --run <run-id> <variantId> [<variantId>...] [--quality <q>]
-                     [--base-url <url>]
+                     [--resolution standard|studio] [--format png|jpeg|webp]
+                     [--compression <0-100>] [--base-url <url>]
+                     [--no-qa] [--qa-model <name>]
                      Applies that board's notes.json (edit it after reviewing a draft)
                      and re-renders at draft quality so you can review the effect
                      before anything reaches final quality or the Library.
+                     Also runs the automated QA accuracy check (see generate).
+  autoboard confirm  --run <run-id> <variantId> [<variantId>...] [--quality <q>]
+                     [--resolution standard|studio] [--format png|jpeg|webp]
+                     [--compression <0-100>] [--base-url <url>] [--dry-run]
+                     [--no-qa] [--qa-model <name>]
+                     One ~$0.04 medium render of the picked variant before the
+                     high-quality final — reuses the approved-draft layout
+                     reference and notes.json exactly like redraft, but (unlike
+                     redraft) runs even when notes.json is unchanged, and
+                     defaults to quality "medium" / resolution "standard".
+                     Records candidate.confirmedAt; finalize then picks up
+                     whatever revision this produced. Also runs the automated
+                     QA accuracy check (see generate).
   autoboard finalize --run <run-id> <variantId> [<variantId>...] [--quality <q>]
                      [--base-url <url>]
                      Refuses to run if notes.json has edits that were never
@@ -290,6 +353,11 @@ async function commandPlan(values) {
     tileIndex,
   });
 
+  // Finding F2a: flag (never exclude) reference photos below a usable
+  // resolution, right after boards are built so plan.json/gaps.md both
+  // reflect it.
+  await annotateReferenceMeta(boards, gaps);
+
   const variants = variantsFromCount(values.variants);
 
   // Fail-early precision check: every board must produce a payload the app's
@@ -367,6 +435,8 @@ function gapsMarkdown(runId, source, gaps) {
       `- ${gap.unitType} / ${gap.roomLabel} / ${gap.collageType} / ${gap.slotId}: ${gap.reason}`],
     ["Library items not mapped to any slot", gaps.unmappedItems, (gap) =>
       `- ${gap.unitType} / ${gap.roomLabel}: ${gap.itemName} (row ${gap.rowId}, ${gap.costCode})`],
+    ["Low-resolution references (flagged, not excluded)", gaps.lowResolutionReferences ?? [], (gap) =>
+      `- ${gap.unitType} / ${gap.roomLabel} / ${gap.collageType} / ${gap.slotId}: ${gap.itemName} — ${gap.width}x${gap.height} (${gap.path})`],
   ];
   for (const [title, list, formatter] of sections) {
     lines.push(`## ${title} (${list.length})`, "");
@@ -387,10 +457,18 @@ function gapsMarkdown(runId, source, gaps) {
 async function postGeneration(baseUrl, payload, files) {
   const form = new FormData();
   form.append("payload", JSON.stringify(payload));
+  // Finding F2b: library photos run 8 KB-3.7 MB / up to 4000 px, while the
+  // app's own browser upload path already caps the long edge at 2048 — bring
+  // this path to parity instead of shipping raw bytes.
+  let resizedReferenceCount = 0;
   for (const file of files) {
-    const bytes = await readFile(file.path);
-    const mime = MIME_BY_EXTENSION[path.extname(file.path).toLowerCase()] ?? "application/octet-stream";
-    form.append("image[]", new Blob([bytes], { type: mime }), file.name);
+    const prepared = await prepareReferenceForUpload(file.path);
+    if (prepared.resized) resizedReferenceCount++;
+    // Only the extension may change (see transport.mjs) — the caller's
+    // "slotId--basename" stem is preserved.
+    const stem = file.name.slice(0, file.name.length - path.extname(file.name).length);
+    const uploadName = `${stem}${path.extname(prepared.filename)}`;
+    form.append("image[]", new Blob([prepared.bytes], { type: prepared.mime }), uploadName);
   }
   const response = await fetch(`${baseUrl}/api/generate`, {
     method: "POST",
@@ -417,6 +495,7 @@ async function postGeneration(baseUrl, payload, files) {
       status: response.status,
     });
   }
+  json.resizedReferenceCount = resizedReferenceCount;
   return json;
 }
 
@@ -432,6 +511,35 @@ async function postWithRetry(baseUrl, payload, files) {
   }
 }
 
+// QA (see lib/qa-client.mjs) — after a candidate is saved, asks the app's
+// /api/qa endpoint how well the render matches its reference photos. Must
+// NEVER fail or slow-fail a render: any error at all — including a 404
+// because the route isn't deployed yet, a network error, or a non-JSON
+// response — is caught here, reported once per run via `qaState.disabled`,
+// and QA is skipped (silently) for the rest of that command's run.
+async function runQaForCandidate({ baseUrl, values, payload, files, savedPath, jobId, qaState }) {
+  if (values["no-qa"] || qaState.disabled) return null;
+  try {
+    const request = await buildQaRequest({ payload, referenceFiles: files, outputPath: savedPath, jobId });
+    if (values["qa-model"]) request.model = values["qa-model"];
+    const { qa } = await runQa(baseUrl, activeAccessHeaders, request);
+    console.log(`    ${formatQaLine(qa)}`);
+    return {
+      model: qa.model,
+      checkedAt: qa.checkedAt,
+      flagCount: qa.flagCount,
+      summary: qa.summary,
+      items: qa.items,
+      extraObjects: qa.extraObjects,
+    };
+  } catch (error) {
+    qaState.disabled = true;
+    const detail = error.status !== undefined ? `HTTP ${error.status}` : error.message;
+    console.log(`    QA unavailable (${detail}) — renders saved without accuracy review`);
+    return null;
+  }
+}
+
 async function commandGenerate(values) {
   if (!values.run) throw new Error("Pass --run <run-id> (from a previous `plan`).");
   const runDir = runDirFor(values.run);
@@ -439,7 +547,15 @@ async function commandGenerate(values) {
   const resultsPath = path.join(runDir, "results.json");
   const results = await readJson(resultsPath, { candidates: {}, finals: {} });
   const baseUrl = (values["base-url"] ?? "http://localhost:3000").replace(/\/+$/, "");
-  const quality = values.quality ?? "medium";
+  // Standing rule (user preference, 2026-08-30): every draft render uses the
+  // cheapest quality tier by default. Only finalize/batch-finalize stay at
+  // high quality, since those are the actual deliverable.
+  const quality = values.quality ?? "low";
+  // Finding F12: drafts render at the app's "standard" canvas (1536x1024) by
+  // default now, not the pricier "studio" (2048x1360) — --resolution studio
+  // restores the old behavior.
+  const outputResolution = resolveDraftResolution(values);
+  const formatOptions = resolveFormatOptions(values);
   const apiKey = loadOpenAIKey();
 
   const selectedIds = values.boards
@@ -451,13 +567,19 @@ async function commandGenerate(values) {
     ? plan.variants.slice(0, Math.max(1, Number(values.variants) || plan.variants.length))
     : plan.variants;
 
+  // A board's items can change after a candidate was rendered — most often
+  // via the review UI swapping a slot's image directly in plan.json. Skip
+  // only when the candidate is BOTH ok and at least as new as the board's
+  // last edit; otherwise it's stale and needs a fresh render even without
+  // --force, since the existing PNG no longer reflects what's selected.
   const work = [];
   for (const board of boards) {
     for (const variant of variants) {
       const variantId = `${board.id}--${variant.key}`;
       const existing = results.candidates[variantId];
-      if (existing?.status === "ok" && !values.force) continue;
-      work.push({ board, variant, variantId });
+      const isStale = isStaleCandidate(board, existing);
+      if (existing?.status === "ok" && !values.force && !isStale) continue;
+      work.push({ board, variant, variantId, stale: isStale && !values.force });
     }
   }
 
@@ -465,12 +587,16 @@ async function commandGenerate(values) {
     console.log(`DRY RUN — ${work.length} render call(s) would be made against ${baseUrl}:`);
     for (const entry of work) {
       const referenceCount = boardReferenceFiles(entry.board).length;
+      const reason = entry.stale ? ", STALE — a slot changed since this was last drafted" : "";
       console.log(
-        `  ${entry.variantId}  (${entry.board.items.length} items, ${referenceCount} reference image(s), quality ${quality})`,
+        `  ${entry.variantId}  (${entry.board.items.length} items, ${referenceCount} reference image(s), quality ${quality}, resolution ${outputResolution}${reason})`,
       );
     }
     const skipped = boards.length * plan.variants.length - work.length;
-    if (skipped) console.log(`  (${skipped} already completed; use --force to re-render)`);
+    if (skipped) console.log(`  (${skipped} already completed and unchanged; use --force to re-render anyway)`);
+    if (!values["no-qa"]) {
+      console.log(`  QA: would run against ${baseUrl}/api/qa${values["qa-model"] ? ` (model ${values["qa-model"]})` : ""}`);
+    }
     return;
   }
 
@@ -478,22 +604,25 @@ async function commandGenerate(values) {
   await waitForServer(baseUrl);
   let failures = 0;
   const scaffoldedNotes = new Set();
-  for (const { board, variant, variantId } of work) {
-    const payload = boardPayload(board, variant, { quality, apiKey });
+  const qaState = { disabled: false };
+  for (const { board, variant, variantId, stale } of work) {
+    const payload = boardPayload(board, variant, { quality, apiKey, outputResolution });
+    Object.assign(payload, formatOptions);
     const files = boardReferenceFiles(board);
-    process.stdout.write(`  ${variantId} ... `);
+    process.stdout.write(`  ${variantId} ${stale ? "(stale, re-rendering) " : ""}... `);
     try {
       validateCollageRequest(payload);
       const startedAt = Date.now();
       const json = await postWithRetry(baseUrl, payload, files);
       const boardDir = path.join(runDir, "boards", board.id);
       mkdirSync(boardDir, { recursive: true });
-      const savedPath = path.join(boardDir, `${variant.key}.png`);
+      const savedPath = path.join(boardDir, `${variant.key}${extensionForMime(json.mimeType)}`);
       await writeFile(savedPath, Buffer.from(json.imageBase64, "base64"));
       const notesPath = scaffoldNotesFile(runDir, board);
       results.candidates[variantId] = {
         status: "ok",
         savedPath,
+        mimeType: json.mimeType ?? "image/png",
         jobId: json.jobId ?? null,
         renderKind: json.renderKind,
         notice: json.notice ?? null,
@@ -503,7 +632,10 @@ async function commandGenerate(values) {
         completedAt: new Date().toISOString(),
         durationMs: Date.now() - startedAt,
       };
-      console.log(`ok (${Math.round((Date.now() - startedAt) / 1000)}s)`);
+      console.log(`ok (${Math.round((Date.now() - startedAt) / 1000)}s)${resizeNote(json.resizedReferenceCount)}`);
+      results.candidates[variantId].qa = await runQaForCandidate({
+        baseUrl, values, payload, files, savedPath, jobId: json.jobId, qaState,
+      });
       if (!scaffoldedNotes.has(board.id)) {
         scaffoldedNotes.add(board.id);
         console.log(`    notes: ${notesPath}`);
@@ -531,6 +663,30 @@ async function commandGenerate(values) {
   if (failures) process.exitCode = 1;
 }
 
+// Renders candidate.qa (see lib/qa-client.mjs / runQaForCandidate) as a
+// compact block under a card: a flagCount badge, the model's summary, and a
+// bulleted list of per-item issues plus anything extra it spotted that isn't
+// in the reference set. Every piece of model-authored text goes through
+// escapeHtml — qa.summary and item.issues/extraObjects are LLM output, not
+// trusted markup.
+function qaHtml(qa) {
+  if (!qa) return "";
+  const clean = !qa.flagCount;
+  const badge = clean
+    ? `<span class="qa-badge qa-clean">QA clean</span>`
+    : `<span class="qa-badge qa-flagged">QA: ${qa.flagCount} flag${qa.flagCount === 1 ? "" : "s"}</span>`;
+  const bullets = [];
+  for (const item of qa.items ?? []) {
+    for (const issue of item.issues ?? []) bullets.push(`${item.id}: ${issue}`);
+  }
+  for (const extra of qa.extraObjects ?? []) bullets.push(`extra: ${extra}`);
+  const list = bullets.length
+    ? `<ul class="qa-list">${bullets.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
+    : "";
+  const summary = qa.summary ? `<div class="qa-summary">${escapeHtml(qa.summary)}</div>` : "";
+  return `<div class="qa">${badge}${summary}${list}</div>`;
+}
+
 function reviewHtml(plan, results) {
   const groups = [];
   for (const board of plan.boards) {
@@ -541,8 +697,9 @@ function reviewHtml(plan, results) {
       if (result?.status !== "ok") continue;
       const finalized = results.finals?.[variantId];
       // The live image is whatever revision was last drafted, not necessarily
-      // the original "<key>.png" — a redraft overwrites savedPath with a
-      // "<key>-r<N>.png" file.
+      // the original "<key>.<ext>" — a redraft/confirm overwrites savedPath
+      // with a "<key>-r<N>.<ext>" file, and the extension itself tracks
+      // whatever format that render actually came back as (see mimeType).
       const imageSrc = path.relative(path.join(RUNS_ROOT, plan.runId), result.savedPath).replaceAll("\\", "/");
       const revision = result.revision ?? 1;
       const noteEntries = Object.entries(result.appliedNotes ?? {});
@@ -557,6 +714,7 @@ function reviewHtml(plan, results) {
           ${revision > 1 ? `<span class="rev">revision ${revision}</span>` : ""}
           ${finalized ? `<span class="final">FINALIZED (job ${escapeHtml(finalized.jobId ?? "?")})</span>` : ""}
           ${notesLine}
+          ${qaHtml(result.qa)}
           <code>Edit notes.json, then: npm run autoboard -- redraft --run ${escapeHtml(plan.runId)} ${escapeHtml(variantId)}</code>
           <code>npm run autoboard -- finalize --run ${escapeHtml(plan.runId)} ${escapeHtml(variantId)}</code>
         </figcaption>
@@ -588,6 +746,12 @@ function reviewHtml(plan, results) {
   .final { display: inline-block; margin-left: 0.5rem; padding: 0.1rem 0.4rem; background: #14532d; color: #fff; border-radius: 4px; font-size: 0.7rem; }
   .rev { display: inline-block; margin-left: 0.5rem; padding: 0.1rem 0.4rem; background: #7c4a03; color: #fff; border-radius: 4px; font-size: 0.7rem; }
   .notes { margin-top: 0.4rem; padding: 0.4rem; background: #fff8e6; border-radius: 4px; font-size: 0.78rem; }
+  .qa { margin-top: 0.4rem; font-size: 0.78rem; }
+  .qa-badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.7rem; color: #fff; }
+  .qa-badge.qa-clean { background: #14532d; }
+  .qa-badge.qa-flagged { background: #92400e; }
+  .qa-summary { margin-top: 0.3rem; color: #444; }
+  .qa-list { margin: 0.3rem 0 0; padding-left: 1.1rem; color: #555; }
   details { margin: 0.5rem 0 1rem; font-size: 0.85rem; color: #555; }
 </style>
 </head>
@@ -615,9 +779,17 @@ async function commandRedraft(values, variantIds) {
   const resultsPath = path.join(runDir, "results.json");
   const results = await readJson(resultsPath, { candidates: {}, finals: {} });
   const baseUrl = (values["base-url"] ?? "http://localhost:3000").replace(/\/+$/, "");
-  const quality = values.quality ?? "medium";
+  // Standing rule (user preference, 2026-08-30): every draft render uses the
+  // cheapest quality tier by default. Only finalize/batch-finalize stay at
+  // high quality, since those are the actual deliverable.
+  const quality = values.quality ?? "low";
+  // Finding F12: drafts render at "standard" (1536x1024) by default now, not
+  // "studio" (2048x1360) — --resolution studio restores the old behavior.
+  const outputResolution = resolveDraftResolution(values);
+  const formatOptions = resolveFormatOptions(values);
   const apiKey = loadOpenAIKey();
   await waitForServer(baseUrl);
+  const qaState = { disabled: false };
 
   for (const variantId of variantIds) {
     const separator = variantId.lastIndexOf("--");
@@ -650,23 +822,26 @@ async function commandRedraft(values, variantIds) {
 
     const payload = boardPayload(boardForDraft, variant, {
       quality,
-      outputResolution: "studio",
+      outputResolution,
       renderKind: "studio",
       layoutReference: true,
       apiKey,
     });
+    Object.assign(payload, formatOptions);
     validateCollageRequest(payload);
-    const files = [{ path: candidate.savedPath, name: "approved-draft.png" }, ...boardReferenceFiles(boardForDraft)];
+    const referenceFiles = boardReferenceFiles(boardForDraft);
+    const files = [{ path: candidate.savedPath, name: "approved-draft.png" }, ...referenceFiles];
 
     process.stdout.write(`  redrafting ${variantId} (notes: [${appliedSlotIds.join(", ") || "none"}]) ... `);
     const startedAt = Date.now();
     const json = await postWithRetry(baseUrl, payload, files);
     const nextRevision = (candidate.revision ?? 1) + 1;
-    const savedPath = path.join(runDir, "boards", boardId, `${variant.key}-r${nextRevision}.png`);
+    const savedPath = path.join(runDir, "boards", boardId, `${variant.key}-r${nextRevision}${extensionForMime(json.mimeType)}`);
     await writeFile(savedPath, Buffer.from(json.imageBase64, "base64"));
     results.candidates[variantId] = {
       ...candidate,
       savedPath,
+      mimeType: json.mimeType ?? "image/png",
       jobId: json.jobId ?? null,
       renderKind: json.renderKind,
       notice: json.notice ?? null,
@@ -675,13 +850,145 @@ async function commandRedraft(values, variantIds) {
       completedAt: new Date().toISOString(),
       durationMs: Date.now() - startedAt,
     };
+    console.log(`ok (${Math.round((Date.now() - startedAt) / 1000)}s)${resizeNote(json.resizedReferenceCount)}, now revision ${nextRevision}`);
+    // QA compares against the item's own reference photos, not the approved-
+    // draft layout reference prepended to `files` above — so it gets the
+    // plain per-item file list (referenceFiles), same as generate's `files`.
+    results.candidates[variantId].qa = await runQaForCandidate({
+      baseUrl, values, payload, files: referenceFiles, savedPath, jobId: json.jobId, qaState,
+    });
     await writeFile(resultsPath, JSON.stringify(results, null, 2), "utf8");
-    console.log(`ok (${Math.round((Date.now() - startedAt) / 1000)}s), now revision ${nextRevision}`);
   }
 
   const reviewPath = path.join(runDir, "review.html");
   await writeFile(reviewPath, reviewHtml(plan, results), "utf8");
   console.log(`\nReview the redraft(s) before finalizing: ${path.resolve(reviewPath)}`);
+}
+
+// ---------------------------------------------------------------------------
+// confirm — finding F8: one ~$0.04 medium render of the picked variant before
+// the high-quality final, to lock in composition at a better tier. Reuses
+// exactly what redraft does to attach the approved draft as Image 1 and
+// apply the board's notes.json, but — unlike redraft — never refuses or
+// skips when notes.json is unchanged; confirming a composition that's
+// already right (no notes edits at all) is the common case, not an error.
+// ---------------------------------------------------------------------------
+
+async function commandConfirm(values, variantIds) {
+  if (!values.run) throw new Error("Pass --run <run-id>.");
+  if (!variantIds.length) throw new Error("Pass at least one variantId (e.g. penthouse-kitchen-material--A).");
+  const runDir = runDirFor(values.run);
+  const plan = await readJson(path.join(runDir, "plan.json"));
+  const resultsPath = path.join(runDir, "results.json");
+  const results = await readJson(resultsPath, { candidates: {}, finals: {} });
+  const baseUrl = (values["base-url"] ?? "http://localhost:3000").replace(/\/+$/, "");
+  // Unlike a draft's "low", confirm defaults to "medium" — a step up to lock
+  // composition in before paying for the high-quality final.
+  const quality = values.quality ?? "medium";
+  const outputResolution = resolveDraftResolution(values);
+  const formatOptions = resolveFormatOptions(values);
+  const apiKey = loadOpenAIKey();
+
+  // Resolved up front so --dry-run needs no network call and reports exactly
+  // what a real run would do.
+  const jobs = [];
+  for (const variantId of variantIds) {
+    const separator = variantId.lastIndexOf("--");
+    if (separator === -1) throw new Error(`"${variantId}" is not a valid variantId (expected <boardId>--<variantKey>).`);
+    const boardId = variantId.slice(0, separator);
+    const variantKey = variantId.slice(separator + 2);
+    const board = plan.boards.find((entry) => entry.id === boardId);
+    const variant = plan.variants.find((entry) => entry.key === variantKey);
+    if (!board || !variant) throw new Error(`"${variantId}" does not match any board/variant in run ${plan.runId}.`);
+    const candidate = results.candidates[variantId];
+    if (candidate?.status !== "ok" || !existsSync(candidate.savedPath)) {
+      throw new Error(`Candidate ${variantId} has no rendered draft yet. Run \`generate\` first.`);
+    }
+
+    const overrides = readNoteOverrides(runDir, boardId);
+    const knownSlotIds = new Set(board.items.map((item) => item.slotId));
+    const unknownSlotIds = [...overrides.keys()].filter((slotId) => !knownSlotIds.has(slotId));
+    if (unknownSlotIds.length) {
+      throw new Error(
+        `${notesFilePath(runDir, boardId)} has a note for unknown slot(s) [${unknownSlotIds.join(", ")}]. ` +
+          `This board's slots are: [${[...knownSlotIds].join(", ")}].`,
+      );
+    }
+    // No overridesEqual gate here (unlike redraft) — confirm's whole purpose
+    // is locking in a tier bump, which is worth doing even with zero notes
+    // changes since the last draft.
+    const { items: notedItems, appliedSlotIds } = applyNoteOverrides(board.items, overrides);
+    const boardForDraft = { ...board, items: notedItems };
+    jobs.push({ variantId, boardId, variant, candidate, boardForDraft, overrides, appliedSlotIds });
+  }
+
+  if (values["dry-run"]) {
+    console.log(`DRY RUN — ${jobs.length} confirm render(s) would be made against ${baseUrl} at quality "${quality}", resolution "${outputResolution}":`);
+    for (const job of jobs) {
+      const referenceCount = boardReferenceFiles(job.boardForDraft).length + 1; // +1 for the approved draft as Image 1
+      const nextRevision = (job.candidate.revision ?? 1) + 1;
+      console.log(
+        `  ${job.variantId}  (revision ${job.candidate.revision ?? 1} -> ${nextRevision}, ${referenceCount} reference image(s), notes: [${job.appliedSlotIds.join(", ") || "none"}])`,
+      );
+    }
+    if (!values["no-qa"]) {
+      console.log(`  QA: would run against ${baseUrl}/api/qa${values["qa-model"] ? ` (model ${values["qa-model"]})` : ""}`);
+    }
+    return;
+  }
+
+  console.log(`Confirming ${jobs.length} candidate(s) against ${baseUrl} at quality "${quality}"...`);
+  await waitForServer(baseUrl);
+  const qaState = { disabled: false };
+
+  for (const job of jobs) {
+    const { variantId, boardId, variant, candidate, boardForDraft, overrides, appliedSlotIds } = job;
+    const payload = boardPayload(boardForDraft, variant, {
+      quality,
+      outputResolution,
+      renderKind: "studio",
+      layoutReference: true,
+      apiKey,
+    });
+    Object.assign(payload, formatOptions);
+    validateCollageRequest(payload);
+    const referenceFiles = boardReferenceFiles(boardForDraft);
+    const files = [{ path: candidate.savedPath, name: "approved-draft.png" }, ...referenceFiles];
+
+    process.stdout.write(`  confirming ${variantId} at quality "${quality}" (notes: [${appliedSlotIds.join(", ") || "none"}]) ... `);
+    const startedAt = Date.now();
+    const json = await postWithRetry(baseUrl, payload, files);
+    const nextRevision = (candidate.revision ?? 1) + 1;
+    const savedPath = path.join(runDir, "boards", boardId, `${variant.key}-r${nextRevision}${extensionForMime(json.mimeType)}`);
+    await writeFile(savedPath, Buffer.from(json.imageBase64, "base64"));
+    results.candidates[variantId] = {
+      ...candidate,
+      savedPath,
+      mimeType: json.mimeType ?? "image/png",
+      jobId: json.jobId ?? null,
+      renderKind: json.renderKind,
+      notice: json.notice ?? null,
+      revision: nextRevision,
+      appliedNotes: overridesToObject(overrides),
+      confirmedAt: new Date().toISOString(),
+      quality,
+      completedAt: new Date().toISOString(),
+      durationMs: Date.now() - startedAt,
+    };
+    console.log(`ok (${Math.round((Date.now() - startedAt) / 1000)}s)${resizeNote(json.resizedReferenceCount)}, now revision ${nextRevision}`);
+    // Same reasoning as redraft: QA gets the plain per-item reference files,
+    // not `files` (which has the approved-draft layout reference prepended).
+    results.candidates[variantId].qa = await runQaForCandidate({
+      baseUrl, values, payload, files: referenceFiles, savedPath, jobId: json.jobId, qaState,
+    });
+    await writeFile(resultsPath, JSON.stringify(results, null, 2), "utf8");
+  }
+
+  const reviewPath = path.join(runDir, "review.html");
+  await writeFile(reviewPath, reviewHtml(plan, results), "utf8");
+  console.log(
+    `\nConfirmed ${jobs.length} candidate(s) at quality "${quality}". Finalize when ready: npm run autoboard -- finalize --run ${plan.runId} <variantId> [...]`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -701,7 +1008,7 @@ function resolveApprovedBoard(plan, runDir, results, variantId) {
   if (!board || !variant) throw new Error(`"${variantId}" does not match any board/variant in run ${plan.runId}.`);
   const candidate = results.candidates[variantId];
   if (candidate?.status !== "ok" || !existsSync(candidate.savedPath)) {
-    throw new Error(`Candidate ${variantId} has no rendered PNG. Run \`generate\` first.`);
+    throw new Error(`Candidate ${variantId} has no rendered draft. Run \`generate\` first.`);
   }
 
   // Never read notes.json's live content here — only what a reviewed redraft
@@ -768,7 +1075,7 @@ async function commandFinalize(values, variantIds) {
       completedAt: new Date().toISOString(),
     };
     await writeFile(resultsPath, JSON.stringify(results, null, 2), "utf8");
-    console.log(`  ok (${Math.round((Date.now() - startedAt) / 1000)}s) — job ${json.jobId ?? "?"}${json.libraryVisible ? ", visible in Library" : ""}`);
+    console.log(`  ok (${Math.round((Date.now() - startedAt) / 1000)}s)${resizeNote(json.resizedReferenceCount)} — job ${json.jobId ?? "?"}${json.libraryVisible ? ", visible in Library" : ""}`);
   }
 
   const reviewPath = path.join(runDir, "review.html");
@@ -940,12 +1247,17 @@ const { values, positionals } = parseArgs({
     "dry-run": { type: "boolean" },
     variants: { type: "string" },
     quality: { type: "string" },
+    resolution: { type: "string" },
+    format: { type: "string" },
+    compression: { type: "string" },
     "base-url": { type: "string" },
     "library-root": { type: "string" },
     "images-per-item": { type: "string" },
     "min-slots": { type: "string" },
     port: { type: "string" },
     force: { type: "boolean" },
+    "no-qa": { type: "boolean" },
+    "qa-model": { type: "string" },
     help: { type: "boolean", short: "h" },
   },
   allowPositionals: true,
@@ -961,6 +1273,8 @@ try {
     await commandGenerate(values);
   } else if (command === "redraft") {
     await commandRedraft(values, positionals.slice(1));
+  } else if (command === "confirm") {
+    await commandConfirm(values, positionals.slice(1));
   } else if (command === "finalize") {
     await commandFinalize(values, positionals.slice(1));
   } else if (command === "batch-finalize") {
