@@ -28,7 +28,12 @@ Confirmed decisions:
   immediately, with an approximate cost on the button label.
 - **Local first.** Hosting the board on the deployed site is a follow-up (see
   "Later phases").
-- Automated QA stays **opt-in** (checkbox, off by default) — the user is the QA.
+- The board **never runs automated QA** — the user is the QA. (The CLI's
+  opt-in `--qa` flag is untouched.)
+- Condensed on 2026-09-07 at the user's request: the queue is **in memory
+  only** (no persistence, no `interrupted` state) and there is **no
+  held/resume** — an expired Access session fails that one job with the
+  login hint and the next click re-resolves credentials. The lightbox is kept.
 
 ## Architecture
 
@@ -88,13 +93,12 @@ Pure functions except `postGeneration`:
   finished draft is recorded as it lands.
 - `cancel(jobId)`: queued → removed; running → `AbortController.abort()`,
   job ends `cancelled after i of n`, drafts already saved are kept.
-- Failure records `{ message, code, status, retryAfterMs, diagnostics }` on
-  the job and continues with the next job. Nothing auto-retries.
-- Access failure (302/403) sets a queue-wide `accessError`; remaining jobs
-  move to `held`. `resume()` re-checks credentials and releases them.
-- Queue state is persisted in `results.json` (`queue`). On restart a job
-  found `running` becomes `interrupted` and is never re-run silently;
-  `queued`/`held` jobs stay as they were.
+- Failure records `{ message, code, status, retryAfterMs }` on the job and
+  continues with the next job. Nothing auto-retries. An Access failure
+  (302/403) is just a failed job whose message carries the login hint; the
+  server re-resolves credentials on the next `POST /api/render`.
+- Queue state lives only for the server's lifetime; render *records* are
+  persisted by the job itself, so a restart loses only the job list.
 - Emits status snapshots the server serves; no websockets — the page polls.
 
 ## Data model (`autoboard-runs/<run>/results.json`)
@@ -149,10 +153,9 @@ Pure functions except `postGeneration`:
 
 | Endpoint | Body | Effect |
 |---|---|---|
-| `POST /api/render` | `{ boardId, kind: "draft"\|"confirm"\|"final", variant?, count?, qa? }` | Validates: board exists; draft needs `variant` ∈ A/B/C and `count` 1–10; confirm needs a picked draft; final needs a picked draft or approved confirmed render whose `selectionHash` matches the board now. Snapshots selection, notes and instruction at click time; enqueues; returns `{ jobId, position }`. |
+| `POST /api/render` | `{ boardId, kind: "draft"\|"confirm"\|"final", variant?, count? }` | Validates: board exists; draft needs `variant` ∈ A/B/C and `count` 1–10; confirm needs a picked draft; final needs a picked draft or approved confirmed render whose `selectionHash` matches the board now. Snapshots selection, notes and instruction at click time; enqueues; returns `{ jobId, position }`. |
 | `GET /api/render-status` | — | `{ accessError, queue, renders, costTable }` — one payload for the whole run. |
 | `POST /api/render-cancel` | `{ jobId }` | Cancel as described in the queue section. |
-| `POST /api/render-resume` | — | Re-check Access credentials; release held jobs. |
 | `POST /api/pick-draft` | `{ boardId, draftId }` | Sets `pickedDraftId`; mirrors into `candidates`. |
 | `POST /api/approve-confirmed` | `{ boardId, confirmedId \| null }` | Sets or clears `approvedConfirmedId`. |
 | `POST /api/instruction` | `{ boardId, instruction }` | Saves the board instruction. |
@@ -168,14 +171,13 @@ Right column of every board section; the slot grid keeps the left.
 
 **Header row:** variant toggle `A | B | C` (default: last used for that
 board, else A) · count stepper 1–10 (default 3) · **Draft ▶** labelled with
-count and approximate cost (`Draft ×3 · ~$0.05`) · QA checkbox (off) ·
-⏹ cancel, visible only while this board has a queued or running job.
+count and approximate cost (`Draft ×3 · ~$0.05`) · ⏹ cancel, visible only
+while this board has a queued or running job.
 
 **Status line:** `queued (2 ahead)` · `rendering draft 2 of 3 · 24 s` ·
 `done 14:02` · `failed: <message>` (for a 429, a countdown from
-`retryAfterMs`) · `cancelled after 2 of 5` · `interrupted (server restarted)`
-· `Access session expired — run cloudflared access login <url>` with a
-**Resume** button.
+`retryAfterMs`) · `cancelled after 2 of 5` · `Access session expired — run
+cloudflared access login <url> — then click again`.
 
 **Drafts strip:** current revision's thumbnails in a row, newest right, each
 badged with variant letter and index. Click opens a lightbox (full size,
@@ -218,9 +220,11 @@ embedded script — including inside comments — corrupt the served page.
   and attempt diagnostics; queue continues; nothing auto-retries.
 - Cancel: queued → removed; running → abort in-flight fetch (the Worker
   cancels upstream). Saved drafts of that batch are kept.
-- Access expiry mid-run: first 302/403 fails that job with `accessError`,
-  remaining jobs are `held`; **Resume** re-checks and releases.
-- Restart: running → `interrupted`; queued/held unchanged.
+- Access expiry mid-run: the failing job records the login hint; queued jobs
+  after it will fail the same way until the user logs in and clicks again
+  (which re-resolves credentials before enqueuing).
+- Restart: the job list is gone; every render that completed is still in
+  `results.json`.
 - Stale guard applies to Final only.
 - Costs are approximate constants in `render.mjs`; no live pricing lookup.
 - Access tokens and the OpenAI key never appear in status payloads or logs.
@@ -232,8 +236,7 @@ embedded script — including inside comments — corrupt the served page.
   stability and sensitivity; record functions incl. the `candidates` mirror.
   Pure, no network.
 - `render-queue.mjs`: FIFO order; progress events; cancel queued vs running
-  (fake worker); a failure does not stop the queue; held/resume on Access
-  error; restart marks `interrupted`.
+  (fake worker); a failure does not stop the queue.
 - `review-server.mjs`: every new endpoint against a scratch run directory
   with a mocked `postGeneration` — validation errors, pick/approve/
   instruction/note persistence, `notes.json` import, image path traversal
