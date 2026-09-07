@@ -58,8 +58,8 @@ cannot diverge.
 The review server takes `--base-url` (default: the deployed Worker) and
 resolves Access credentials once at startup using `lib/access.mjs`. An
 expired `cloudflared` session is reported in the status payload
-(`accessError`) and disables render buttons with the login command shown;
-it never fails click by click.
+(`accessError`) with the login command shown; the next render click
+re-resolves credentials.
 
 ### `lib/render.mjs`
 
@@ -118,18 +118,13 @@ Pure functions except `postGeneration`:
           "path": "boards/penthouse-bath-2-fixture/drafts/d-0007.png",
           "jobId": "<worker job id>", "createdAt": "2026-09-07T…", "durationMs": 24000,
           "selectionHash": "9f3a…",
-          "instruction": "…", "itemNotes": { "shower_head": "…" },
-          "qa": null
+          "instruction": "…", "itemNotes": { "shower_head": "…" }
         }
       ],
       "confirmed": [ { "id": "c-0002", "fromDraftId": "d-0007", "…": "same fields" } ],
       "finals":    [ { "id": "f-0001", "fromRenderId": "c-0002", "libraryJobId": "…", "…": "same fields" } ]
     }
-  },
-  "queue": [
-    { "jobId": "q-…", "boardId": "…", "kind": "draft", "variant": "A", "count": 3,
-      "state": "running", "progress": "2/3", "startedAt": "…", "error": null }
-  ]
+  }
 }
 ```
 
