@@ -52,6 +52,11 @@ export type AttemptDiagnostic = {
   status?: number;
   code?: string;
   requestId?: string;
+  // Server-provided wait (from Retry-After) and OpenAI's error `type`, so a
+  // caller reading the diagnostics can schedule a retry correctly or tell a
+  // user-correctable input error apart from a provider fault.
+  retryAfterMs?: number;
+  errorType?: string;
   error?: string;
 };
 
@@ -125,7 +130,7 @@ export async function createImageEdit(
     });
     const data = await readOpenAIResponse<OpenAIImageResponse>(response);
     diagnostics.push({ stage: "image_edit", outcome: "succeeded", attempt: 1, durationMs: Date.now() - startedAt, size: body.size });
-    return { data, attempts: 1 };
+    return { data };
   } catch (error) {
     diagnostics.push(diagnosticFor(error, "image_edit", 1, Date.now() - startedAt, body.size));
     // A failed provider request may have reached the service. Surface it to
@@ -171,7 +176,7 @@ export async function createImageGeneration(
     });
     const data = await readOpenAIResponse<OpenAIImageResponse>(response);
     diagnostics.push({ stage: "image_edit", outcome: "succeeded", attempt: 1, durationMs: Date.now() - startedAt, size: body.size });
-    return { data, attempts: 1 };
+    return { data };
   } catch (error) {
     diagnostics.push(diagnosticFor(error, "image_edit", 1, Date.now() - startedAt, body.size));
     throw error;
@@ -189,6 +194,8 @@ export function diagnosticFor(error: unknown, stage: AttemptDiagnostic["stage"],
     status: openAIError?.status,
     code: openAIError?.code,
     requestId: openAIError?.requestId,
+    retryAfterMs: openAIError?.retryAfterMs,
+    errorType: openAIError?.errorType,
     error: error instanceof Error ? error.message.slice(0, 500) : "Unknown error.",
   };
 }
@@ -206,6 +213,12 @@ export function safeReferenceFilename(value: string) {
   return safe || "reference.png";
 }
 
+// "Retryable" here means "safe to submit the SAME paid render again", not
+// merely "transient". A failure is only safe to repeat when the provider
+// demonstrably rejected the request (409 conflict, 5xx, or a non-quota 429);
+// a raw network error (TypeError from fetch) is deliberately NOT retryable
+// because the request body may already have been accepted and billed — the
+// caller cannot tell, so it must not automatically repeat it.
 export function isRetryableImageError(error: unknown): boolean {
   if (error instanceof DiagnosedGenerationError) return isRetryableImageError(error.causeError);
   if (!(error instanceof OpenAIRequestError)) return false;

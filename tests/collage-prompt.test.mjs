@@ -21,6 +21,22 @@ function request(overrides = {}) {
   };
 }
 
+test("each board type keeps its own prohibition against inventing unreferenced pieces", () => {
+  assert.match(buildGenerationPrompt(request()), /Do not add sanitaryware \(toilet, tub, sink basin\) or plumbing pieces that are not referenced/);
+  assert.match(
+    buildGenerationPrompt(request({ collageType: "kitchen_material_palette" })),
+    /Do not add tile, appliances, or substitute samples that are not referenced/,
+  );
+  assert.match(
+    buildGenerationPrompt(request({ collageType: "bathroom_tile_collage" })),
+    /Do not add tile or finish samples that are not referenced/,
+  );
+  assert.match(
+    buildGenerationPrompt(request({ collageType: "appliance_collage" })),
+    /Do not add material samples or appliances that are not referenced/,
+  );
+});
+
 test("a multi-image item names its primary identity view and its supporting views", () => {
   const prompt = buildGenerationPrompt(request());
 

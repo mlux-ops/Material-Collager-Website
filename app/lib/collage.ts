@@ -109,11 +109,20 @@ export const ITEM_PRESETS: Record<CollageType, CollageItemInput[]> = {
   ],
 };
 
+// Each subject line keeps its type-specific prohibition: the generic "no
+// unmapped products" sentence later in the prompt is not enough on its own,
+// because each board type has a named failure mode (a bathroom board growing
+// a sink basin, a kitchen palette growing tile or an appliance) that the
+// model avoids far more reliably when told so up front.
 const TYPE_PROMPTS: Record<CollageType, string> = {
-  kitchen_material_palette: "Subject: luxury residential kitchen materials and fixtures from the reference map.",
-  appliance_collage: "Subject: luxury appliances from the reference map, preserving product identity and door/handle configuration.",
-  bathroom_fixture_collage: "Subject: luxury bathroom fixtures and finishes from the reference map.",
-  bathroom_tile_collage: "Subject: luxury bathroom tile and finishes from the reference map, with realistic pattern scale and tactile detail.",
+  kitchen_material_palette:
+    "Subject: luxury residential kitchen materials and fixtures from the reference map. Do not add tile, appliances, or substitute samples that are not referenced.",
+  appliance_collage:
+    "Subject: luxury appliances from the reference map, preserving product identity and door/handle configuration. Do not add material samples or appliances that are not referenced.",
+  bathroom_fixture_collage:
+    "Subject: luxury bathroom fixtures and finishes from the reference map. Do not add sanitaryware (toilet, tub, sink basin) or plumbing pieces that are not referenced.",
+  bathroom_tile_collage:
+    "Subject: luxury bathroom tile and finishes from the reference map, with realistic pattern scale and tactile detail. Do not add tile or finish samples that are not referenced.",
 };
 
 const COMPOSITION_PROMPTS: Record<Composition, string> = {
@@ -253,13 +262,28 @@ export function resolvedLighting(request: CollageRequestInput): LightingOption {
   return request.lighting ?? "soft_daylight";
 }
 
-// Finals are always PNG regardless of what output format was requested: a
-// Final render (whether flagged via renderKind or via outputResolution, since
-// callers can set either) is the archival, library-visible artifact and must
-// not carry lossy compression.
+// A Final render is the archival, library-visible artifact. Callers can flag
+// it via renderKind or via outputResolution, so both are checked here — every
+// "is this a Final?" decision (format, quality, render kind) goes through
+// this one predicate instead of re-deriving the condition per call site.
+export function isFinalRender(request: CollageRequestInput): boolean {
+  return request.renderKind === "final" || request.outputResolution === "final";
+}
+
+// Finals are always PNG regardless of what output format was requested: they
+// must not carry lossy compression.
 export function resolvedOutputFormat(request: CollageRequestInput): OutputFormat {
-  if (request.renderKind === "final" || request.outputResolution === "final") return "png";
+  if (isFinalRender(request)) return "png";
   return request.outputFormat ?? "png";
+}
+
+// Finals always render at high quality regardless of the requested tier, so a
+// draft-tier setting left over in a client (or a CLI flag) can never quietly
+// produce a degraded deliverable. Callers compare the result against the
+// requested quality to tell the user when the upgrade happened.
+export function resolvedQuality(request: CollageRequestInput): Quality {
+  if (isFinalRender(request)) return "high";
+  return request.quality;
 }
 
 export function resolvedSize(request: CollageRequestInput) {

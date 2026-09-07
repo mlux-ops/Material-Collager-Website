@@ -50,7 +50,30 @@ test("Final uses high quality, original pixels, requested dimensions and lossles
   assert.equal(submitted.has("input_fidelity"), false);
   assert.equal(await submitted.get("image[]").text(), "original image");
   assert.equal(globalThis.savedRender.payload.quality, "high");
-  assert.equal((await response.json()).usage.total_tokens, 123);
+  const json = await response.json();
+  assert.equal(json.usage.total_tokens, 123);
+  // The caller asked for "low"; the upgrade must be reported, not silent.
+  assert.match(json.notice, /requested "low" quality was upgraded/);
+});
+
+test("a Final that already requested high quality gets no upgrade notice", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => Response.json({ data: [{ b64_json: "AA==" }] }));
+  const response = await POST(request({ quality: "high" }));
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).notice, undefined);
+});
+
+test("a rate limit forwards the provider's Retry-After to the client", async (t) => {
+  t.mock.method(globalThis, "fetch", async () =>
+    Response.json({ error: { message: "Busy", type: "server_error" } }, { status: 429, headers: { "retry-after": "120" } }));
+  const response = await POST(request());
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get("retry-after"), "120");
+  const json = await response.json();
+  assert.equal(json.retryAfterMs, 120_000);
+  assert.equal(json.errorType, "server_error");
+  const failed = json.diagnostics.attempts.find((attempt) => attempt.stage === "image_edit");
+  assert.equal(failed.retryAfterMs, 120_000);
 });
 
 test("transient failures preserve the requested render and make one paid call", async (t) => {

@@ -25,6 +25,21 @@ METAL_FINISH_RULES = """Metal finish reference:
 - Brushed Nickel: warmer than chrome, satin finish.
 - Polished Nickel: bright but slightly warmer than chrome."""
 
+# The glossary above only earns its place when some item actually carries a
+# metal finish; a tile-only board gains nothing from it. Matched against each
+# item's finish, name, role and notes.
+_METAL_FINISH_KEYWORDS = ("brass", "chrome", "nickel", "stainless", "bronze", "matte black", "metal")
+
+
+def _mentions_metal_finish(request: CollageRequest) -> bool:
+    for item in request.items:
+        haystack = " ".join(
+            value for value in (item.finish, item.name, item.role, item.notes) if value
+        ).lower()
+        if any(keyword in haystack for keyword in _METAL_FINISH_KEYWORDS):
+            return True
+    return False
+
 
 TYPE_PROMPTS = {
     "kitchen_material_palette": """Collage type: Kitchen Material Palette.
@@ -95,6 +110,7 @@ def build_generation_prompt(request: CollageRequest) -> str:
         "Create one finished high-end interior design material collage board.",
         TYPE_PROMPTS[request.collage_type],
         UNIVERSAL_STYLE_RULES,
+        *([METAL_FINISH_RULES] if _mentions_metal_finish(request) else []),
         "Reference image mapping. The image model can see these actual uploaded image files; use them directly as visual references:",
         "\n".join(labels),
         " ".join(object_count_lines),
