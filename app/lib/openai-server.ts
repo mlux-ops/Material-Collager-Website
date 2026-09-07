@@ -2,6 +2,8 @@ export class OpenAIRequestError extends Error {
   status: number;
   code?: string;
   requestId?: string;
+  retryAfterMs?: number;
+  errorType?: string;
 
   constructor(message: string, status: number, code?: string, requestId?: string) {
     super(message);
@@ -39,7 +41,7 @@ export function resolveOpenAIKey(provided?: string) {
 
 export async function readOpenAIResponse<T>(response: Response): Promise<T> {
   const raw = await response.text();
-  let payload: { error?: { message?: string; code?: string } } & Record<string, unknown> = {};
+  let payload: { error?: { message?: string; code?: string; type?: string } } & Record<string, unknown> = {};
   const headerRequestId = response.headers.get("x-request-id") || undefined;
 
   if (raw) {
@@ -55,12 +57,20 @@ export async function readOpenAIResponse<T>(response: Response): Promise<T> {
 
   if (!response.ok) {
     const message = payload.error?.message || `OpenAI request failed with status ${response.status}.`;
-    throw new OpenAIRequestError(
+    const error = new OpenAIRequestError(
       message,
       response.status,
       payload.error?.code,
       headerRequestId || requestIdFrom(message),
     );
+    error.errorType = payload.error?.type;
+    const retryAfter = response.headers.get("retry-after");
+    if (retryAfter) {
+      const seconds = Number(retryAfter);
+      const delay = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter) - Date.now();
+      if (Number.isFinite(delay)) error.retryAfterMs = Math.max(0, delay);
+    }
+    throw error;
   }
 
   return payload as T;

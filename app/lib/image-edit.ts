@@ -33,8 +33,8 @@ export type ImageEditRequest = {
   // 0-100; OpenAI applies this only to jpeg/webp and ignores it for png, so
   // createImageEdit only sends it alongside those two formats.
   output_compression?: number;
-  // Number of candidates to generate in one call (1-10). Input tokens are
-  // charged once per request, so n>1 beats n separate calls.
+  // Number of requested candidates (1-10). Additional candidates consume
+  // output tokens; use the returned usage rather than assuming an input discount.
   n?: number;
   // Wall-clock ceiling for one attempt. Undefined uses IMAGE_EDIT_TIMEOUT_MS;
   // NULL disables the timer entirely, for long user-initiated work that must
@@ -91,12 +91,14 @@ export async function createImageEdit(
   retry = true,
   callerSignal?: AbortSignal,
 ) {
+  validateImagePrompt(body.prompt);
   let lastError: unknown;
   const retryDelays = retry ? IMAGE_RETRY_DELAYS_MS : [];
 
   for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
     const startedAt = Date.now();
     try {
+      callerSignal?.throwIfAborted();
       const form = new FormData();
       form.append("model", body.model);
       form.append("prompt", body.prompt);
@@ -134,7 +136,12 @@ export async function createImageEdit(
     } catch (error) {
       diagnostics.push(diagnosticFor(error, "image_edit", attempt + 1, Date.now() - startedAt, body.size));
       lastError = error;
-      if (!isRetryableImageError(error) || attempt === retryDelays.length) {
+      const retryDelay = error instanceof OpenAIRequestError
+        ? error.retryAfterMs ?? retryDelays[attempt]
+        : retryDelays[attempt];
+      // Long Retry-After delays should surface to the caller, not keep an
+      // edge request alive or retry before the provider permits it.
+      if (callerSignal?.aborted || !isRetryableImageError(error) || attempt === retryDelays.length || retryDelay > 30_000) {
         throw new DiagnosedGenerationError(error, {
           model: body.model,
           transport: "multipart",
@@ -146,7 +153,7 @@ export async function createImageEdit(
           attempts: diagnostics,
         });
       }
-      await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+      await waitForImageRetry(retryDelay, callerSignal);
     }
   }
 
@@ -161,8 +168,10 @@ export async function createImageGeneration(
   diagnostics: AttemptDiagnostic[],
   callerSignal?: AbortSignal,
 ) {
+  validateImagePrompt(body.prompt);
   const startedAt = Date.now();
   try {
+    callerSignal?.throwIfAborted();
     const response = await fetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
@@ -216,10 +225,30 @@ export function safeReferenceFilename(value: string) {
 
 export function isRetryableImageError(error: unknown): boolean {
   if (error instanceof DiagnosedGenerationError) return isRetryableImageError(error.causeError);
-  if (error instanceof TypeError) return true;
   if (!(error instanceof OpenAIRequestError)) return false;
-  if (error.status === 408 || error.status === 409 || error.status >= 500) return true;
+  if (error.errorType === "image_generation_user_error" || /quota|billing|credit|moderation_blocked/i.test(error.code ?? "")) return false;
+  if (error.status === 409 || error.status >= 500) return true;
   return error.status === 429 && !/quota|billing|credit/i.test(error.message);
+}
+
+export function validateImagePrompt(prompt: string) {
+  if (!prompt.trim()) throw new Error("Enter an image prompt before generating.");
+  if (prompt.length > 32_000) throw new Error("The prompt exceeds the 32,000 character limit. Shorten the item notes or prompt and retry.");
+}
+
+function waitForImageRetry(delayMs: number, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 // gpt-image-2 size constraints: dimensions divisible by 16, aspect between
