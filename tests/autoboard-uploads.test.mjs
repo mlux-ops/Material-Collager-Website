@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -8,6 +8,8 @@ import {
   customItemsForRoom,
   decodeUploadedImage,
   isValidTileCode,
+  replaceCustomItemPhoto,
+  replaceTileImage,
   sanitizeNamePart,
   saveCustomItem,
   saveUploadedRowImage,
@@ -86,6 +88,66 @@ test("saveUploadedTileImage writes <CODE>_<name>.<ext> and refuses to overwrite 
 
     await assert.rejects(
       saveUploadedTileImage(libraryRoot, "WT14", "New Material", Buffer.from("other-bytes"), ".jpg"),
+      (error) => error.status === 400 && /already exists/.test(error.message),
+    );
+  });
+});
+
+test("replaceCustomItemPhoto swaps the photo in place, leaving meta.json (name/brand/notes) untouched", async () => {
+  await withTempRoot(async (root) => {
+    const saved = await saveCustomItem(
+      "penthouse::bath 2",
+      { name: "Custom Robe Hook", brand: "Acme", notes: "matte black" },
+      Buffer.from("old-photo-bytes"),
+      ".png",
+      root,
+    );
+    const newPath = await replaceCustomItemPhoto("penthouse::bath 2", saved.id, Buffer.from("new-photo-bytes"), ".jpg", root);
+    assert.ok(newPath.endsWith(".jpg"));
+    assert.equal(readFileSync(newPath, "utf8"), "new-photo-bytes");
+    // the old photo.png is gone — no orphan left behind after the extension changed
+    assert.equal(existsSync(saved.imagePath), false);
+
+    const items = customItemsForRoom("penthouse::bath 2", root);
+    assert.equal(items.length, 1);
+    assert.equal(items[0].name, "Custom Robe Hook");
+    assert.equal(items[0].brand, "Acme");
+    assert.equal(items[0].notes, "matte black");
+    assert.equal(items[0].imagePath, newPath);
+  });
+});
+
+test("replaceCustomItemPhoto throws .status 404 for a missing item", async () => {
+  await withTempRoot(async (root) => {
+    await assert.rejects(
+      replaceCustomItemPhoto("penthouse::bath 2", "custom-missing", Buffer.from("bytes"), ".jpg", root),
+      (error) => error.status === 404,
+    );
+  });
+});
+
+test("replaceTileImage overwrites the tile's own existing file at the same path", async () => {
+  await withTempRoot(async (libraryRoot) => {
+    const filePath = await saveUploadedTileImage(libraryRoot, "WT14", "New Material", Buffer.from("original"), ".jpg");
+    const replacedPath = await replaceTileImage(libraryRoot, "WT14", "New Material", Buffer.from("replaced"), ".jpg");
+    assert.equal(replacedPath, filePath);
+    assert.equal(readFileSync(replacedPath, "utf8"), "replaced");
+  });
+});
+
+test("replaceTileImage also succeeds as a create for a fresh tile code with no existing file", async () => {
+  await withTempRoot(async (libraryRoot) => {
+    const filePath = await replaceTileImage(libraryRoot, "WT20", "Brand New", Buffer.from("bytes"), ".png");
+    assert.ok(filePath.endsWith(path.join("Tile", "tiles", "WT20_Brand_New.png")));
+    assert.equal(readFileSync(filePath, "utf8"), "bytes");
+  });
+});
+
+test("saveUploadedTileImage's own no-overwrite behavior is unaffected by replaceTileImage's addition", async () => {
+  await withTempRoot(async (libraryRoot) => {
+    await saveUploadedTileImage(libraryRoot, "WT30", "Material", Buffer.from("bytes"), ".jpg");
+    await assert.rejects(
+      saveUploadedTileImage(libraryRoot, "WT30", "Material", Buffer.from("other"), ".jpg"),
       (error) => error.status === 400 && /already exists/.test(error.message),
     );
   });

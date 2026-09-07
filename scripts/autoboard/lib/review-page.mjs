@@ -46,7 +46,10 @@ export function renderReviewPage() {
   .upload-card:hover { outline: none; }
   .upload-card input[type="text"] { font-size: 0.75rem; padding: 0.3rem; border: 1px solid var(--line); border-radius: 4px; width: 100%; }
   .upload-card input[type="file"] { font-size: 0.7rem; width: 100%; }
-  .upload-card .error { color: var(--danger); font-size: 0.7rem; }
+  .error { color: var(--danger); font-size: 0.7rem; }
+  .replace-control { padding: 0.3rem 0.5rem 0.5rem; }
+  .replace-control input[type="file"] { display: none; }
+  .replace-control button { font-size: 0.68rem; padding: 0.15rem 0.4rem; }
   .hero-control { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.8rem; font-size: 0.8rem; }
   .hero-control select { font-size: 0.78rem; padding: 0.25rem 0.4rem; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
   .add-slot-panel { margin-top: 1rem; }
@@ -208,6 +211,51 @@ function updateBoardInPlan(boardId, updatedBoard) {
   section.replaceWith(renderBoard(updatedBoard));
 }
 
+// A small "Replace photo" control usable both on the main-page card (no
+// target argument — swaps whatever currently occupies slotId) and on a
+// picker option card (target: { kind, code|rowId } — swaps that SPECIFIC
+// library item's own photo, which may not even be the slot's current pick).
+// Stops propagation on every click inside it so it never triggers the
+// option's own "select this" click handler (see openPicker's use of it,
+// nested inside an .option card whose whole body is otherwise
+// clickable-to-select).
+function createReplaceControl({ boardId, slotId, target, buttonText, onDone }) {
+  const fileInput = el("input", { type: "file", accept: "image/png,image/jpeg,image/webp" });
+  const button = el("button", { text: buttonText });
+  const errorText = el("div", { className: "error" });
+
+  button.addEventListener("click", () => { fileInput.click(); });
+
+  fileInput.addEventListener("change", async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    button.disabled = true;
+    errorText.textContent = "";
+    try {
+      const dataBase64 = await fileToBase64(file);
+      const body = { boardId: boardId, slotId: slotId, mimeType: file.type, dataBase64: dataBase64 };
+      if (target) body.target = target;
+      const response = await fetch("/api/replace-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Replace image failed");
+      button.disabled = false;
+      fileInput.value = "";
+      onDone(data);
+    } catch (error) {
+      errorText.textContent = error.message;
+      button.disabled = false;
+    }
+  });
+
+  const wrap = el("div", { className: "replace-control" }, [button, fileInput, errorText]);
+  wrap.addEventListener("click", (event) => { event.stopPropagation(); });
+  return wrap;
+}
+
 function renderSlotCard(board, item) {
   const image = item.images && item.images[0];
   const img = el("img", { src: image ? imageUrl(image) : "", alt: item.slotId });
@@ -229,6 +277,20 @@ function renderSlotCard(board, item) {
     el("button", { "data-action": "remove-slot", "data-board": board.id, "data-slot": item.slotId, text: "Remove" }),
   ]);
   body.appendChild(actions);
+  // Swaps just this slot's photo in place — same item, new picture. No
+  // target argument, so the server always resolves it to whatever's
+  // currently in this slot (a real row, a custom item, or a tile) and
+  // refreshes it.
+  body.appendChild(createReplaceControl({
+    boardId: board.id,
+    slotId: item.slotId,
+    target: null,
+    buttonText: "Replace image",
+    onDone: (data) => {
+      updateItemInPlan(board.id, data.item);
+      showStatus("Replaced image — " + item.slotId + " updated.");
+    },
+  }));
   const card = el("article", { className: "slot-card", "data-board": board.id, "data-slot": item.slotId }, [img, body]);
   return card;
 }
@@ -325,9 +387,32 @@ async function openPicker(boardId, slotId) {
     const props = { className: "option" };
     if (option.kind === "tile") { props["data-kind"] = "tile"; props["data-code"] = option.code; }
     else { props["data-kind"] = "row"; props["data-row-id"] = option.rowId; }
-    grid.appendChild(el("button", props, [
-      el("img", { src: imageUrl(option.imagePath), alt: "" }),
+    const img = el("img", { src: imageUrl(option.imagePath), alt: "" });
+    // Fixes THIS option's own photo on disk — not necessarily the slot's
+    // current pick (the picker lists every candidate in the room, not just
+    // the active one). If it does turn out to be the active pick, the server
+    // reports back an updated item and the slot card refreshes too;
+    // otherwise only this thumbnail changes.
+    const target = option.kind === "tile" ? { kind: "tile", code: option.code } : { kind: "row", rowId: option.rowId };
+    const replaceControl = createReplaceControl({
+      boardId: activeBoardId,
+      slotId: activeSlotId,
+      target: target,
+      buttonText: "Replace photo",
+      onDone: (data) => {
+        if (data.item) {
+          updateItemInPlan(activeBoardId, data.item);
+          img.src = imageUrl(data.item.images[0]);
+        } else {
+          img.src = imageUrl(data.imagePath);
+        }
+        showStatus("Replaced photo for \\u2014 " + labelText);
+      },
+    });
+    grid.appendChild(el("div", props, [
+      img,
       el("div", { className: "label", text: labelText }),
+      replaceControl,
     ]));
   });
   if (data.slotKind === "tile") grid.appendChild(renderAddTileCard());

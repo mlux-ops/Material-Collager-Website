@@ -13,7 +13,7 @@
 // consistently.
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { tileLibraryDir } from "./tiles.mjs";
@@ -88,6 +88,23 @@ export async function saveUploadedTileImage(libraryRoot, code, materialName, buf
   return filePath;
 }
 
+// Replaces a tile's own photo in place (deliberate overwrite — unlike
+// saveUploadedTileImage's create-only behavior above). The filename is
+// always derived from `code`, so it can only ever collide with that same
+// tile's own prior file; the startsWith guard below is a belt-and-suspenders
+// check against that assumption rather than a real collision case.
+export async function replaceTileImage(libraryRoot, code, materialName, buffer, ext) {
+  const dir = tileLibraryDir(libraryRoot);
+  const filename = `${code}_${sanitizeNamePart(materialName)}${ext}`;
+  const filePath = path.join(dir, filename);
+  if (existsSync(filePath) && !path.basename(filePath).startsWith(`${code}_`)) {
+    throw Object.assign(new Error(`Refusing to overwrite a file that isn't tile "${code}"'s own.`), { status: 409 });
+  }
+  await mkdir(dir, { recursive: true });
+  await writeFile(filePath, buffer);
+  return filePath;
+}
+
 export function customItemsRootDir(root) {
   return root ?? path.join(import.meta.dirname, "..", "custom-items");
 }
@@ -128,4 +145,23 @@ export async function saveCustomItem(roomKeyValue, { name, brand, notes }, buffe
     JSON.stringify({ name, brand: brand ?? "", notes: notes ?? "", createdAt: new Date().toISOString() }, null, 2),
   );
   return { id, name, brand: brand ?? "", notes: notes ?? "", imagePath: path.join(dir, `photo${ext}`) };
+}
+
+// Swaps a custom item's photo in place, leaving meta.json (name/brand/notes)
+// untouched — for when the user just wants a better picture of the SAME
+// item, not a brand-new entry. Removes the old photo.* file (there's exactly
+// one, per customItemsForRoom's reader above) so no orphan is left behind
+// once the extension changes (e.g. photo.png -> photo.jpg).
+export async function replaceCustomItemPhoto(roomKeyValue, id, buffer, ext, root) {
+  const dir = path.join(customItemsRoomDir(roomKeyValue, root), id);
+  if (!existsSync(dir)) {
+    throw Object.assign(new Error("Custom item not found."), { status: 404 });
+  }
+  const existingPhotos = readdirSync(dir).filter((name) => IMAGE_EXTENSIONS.has(path.extname(name).toLowerCase()));
+  for (const name of existingPhotos) {
+    await unlink(path.join(dir, name));
+  }
+  const imagePath = path.join(dir, `photo${ext}`);
+  await writeFile(imagePath, buffer);
+  return imagePath;
 }

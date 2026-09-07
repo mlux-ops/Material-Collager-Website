@@ -186,6 +186,19 @@ function normalizedName(value) {
   return String(value).toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+// Smartsheet exports sometimes coerce a text SKU through a numeric column,
+// appending a trailing ".0" (e.g. "12345.0"). Strip that along with the usual
+// trim/lowercase so SKU comparisons aren't defeated by export formatting.
+function normalizeSku(value) {
+  return String(value ?? "").trim().toLowerCase().replace(/\.0$/, "");
+}
+
+// Reads the build log's row_id -> folder join. Row ids in the live Smartsheet
+// get reused across unrelated products over time, so a row-id lookup alone can
+// resolve to the wrong product's photos (see match.mjs header comment for the
+// GROHE-valve-turned-Hansgrohe-hand-shower case observed 2026-09-06). The
+// `bySku` index lets callers fall back to a same-SKU entry elsewhere in the
+// log when the row-id entry looks stale or is missing.
 export function loadBuildLog(libraryRoot) {
   const logPath = path.join(libraryRoot, "Master_Library_Build", "_BUILD_LOG.csv");
   if (!existsSync(logPath)) {
@@ -193,18 +206,28 @@ export function loadBuildLog(libraryRoot) {
   }
   const records = csvObjects(readFileSync(logPath, "utf8"));
   const byRowId = new Map();
+  const bySku = new Map();
   for (const record of records) {
-    byRowId.set(String(record.row_id), {
+    const matchedFiles = (record.matched_files ?? "").split(";").map((name) => name.trim()).filter(Boolean);
+    const sku = normalizeSku(record.sku);
+    const entry = {
       folder: record.folder ?? "",
-      matchedFiles: (record.matched_files ?? "").split(";").map((name) => name.trim()).filter(Boolean),
-    });
+      matchedFiles,
+      sku,
+    };
+    byRowId.set(String(record.row_id), entry);
+    if (sku && matchedFiles.length && !bySku.has(sku)) {
+      bySku.set(sku, entry);
+    }
   }
+  byRowId.bySku = bySku;
   return byRowId;
 }
 
 export function makeDiskImageResolver(libraryRoot, buildLog = loadBuildLog(libraryRoot)) {
-  return function resolveImages(rowId) {
-    const entry = buildLog.get(String(rowId));
+  const bySku = buildLog.bySku ?? new Map();
+
+  function readFolder(entry) {
     if (!entry?.folder) return [];
     const folder = path.join(libraryRoot, ...entry.folder.split(/[\\/]/));
     if (!existsSync(folder)) return [];
@@ -218,6 +241,22 @@ export function makeDiskImageResolver(libraryRoot, buildLog = loadBuildLog(libra
       return aRank - bRank || a.localeCompare(b);
     });
     return files.map((name) => path.join(folder, name));
+  }
+
+  return function resolveImages(rowId, sku) {
+    const normalizedSku = sku === undefined ? undefined : normalizeSku(sku);
+    const rowEntry = buildLog.get(String(rowId));
+    if (rowEntry && (normalizedSku === undefined || !normalizedSku || rowEntry.sku === normalizedSku)) {
+      return readFolder(rowEntry);
+    }
+    // Either there's no row-id entry (new row) or its SKU doesn't match what
+    // the caller expects (row id was reused for a different product) — fall
+    // back to the first build-log entry for the requested SKU, if any.
+    if (normalizedSku) {
+      const skuEntry = bySku.get(normalizedSku);
+      if (skuEntry) return readFolder(skuEntry);
+    }
+    return [];
   };
 }
 
@@ -298,7 +337,7 @@ export function buildBoards(rows, options) {
       const items = [];
       for (const slot of filled) {
         mappedRowIds.add(slot.row.rowId);
-        const images = resolveImages(slot.row.rowId).slice(0, Math.max(1, imagesPerItem));
+        const images = resolveImages(slot.row.rowId, slot.row.sku).slice(0, Math.max(1, imagesPerItem));
         if (!images.length) {
           gaps.imagelessItems.push({
             unitType: group.unitType,
@@ -445,4 +484,75 @@ export function buildBoards(rows, options) {
 
   boards.sort((a, b) => a.id.localeCompare(b.id));
   return { boards, gaps };
+}
+
+// Twin-unit room merging: some rooms in one unit type have selections
+// identical to a room in another unit type, and the client wants a single
+// board (labeled with both rooms) instead of two near-duplicate boards.
+// Pure function — no I/O, no mutation of gaps beyond the passed-in object.
+export function applyBoardMerges(boards, gaps, merges) {
+  if (!merges || !merges.length) return boards;
+
+  const boardsByKey = new Map();
+  for (const board of boards) {
+    const key = roomKey(board.unitType, board.roomLabel);
+    if (!boardsByKey.has(key)) boardsByKey.set(key, []);
+    boardsByKey.get(key).push(board);
+  }
+
+  const capitalize = (word) => (word ? word[0].toUpperCase() + word.slice(1) : word);
+
+  function displayLabel(mergeKey, mergeBoard) {
+    if (mergeBoard) return `${mergeBoard.unitType} ${mergeBoard.roomLabel}`;
+    const [unit, room] = mergeKey.split("::");
+    return `${unit.split(" ").map(capitalize).join(" ")} ${room.split(" ").map(capitalize).join(" ")}`;
+  }
+
+  const toRemove = new Set();
+
+  for (const rule of merges) {
+    const keepBoards = boardsByKey.get(rule.keep) ?? [];
+    const keepByType = new Map(keepBoards.map((board) => [board.collageType, board]));
+
+    for (const mergeKey of rule.merge) {
+      const mergeBoardsForKey = boardsByKey.get(mergeKey) ?? [];
+      const mergeByType = new Map(mergeBoardsForKey.map((board) => [board.collageType, board]));
+
+      for (const [collageType, keptBoard] of keepByType) {
+        const mergeBoard = mergeByType.get(collageType);
+        const alias = displayLabel(mergeKey, mergeBoard);
+        keptBoard.aliases = keptBoard.aliases ? [...keptBoard.aliases, alias] : [alias];
+        if (mergeBoard) {
+          toRemove.add(mergeBoard.id);
+          gaps.mergedBoards.push({
+            unitType: mergeBoard.unitType,
+            roomLabel: mergeBoard.roomLabel,
+            collageType,
+            mergedInto: keptBoard.id,
+          });
+        }
+      }
+
+      for (const [collageType, mergeBoard] of mergeByType) {
+        if (!keepByType.has(collageType)) {
+          gaps.mergedBoards.push({
+            unitType: mergeBoard.unitType,
+            roomLabel: mergeBoard.roomLabel,
+            collageType,
+            mergedInto: null,
+            reason: `kept room has no ${collageType} board`,
+          });
+        }
+      }
+    }
+  }
+
+  for (const board of boards) {
+    if (board.aliases && board.aliases.length) {
+      const aliasPart = board.aliases.map((alias) => `/ ${alias}`).join(" ");
+      board.title = `${board.unitType} ${board.roomLabel} ${aliasPart} ${board.kindLabel}`;
+    }
+  }
+
+  return boards.filter((board) => !toRemove.has(board.id));
 }

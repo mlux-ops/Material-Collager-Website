@@ -26,7 +26,7 @@ import {
   SMARTSHEET_SHEET_ID,
   loadLibraryRows,
 } from "./lib/source.mjs";
-import { buildBoards, makeDiskImageResolver } from "./lib/match.mjs";
+import { applyBoardMerges, buildBoards, makeDiskImageResolver } from "./lib/match.mjs";
 import { indexTileCodes } from "./lib/tiles.mjs";
 import { withUploads } from "./lib/uploads.mjs";
 import { boardPayload, boardReferenceFiles, variantsFromCount } from "./lib/variants.mjs";
@@ -49,6 +49,18 @@ import {
 const RUNS_ROOT = "autoboard-runs";
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const TILE_ASSIGNMENTS_PATH = path.join(SCRIPT_DIR, "tile-assignments.json");
+const BOARD_MERGES_PATH = path.join(SCRIPT_DIR, "board-merges.json");
+
+async function loadBoardMerges() {
+  if (!existsSync(BOARD_MERGES_PATH)) return [];
+  let data;
+  try {
+    data = JSON.parse(await readFile(BOARD_MERGES_PATH, "utf8"));
+  } catch (error) {
+    throw new Error(`${BOARD_MERGES_PATH} is not valid JSON: ${error.message}`);
+  }
+  return Array.isArray(data.merges) ? data.merges : [];
+}
 
 // Hand-editable, tracked config (never per-run state) mapping room -> tile
 // codes. See tile-assignments.json's own _readme for provenance: the
@@ -344,7 +356,7 @@ async function commandPlan(values) {
   const resolveImages = withUploads(makeDiskImageResolver(libraryRoot));
   const tileAssignments = await loadTileAssignments();
   const tileIndex = indexTileCodes(libraryRoot);
-  const { boards } = buildBoards(filtered, {
+  let { boards } = buildBoards(filtered, {
     resolveImages,
     imagesPerItem: Number(values["images-per-item"]) || 1,
     minSlots: Number(values["min-slots"]) || 2,
@@ -352,6 +364,11 @@ async function commandPlan(values) {
     tileAssignments,
     tileIndex,
   });
+
+  if (!values["no-merge"]) {
+    const boardMerges = await loadBoardMerges();
+    boards = applyBoardMerges(boards, gaps, boardMerges);
+  }
 
   // Finding F2a: flag (never exclude) reference photos below a usable
   // resolution, right after boards are built so plan.json/gaps.md both
@@ -402,7 +419,8 @@ async function commandPlan(values) {
   let boardsWithProvisionalTiles = 0;
   for (const board of boards) {
     const slots = board.items.map((item) => item.slotId).join(", ");
-    console.log(`  ${board.id}  [${board.items.length} slots: ${slots}]`);
+    const mergedNote = board.aliases && board.aliases.length ? `  ("${board.title}")` : "";
+    console.log(`  ${board.id}  [${board.items.length} slots: ${slots}]${mergedNote}`);
     if (board.items.some((item) => item.slotId === "main_tile" || item.slotId === "accent_tile")) {
       boardsWithProvisionalTiles++;
     }
@@ -437,6 +455,10 @@ function gapsMarkdown(runId, source, gaps) {
       `- ${gap.unitType} / ${gap.roomLabel}: ${gap.itemName} (row ${gap.rowId}, ${gap.costCode})`],
     ["Low-resolution references (flagged, not excluded)", gaps.lowResolutionReferences ?? [], (gap) =>
       `- ${gap.unitType} / ${gap.roomLabel} / ${gap.collageType} / ${gap.slotId}: ${gap.itemName} — ${gap.width}x${gap.height} (${gap.path})`],
+    ["Boards merged into a twin room", gaps.mergedBoards ?? [], (gap) =>
+      gap.mergedInto
+        ? `- ${gap.unitType} / ${gap.roomLabel} / ${gap.collageType}: merged into board "${gap.mergedInto}"`
+        : `- ${gap.unitType} / ${gap.roomLabel} / ${gap.collageType}: NOT merged — ${gap.reason}`],
   ];
   for (const [title, list, formatter] of sections) {
     lines.push(`## ${title} (${list.length})`, "");
@@ -1257,6 +1279,7 @@ const { values, positionals } = parseArgs({
     port: { type: "string" },
     force: { type: "boolean" },
     "no-qa": { type: "boolean" },
+    "no-merge": { type: "boolean" },
     "qa-model": { type: "string" },
     help: { type: "boolean", short: "h" },
   },

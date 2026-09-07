@@ -4,7 +4,7 @@
 // without spinning up a server.
 
 import { extractBrand, extractTier } from "./match.mjs";
-import { resolveTileCode } from "./tiles.mjs";
+import { readImageSize, resolveTileCode } from "./tiles.mjs";
 
 export const TILE_SLOT_IDS = new Set(["main_tile", "accent_tile"]);
 
@@ -28,8 +28,9 @@ export function slotKind(slotId) {
 }
 
 // The prefix marking a custom (not-in-the-manifest) item's synthetic rowId,
-// so applySelection can tell it apart from a real Smartsheet row id.
-const CUSTOM_ID_PREFIX = "custom:";
+// so applySelection can tell it apart from a real Smartsheet row id. Exported
+// so review-server.mjs's /api/replace-image can tell the two apart too.
+export const CUSTOM_ID_PREFIX = "custom:";
 
 // The browsable candidates for one board's slot: every tile code for a tile
 // slot, or every row in that board's room (plus any custom items added for
@@ -136,6 +137,27 @@ export function applySelection({ board, slotId, choice, roomIndex, tileIndex, re
   const now = new Date().toISOString();
   item.overriddenAt = now;
   board.overriddenAt = now; // board-level marker — see boardOverriddenAt
+  return item;
+}
+
+// Swaps a slot's photo in place without touching anything else about the
+// item — name/brand/notes/provenance/tier/rowId/sku all survive untouched.
+// For "I just want a better picture of the SAME item" (see uploads.mjs's
+// replaceCustomItemPhoto/replaceTileImage, and review-server.mjs's
+// saveUploadedRowImage call, whichever produced `imagePath`). Snapshots the
+// auto-pick on first override, same as applySelection, so "Reset to
+// auto-pick" still works after an image-only swap.
+export function replaceItemImage({ board, slotId, imagePath }) {
+  const item = board.items.find((entry) => entry.slotId === slotId);
+  if (!item) throw Object.assign(new Error(`Board "${board.id}" has no slot "${slotId}".`), { status: 404 });
+  if (!item._auto) item._auto = snapshotAuto(item);
+  item.images = [imagePath];
+  const size = readImageSize(imagePath);
+  if (size) item.imageMeta = [{ path: imagePath, width: size.width, height: size.height }];
+  else delete item.imageMeta;
+  const now = new Date().toISOString();
+  item.overriddenAt = now;
+  board.overriddenAt = now;
   return item;
 }
 

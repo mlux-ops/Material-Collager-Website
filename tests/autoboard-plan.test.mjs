@@ -1,9 +1,21 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { validateCollageRequest } from "../app/lib/collage.ts";
 import { normalizeRoomLabel, parseCsv, csvObjects, emptyGaps } from "../scripts/autoboard/lib/source.mjs";
-import { assignSlots, boardTypesForRoom, buildBoards, extractBrand, extractTier } from "../scripts/autoboard/lib/match.mjs";
+import {
+  applyBoardMerges,
+  assignSlots,
+  boardTypesForRoom,
+  buildBoards,
+  extractBrand,
+  extractTier,
+  loadBuildLog,
+  makeDiskImageResolver,
+} from "../scripts/autoboard/lib/match.mjs";
 import { boardPayload, boardReferenceFiles, heroFor, DEFAULT_VARIANTS } from "../scripts/autoboard/lib/variants.mjs";
 
 function row(overrides) {
@@ -335,4 +347,194 @@ test("buildBoards never truncates a long item name", () => {
   const board = boards.find((entry) => entry.collageType === "bathroom_fixture_collage");
   const faucet = board.items.find((item) => item.slotId === "vanity_faucet");
   assert.equal(faucet.name, longName);
+});
+
+// ---------------------------------------------------------------------------
+// loadBuildLog / makeDiskImageResolver: SKU fallback for reused row ids.
+// (Observed on real data 2026-09-06: Smartsheet reused a row id, so a row-id
+// -only lookup can return a different product's photos than the caller asked
+// for. The SKU index lets the resolver detect and correct for that.)
+// ---------------------------------------------------------------------------
+
+function makeFakeLibrary(csvRows) {
+  const root = mkdtempSync(path.join(os.tmpdir(), "autoboard-buildlog-"));
+  const buildDir = path.join(root, "Master_Library_Build");
+  mkdirSync(buildDir, { recursive: true });
+  const header = "row_id,item_name,sku,folder,matched_files";
+  const lines = csvRows.map((r) => `${r.row_id},${r.item_name},${r.sku},${r.folder},${r.matched_files}`);
+  writeFileSync(path.join(buildDir, "_BUILD_LOG.csv"), [header, ...lines].join("\n") + "\n", "utf8");
+  return root;
+}
+
+function makeFolderWithImage(root, folderName, fileName) {
+  const dir = path.join(root, ...folderName.split("/"));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, fileName), "fake image bytes");
+}
+
+test("resolveImages: unchanged row id resolves exactly as before", (t) => {
+  const root = makeFakeLibrary([
+    { row_id: "1", item_name: "GROHE Chrome Valve", sku: "GRH-1", folder: "GROHE_Valve", matched_files: "photo.jpg" },
+  ]);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  makeFolderWithImage(root, "GROHE_Valve", "photo.jpg");
+
+  const buildLog = loadBuildLog(root);
+  const resolveImages = makeDiskImageResolver(root, buildLog);
+  const images = resolveImages("1", "GRH-1");
+  assert.equal(images.length, 1);
+  assert.ok(images[0].endsWith(path.join("GROHE_Valve", "photo.jpg")));
+
+  // No sku passed at all behaves identically (today's callers).
+  const imagesNoSku = resolveImages("1");
+  assert.deepEqual(imagesNoSku, images);
+});
+
+test("resolveImages: row-id entry with a different sku than requested falls back to the SKU match", (t) => {
+  const root = makeFakeLibrary([
+    // Row 1 was a GROHE valve; the sheet reused row id 1 for a Hansgrohe hand shower.
+    { row_id: "1", item_name: "GROHE Chrome Valve", sku: "GRH-1", folder: "GROHE_Valve", matched_files: "photo.jpg" },
+    { row_id: "2", item_name: "Hansgrohe Matte White Hand Shower", sku: "HG-2", folder: "Hansgrohe_HandShower", matched_files: "hand.jpg" },
+  ]);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  makeFolderWithImage(root, "GROHE_Valve", "photo.jpg");
+  makeFolderWithImage(root, "Hansgrohe_HandShower", "hand.jpg");
+
+  const resolveImages = makeDiskImageResolver(root, loadBuildLog(root));
+  // Caller asks for row 1 but expects the Hansgrohe SKU (row id was reused).
+  const images = resolveImages("1", "HG-2");
+  assert.equal(images.length, 1);
+  assert.ok(images[0].endsWith(path.join("Hansgrohe_HandShower", "hand.jpg")));
+});
+
+test("resolveImages: unknown row id with a known sku resolves by SKU", (t) => {
+  const root = makeFakeLibrary([
+    { row_id: "5", item_name: "Brizo Odin Faucet", sku: "BRZ-5", folder: "Brizo_Odin", matched_files: "faucet.jpg" },
+  ]);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  makeFolderWithImage(root, "Brizo_Odin", "faucet.jpg");
+
+  const resolveImages = makeDiskImageResolver(root, loadBuildLog(root));
+  const images = resolveImages("999", "BRZ-5");
+  assert.equal(images.length, 1);
+  assert.ok(images[0].endsWith(path.join("Brizo_Odin", "faucet.jpg")));
+});
+
+test("resolveImages: unknown row id with unknown sku returns []", (t) => {
+  const root = makeFakeLibrary([
+    { row_id: "5", item_name: "Brizo Odin Faucet", sku: "BRZ-5", folder: "Brizo_Odin", matched_files: "faucet.jpg" },
+  ]);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  makeFolderWithImage(root, "Brizo_Odin", "faucet.jpg");
+
+  const resolveImages = makeDiskImageResolver(root, loadBuildLog(root));
+  assert.deepEqual(resolveImages("999", "NOPE"), []);
+  // Also unknown row id, no sku at all.
+  assert.deepEqual(resolveImages("999"), []);
+});
+
+test("resolveImages: SKU '.0' suffix normalization matches spreadsheet-export skus", (t) => {
+  const root = makeFakeLibrary([
+    // Spreadsheet export coerced this sku through a numeric column.
+    { row_id: "7", item_name: "Kohler Widespread Faucet", sku: "12345.0", folder: "Kohler_Faucet", matched_files: "f.jpg" },
+  ]);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  makeFolderWithImage(root, "Kohler_Faucet", "f.jpg");
+
+  const resolveImages = makeDiskImageResolver(root, loadBuildLog(root));
+  // Caller's sku for this row lacks the ".0", and row id is unknown so this
+  // must go through the bySku path to prove normalization is applied there.
+  const images = resolveImages("unknown-row", "12345");
+  assert.equal(images.length, 1);
+  assert.ok(images[0].endsWith(path.join("Kohler_Faucet", "f.jpg")));
+
+  // Also exercise the row-id path: entry sku "12345.0" must normalize-equal
+  // a requested sku of "12345" so the row-id entry is trusted, not bypassed.
+  const imagesViaRowId = resolveImages("7", "12345");
+  assert.deepEqual(imagesViaRowId, images);
+});
+
+function makeBoard(overrides) {
+  return {
+    id: overrides.id,
+    unitType: overrides.unitType,
+    roomLabel: overrides.roomLabel,
+    collageType: overrides.collageType ?? "bathroom_fixture_collage",
+    kindLabel: overrides.kindLabel ?? "Fixture Collage",
+    title: `${overrides.unitType} ${overrides.roomLabel} ${overrides.kindLabel ?? "Fixture Collage"}`,
+    items: overrides.items ?? [],
+  };
+}
+
+test("applyBoardMerges: happy path merges two identical-selection boards into one with an alias", () => {
+  const keep = makeBoard({ id: "penthouse-bath-2-fixture", unitType: "Penthouse", roomLabel: "Bath 2" });
+  const merge = makeBoard({ id: "triplex-bath-4-fixture", unitType: "Triplex", roomLabel: "Bath 4" });
+  const gaps = emptyGaps();
+  const result = applyBoardMerges(
+    [keep, merge],
+    gaps,
+    [{ keep: "penthouse::bath 2", merge: ["triplex::bath 4"] }],
+  );
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].id, "penthouse-bath-2-fixture");
+  assert.deepEqual(result[0].aliases, ["Triplex Bath 4"]);
+  assert.equal(result[0].title, "Penthouse Bath 2 / Triplex Bath 4 Fixture Collage");
+  assert.deepEqual(gaps.mergedBoards, [
+    {
+      unitType: "Triplex",
+      roomLabel: "Bath 4",
+      collageType: "bathroom_fixture_collage",
+      mergedInto: "penthouse-bath-2-fixture",
+    },
+  ]);
+});
+
+test("applyBoardMerges: multi-alias powder room case appends every merged room to the title", () => {
+  const keep = makeBoard({ id: "penthouse-powder-room-fixture", unitType: "Penthouse", roomLabel: "Powder Room" });
+  const mergeA = makeBoard({ id: "triplex-powder-room-fixture", unitType: "Triplex", roomLabel: "Powder Room" });
+  const mergeB = makeBoard({ id: "triplex-powder-2-fixture", unitType: "Triplex", roomLabel: "Powder 2" });
+  const gaps = emptyGaps();
+  const result = applyBoardMerges(
+    [keep, mergeA, mergeB],
+    gaps,
+    [{ keep: "penthouse::powder room", merge: ["triplex::powder room", "triplex::powder 2"] }],
+  );
+
+  assert.equal(result.length, 1);
+  assert.deepEqual(result[0].aliases, ["Triplex Powder Room", "Triplex Powder 2"]);
+  assert.equal(result[0].title, "Penthouse Powder Room / Triplex Powder Room / Triplex Powder 2 Fixture Collage");
+  assert.equal(gaps.mergedBoards.length, 2);
+});
+
+test("applyBoardMerges: kept room missing a board for the collage type leaves the merge board in place and records a gap", () => {
+  const merge = makeBoard({ id: "triplex-bath-2-fixture", unitType: "Triplex", roomLabel: "Bath 2" });
+  const gaps = emptyGaps();
+  // No "penthouse::bath 3" board exists at all — the kept room has zero boards.
+  const result = applyBoardMerges(
+    [merge],
+    gaps,
+    [{ keep: "penthouse::bath 3", merge: ["triplex::bath 2"] }],
+  );
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].id, "triplex-bath-2-fixture");
+  assert.equal(result[0].aliases, undefined);
+  assert.deepEqual(gaps.mergedBoards, [
+    {
+      unitType: "Triplex",
+      roomLabel: "Bath 2",
+      collageType: "bathroom_fixture_collage",
+      mergedInto: null,
+      reason: "kept room has no bathroom_fixture_collage board",
+    },
+  ]);
+});
+
+test("applyBoardMerges: no merges configured returns boards unchanged", () => {
+  const board = makeBoard({ id: "penthouse-bath-2-fixture", unitType: "Penthouse", roomLabel: "Bath 2" });
+  const gaps = emptyGaps();
+  const result = applyBoardMerges([board], gaps, []);
+  assert.deepEqual(result, [board]);
+  assert.deepEqual(gaps.mergedBoards, []);
 });
