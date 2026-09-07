@@ -6,7 +6,7 @@ Implemented locally against GitHub `main` at `1e5dee9`. The workspace was fast-f
 
 - `app/lib/collage.ts`: shortened repeated instructions while retaining ordered image mapping, primary/supporting views, exact product count, finish/geometry requirements, user notes, and final verification instructions. Styling props now have an explicit count exception. Approved drafts control arrangement, camera, and lighting without contradictory presets. Explicit item edits take precedence over general preservation rules.
 - `app/api/generate/route.ts`: Final requests use high quality and lossless PNG, preserving their requested dimensions and original submitted reference bytes. Removed the extra lower-resolution fallback that could change aspect ratio and issue four upstream calls. Cancellation reaches reference downloads and image generation. Oversized prompts fail before reference retrieval.
-- `app/lib/image-edit.ts` and `app/lib/openai-server.ts`: at most one automatic retry for eligible provider errors, respecting `Retry-After`; abortable backoff; no automatic replay after ambiguous network failures or timeouts; terminal handling of quota, billing, and user-correctable image errors. Shared prompt validation also protects workbench generation/edit calls. Usage remains the API's returned usage, without inventing token discounts.
+- `app/lib/image-edit.ts` and `app/lib/openai-server.ts`: one upstream image-edit attempt per user action; failures surface with request diagnostics rather than silently repeating a potentially billable render. Quota, billing, and user-correctable image errors remain terminal. Shared prompt validation also protects workbench generation/edit calls. Usage remains the API's returned usage, without inventing token discounts.
 - `app/api/economy/route.ts`: history polling records failed batches without buying a smaller replacement render; validates prompts before submission.
 - `src/material_collager/prompts.py`: omitted the unrelated metal-finish glossary, made supporting-view instructions conditional, condensed duplication, and clarified the styling count exception.
 - Regression coverage: `tests/image-efficiency.test.mjs`, `tests/image-routes.test.mjs`, `tests/collage-layout-master.test.mjs`, `tests/collage-prompt.test.mjs`, and `tests/test_prompts.py`.
@@ -37,7 +37,7 @@ These are text-length measurements, **not measured token billing or total-cost r
 
 No live OpenAI renders were purchased during validation. The tests exercise prompt construction, original-byte transmission, settings, failures, retry counts, persistence inputs, and cancellation using mocked upstream calls. Improved visual accuracy and adherence remain to be evaluated on real renders. A useful follow-up is a matched before/after comparison of the four fixtures above, reviewing product count, finish/color, geometry, layout, artifacts, returned usage, and rerun rate. Do not infer visual quality from shorter prompts alone.
 
-No deployment, push, or new commit was performed. The existing `.claude/settings.local.json` was preserved.
+No deployment or live OpenAI render was performed. The existing `.claude/settings.local.json` was preserved.
 
 ## Official guidance used
 

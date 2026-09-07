@@ -53,7 +53,7 @@ test("Final uses high quality, original pixels, requested dimensions and lossles
   assert.equal((await response.json()).usage.total_tokens, 123);
 });
 
-test("transient failures never trigger a smaller or different-aspect render", async (t) => {
+test("transient failures preserve the requested render and make one paid call", async (t) => {
   const sizes = [];
   t.mock.method(globalThis, "fetch", async (_url, init) => {
     sizes.push(init.body.get("size"));
@@ -61,7 +61,7 @@ test("transient failures never trigger a smaller or different-aspect render", as
   });
   const response = await POST(request());
   assert.equal(response.status, 503);
-  assert.deepEqual(sizes, ["2560x1440", "2560x1440"]);
+  assert.deepEqual(sizes, ["2560x1440"]);
 });
 
 test("collage cancellation reaches the paid upstream render", async (t) => {

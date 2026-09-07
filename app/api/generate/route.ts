@@ -142,7 +142,7 @@ export async function POST(request: Request) {
             // always PNG regardless of what the real render requested.
             output_format: "png",
             output_compression: undefined,
-          }, diagnostics.attempts, false, request.signal);
+          }, diagnostics.attempts, request.signal);
           diagnosticImageBase64 = testResult.data.data?.[0]?.b64_json;
           isolationResults.push({ referenceCount: count, outcome: "succeeded" });
         } catch (error) {
@@ -167,9 +167,9 @@ export async function POST(request: Request) {
         filename: "isolation-test.png",
       });
     }
-    // Retry a transient provider rejection once at the requested settings.
-    // Never purchase a lower-resolution render or change the approved aspect.
-    const imageResult = await createImageEdit(apiKey, imageRequest, diagnostics.attempts, true, request.signal);
+    // One upstream attempt per user action preserves the requested settings
+    // without risking a duplicate paid render after an ambiguous failure.
+    const imageResult = await createImageEdit(apiKey, imageRequest, diagnostics.attempts, request.signal);
     const { data: imageJson, attempts: imageAttempts } = imageResult;
     const imageBase64 = imageJson.data?.[0]?.b64_json;
     if (!imageBase64) {

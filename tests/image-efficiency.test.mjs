@@ -42,7 +42,7 @@ test("a cancelled request does not submit even its first paid call", async (t) =
     calls++;
     return Response.json({ data: [{ b64_json: "AA==" }] });
   });
-  await assert.rejects(createImageEdit("test-only", body, [], true, AbortSignal.abort()));
+  await assert.rejects(createImageEdit("test-only", body, [], AbortSignal.abort()));
   assert.equal(calls, 0);
 });
 
@@ -75,19 +75,17 @@ test("an approved draft wins over composition presets to prevent final-render la
   assert.match(prompt, /Keep the approved draft camera and lighting direction/);
 });
 
-test("cancelling during Retry-After prevents a second paid call", async (t) => {
-  const controller = new AbortController();
+test("a retryable provider failure never triggers a second paid call", async (t) => {
   let calls = 0;
   t.mock.method(globalThis, "fetch", async () => {
     calls++;
-    setTimeout(() => controller.abort(), 0);
-    return Response.json({ error: { message: "Busy" } }, { status: 429, headers: { "retry-after": "20" } });
+    return Response.json({ error: { message: "Busy" } }, { status: 503 });
   });
-  await assert.rejects(createImageEdit("test-only", body, [], true, controller.signal));
+  await assert.rejects(createImageEdit("test-only", body, []));
   assert.equal(calls, 1);
 });
 
-test("long Retry-After is surfaced instead of retried too soon", async (t) => {
+test("Retry-After is surfaced without an automatic repeat", async (t) => {
   let calls = 0;
   t.mock.method(globalThis, "fetch", async () => {
     calls++;
