@@ -66,9 +66,11 @@ Pure functions except `postGeneration`:
   `buildConfirmPayload(board, variant, sourceRender, {...})`,
   `buildFinalPayload(board, variant, sourceRender, {...})` — return
   `{ payload, files }` already passed through `validateCollageRequest`.
-  Per-item notes come from `item.note`; the board instruction is appended to
-  the payload's board-level notes field the same way `redraft` applies
-  `notes.json` today.
+  Per-item notes come from `item.note`. The collage request has no
+  board-level notes field (only per-item `notes`), so the board instruction
+  is appended to the **hero item's** notes as `Board instruction: <text>` —
+  the hero is always first in payload order. A request-level field in the app
+  is a follow-up that needs a deploy.
 - `postGeneration(baseUrl, payload, files, { accessHeaders, signal })` —
   moved from `cli.mjs` unchanged in behaviour (reference resize-on-upload,
   Access 302/403 detection, `retryAfterMs` on the thrown error), plus an
