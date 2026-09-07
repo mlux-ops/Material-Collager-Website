@@ -139,6 +139,7 @@ export function emptyGaps() {
     unfilledSlots: [],
     skippedBoards: [],
     lowResolutionReferences: [],
+    mergedBoards: [],
   };
 }
 

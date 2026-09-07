@@ -1,0 +1,35 @@
+{
+  "_readme": "Rooms whose selections are identical across units render as one board. `keep` is the room whose data drives the board; `merge` rooms are dropped from planning and appended to the kept board's title/aliases. Keys are `<unit>::<room label>` in lowercase, matching roomKey().",
+  "merges": [
+    {
+      "keep": "penthouse::bath 2",
+      "merge": [
+        "triplex::bath 4"
+      ]
+    },
+    {
+      "keep": "penthouse::bath 3",
+      "merge": [
+        "triplex::bath 2"
+      ]
+    },
+    {
+      "keep": "penthouse::bath 4",
+      "merge": [
+        "triplex::bath 3"
+      ]
+    },
+    {
+      "keep": "penthouse::primary bath",
+      "merge": [
+        "triplex::primary bath"
+      ]
+    },
+    {
+      "keep": "penthouse::powder room",
+      "merge": [
+        "triplex::powder room"
+      ]
+    }
+  ]
+}

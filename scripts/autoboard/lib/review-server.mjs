@@ -8,9 +8,9 @@ import { readFile, writeFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 
-import { addSlot, buildRoomIndex, libraryOptionsForSlot, applySelection, removeSlot, resetSelection, roomKeyFor, slotKind } from "./review-core.mjs";
+import { addSlot, applySelection, buildRoomIndex, CUSTOM_ID_PREFIX, libraryOptionsForSlot, removeSlot, replaceItemImage, resetSelection, roomKeyFor, slotKind } from "./review-core.mjs";
 import { makeDiskImageResolver } from "./match.mjs";
-import { indexTileCodes } from "./tiles.mjs";
+import { indexTileCodes, resolveTileCode } from "./tiles.mjs";
 import { loadLibraryRows } from "./source.mjs";
 import { heroFor } from "./variants.mjs";
 import {
@@ -18,6 +18,8 @@ import {
   customItemsRootDir,
   decodeUploadedImage,
   isValidTileCode,
+  replaceCustomItemPhoto,
+  replaceTileImage,
   saveCustomItem,
   saveUploadedRowImage,
   saveUploadedTileImage,
@@ -222,6 +224,60 @@ export async function startReviewServer({ runDir, planPath, port, renderReviewPa
         const item = applySelection({ board, slotId, choice: { kind: "tile", code }, roomIndex, tileIndex, resolveImages });
         await persistPlan();
         sendJson(response, 200, { item: serializeItem(item) });
+        return;
+      }
+
+      // Replaces the photo of an existing item in place — no new item, no
+      // re-typing name/brand/notes. Two shapes:
+      //  - no `target`: swap the photo of whatever currently occupies
+      //    `slotId` (the main-page card's "Replace image" control).
+      //  - `target: { kind: "tile", code }` or `{ kind: "row", rowId }`:
+      //    swap that SPECIFIC library option's stored photo (the picker's
+      //    per-option "Replace photo" control), which may not be the slot's
+      //    current pick at all. If it happens to be, the slot is refreshed
+      //    too and `item` comes back; otherwise only `imagePath` comes back
+      //    so the picker can update just that option's thumbnail.
+      if (request.method === "POST" && url.pathname === "/api/replace-image") {
+        const { boardId, slotId, mimeType, dataBase64, target } = JSON.parse(await readBody(request));
+        const board = findBoard(boardId);
+        const item = board.items.find((entry) => entry.slotId === slotId);
+        if (!item) throw Object.assign(new Error(`Board "${boardId}" has no slot "${slotId}".`), { status: 404 });
+        const { buffer, ext } = decodeUploadedImage({ mimeType, dataBase64 });
+
+        const kind = target?.kind ?? slotKind(slotId);
+        let imagePath;
+        let matchesCurrentItem;
+
+        if (kind === "tile") {
+          const code = String(target?.code ?? item.sku ?? "").trim().toUpperCase();
+          const tile = resolveTileCode(tileIndex, code);
+          if (!tile) throw Object.assign(new Error(`Unknown tile code "${code}".`), { status: 404 });
+          imagePath = await replaceTileImage(libraryRoot, tile.code, tile.materialName, buffer, ext);
+          tileIndex.set(tile.code, { code: tile.code, materialName: tile.materialName, filePath: imagePath });
+          matchesCurrentItem = slotKind(slotId) === "tile" && item.sku === tile.code;
+        } else {
+          const rowId = String(target?.rowId ?? item.rowId ?? "");
+          if (!rowId) throw Object.assign(new Error("No item to replace a photo for."), { status: 400 });
+          if (rowId.startsWith(CUSTOM_ID_PREFIX)) {
+            const customId = rowId.slice(CUSTOM_ID_PREFIX.length);
+            imagePath = await replaceCustomItemPhoto(roomKeyFor(board.unitType, board.roomLabel), customId, buffer, ext);
+          } else {
+            const rows = roomIndex.get(roomKeyFor(board.unitType, board.roomLabel)) ?? [];
+            if (!rows.some((row) => row.rowId === rowId)) {
+              throw Object.assign(new Error("That item is not in this board's room."), { status: 400 });
+            }
+            imagePath = await saveUploadedRowImage(rowId, buffer, ext);
+          }
+          matchesCurrentItem = item.rowId === rowId;
+        }
+
+        if (matchesCurrentItem) {
+          const updated = replaceItemImage({ board, slotId, imagePath });
+          await persistPlan();
+          sendJson(response, 200, { item: serializeItem(updated) });
+        } else {
+          sendJson(response, 200, { imagePath });
+        }
         return;
       }
 

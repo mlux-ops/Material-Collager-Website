@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 
 import {
@@ -9,10 +12,31 @@ import {
   isStaleCandidate,
   libraryOptionsForSlot,
   removeSlot,
+  replaceItemImage,
   resetSelection,
   roomKeyFor,
   slotKind,
 } from "../scripts/autoboard/lib/review-core.mjs";
+import { startReviewServer } from "../scripts/autoboard/lib/review-server.mjs";
+
+// A tiny real 1x1 PNG (valid header) — readImageSize needs actual bytes to
+// parse, unlike the other tests here which get away with fake "/fake/..."
+// paths since they never touch image dimensions.
+const ONE_BY_ONE_PNG = Buffer.from(
+  "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de0000000c4944415408d763f8cfc0c0c0c40000000704fe07b3ee7e0000000049454e44ae426082",
+  "hex",
+);
+
+function withTempPng(name, fn) {
+  const dir = mkdtempSync(path.join(tmpdir(), "autoboard-review-test-"));
+  try {
+    const filePath = path.join(dir, name);
+    writeFileSync(filePath, ONE_BY_ONE_PNG);
+    return fn(filePath);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 function row(overrides) {
   return {
@@ -379,6 +403,63 @@ test("isStaleCandidate: a slot changed after the candidate rendered makes it sta
   assert.equal(isStaleCandidate(untouched, renderedBefore), false);
 });
 
+test("replaceItemImage swaps only the image/imageMeta, leaving everything else about the item untouched", () => {
+  withTempPng("new-photo.png", (newPath) => {
+    const b = board([{
+      slotId: "vanity_faucet", role: "vanity faucet", required: true, rowId: "1", sku: "SKU-1",
+      brand: "Brizo", name: "Brizo Odin Faucet", notes: "keep it shiny",
+      provenance: "Manually selected in the review UI from the room's library rows.",
+      tier: "better", images: ["/fake/1.png"], imageMeta: [{ path: "/fake/1.png", width: 900, height: 900 }],
+    }]);
+    const item = replaceItemImage({ board: b, slotId: "vanity_faucet", imagePath: newPath });
+
+    assert.deepEqual(item.images, [newPath]);
+    assert.deepEqual(item.imageMeta, [{ path: newPath, width: 1, height: 1 }]);
+    // untouched
+    assert.equal(item.rowId, "1");
+    assert.equal(item.sku, "SKU-1");
+    assert.equal(item.brand, "Brizo");
+    assert.equal(item.name, "Brizo Odin Faucet");
+    assert.equal(item.notes, "keep it shiny");
+    assert.equal(item.provenance, "Manually selected in the review UI from the room's library rows.");
+    assert.equal(item.tier, "better");
+    // staleness stamped, same as every other mutation in this file
+    assert.ok(item.overriddenAt);
+    assert.equal(b.overriddenAt, item.overriddenAt);
+  });
+});
+
+test("replaceItemImage snapshots _auto on first call and preserves it across a later swap", () => {
+  withTempPng("first.png", (firstPath) => {
+    const b = board([{ slotId: "vanity_faucet", role: "vanity faucet", required: true, rowId: "1", sku: "SKU-1", brand: "Brizo", name: "Original", notes: "", images: ["/fake/1.png"] }]);
+    replaceItemImage({ board: b, slotId: "vanity_faucet", imagePath: firstPath });
+    assert.deepEqual(b.items[0]._auto, { rowId: "1", sku: "SKU-1", brand: "Brizo", name: "Original", tier: undefined, notes: "", provenance: undefined, images: ["/fake/1.png"] });
+
+    withTempPng("second.png", (secondPath) => {
+      replaceItemImage({ board: b, slotId: "vanity_faucet", imagePath: secondPath });
+      // the second call must not re-snapshot over the first auto-pick
+      assert.deepEqual(b.items[0]._auto.images, ["/fake/1.png"]);
+      assert.equal(b.items[0].images[0], secondPath);
+    });
+
+    // Reset to auto-pick still works correctly after an image-only swap.
+    const restored = resetSelection({ board: b, slotId: "vanity_faucet" });
+    assert.equal(restored.name, "Original");
+    assert.deepEqual(restored.images, ["/fake/1.png"]);
+    assert.ok(!restored._auto);
+  });
+});
+
+test("replaceItemImage throws with .status 404 for an unknown slot", () => {
+  withTempPng("x.png", (imagePath) => {
+    const b = board([{ slotId: "vanity_faucet", images: ["/fake/1.png"] }]);
+    assert.throws(
+      () => replaceItemImage({ board: b, slotId: "no-such-slot", imagePath }),
+      (error) => error.status === 404,
+    );
+  });
+});
+
 test("resetSelection restores the snapshot and is a no-op if never overridden", () => {
   const roomIndex = buildRoomIndex([row({ rowId: "1" }), row({ rowId: "2" })]);
   const b = board([{ slotId: "vanity_faucet", role: "vanity faucet", required: true, rowId: "1", sku: "SKU-1", brand: "Brizo", name: "Original", notes: "", images: ["/fake/1.png"] }]);
@@ -394,4 +475,72 @@ test("resetSelection restores the snapshot and is a no-op if never overridden", 
   assert.equal(restored.rowId, "1");
   assert.ok(!restored._auto);
   assert.ok(!restored.overriddenAt);
+});
+
+test("POST /api/replace-image swaps a real row's photo and returns the updated item with unchanged name/brand", async () => {
+  const runDir = mkdtempSync(path.join(tmpdir(), "autoboard-review-server-run-"));
+  const libraryRoot = mkdtempSync(path.join(tmpdir(), "autoboard-review-server-lib-"));
+  // saveUploadedRowImage (called by the real /api/replace-image handler, no
+  // `root` override) always writes into the repo's own real
+  // scripts/autoboard/uploaded-images/<rowId>/ overlay — that's the intended
+  // production behavior (see uploads.mjs's header note), not a fixture path.
+  // Use a rowId that can't collide with real data, and clean up just that
+  // one subfolder afterward.
+  const testRowId = "test-server-row-9001";
+  const uploadedImagesRoot = path.join(import.meta.dirname, "..", "scripts", "autoboard", "uploaded-images");
+  let server;
+  try {
+    mkdirSync(path.join(libraryRoot, "Tile", "tiles"), { recursive: true });
+    mkdirSync(path.join(libraryRoot, "Master_Library_Build"), { recursive: true });
+    writeFileSync(path.join(libraryRoot, "Master_Library_Build", "_BUILD_LOG.csv"), "row_id,folder,matched_files\n");
+    writeFileSync(
+      path.join(libraryRoot, "build_manifest_v2.csv"),
+      "row_id,unit_type,room_type,cost_code,item_name,sku,qty,reference\n"
+      + `${testRowId},Penthouse,Bath 2,11 45 Plumbing Fixtures M,Test Faucet,SKU-1,1,\n`,
+    );
+    const planPath = path.join(runDir, "plan.json");
+    const plan = {
+      runId: "test-run",
+      source: "offline-manifest",
+      libraryRoot,
+      variants: {},
+      boards: [{
+        id: "test-board", unitType: "Penthouse", roomLabel: "Bath 2", collageType: "bathroom_fixture_collage",
+        kindLabel: "Fixture Collage", title: "Test Board",
+        items: [{
+          slotId: "vanity_faucet", role: "vanity faucet", required: true, rowId: testRowId, sku: "SKU-1",
+          brand: "Test Brand", name: "Test Faucet", notes: "", images: ["/fake/nonexistent.jpg"],
+        }],
+      }],
+    };
+    writeFileSync(planPath, JSON.stringify(plan, null, 2));
+
+    server = await startReviewServer({ runDir, planPath, port: 0, renderReviewPage: () => "<html></html>" });
+    const { port } = server.address();
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    const response = await fetch(`${baseUrl}/api/replace-image`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        boardId: "test-board", slotId: "vanity_faucet",
+        mimeType: "image/png", dataBase64: ONE_BY_ONE_PNG.toString("base64"),
+      }),
+    });
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.notEqual(data.item.images[0], "/fake/nonexistent.jpg");
+    assert.equal(data.item.name, "Test Faucet");
+    assert.equal(data.item.brand, "Test Brand");
+    assert.ok(data.item.overriddenAt);
+
+    // Persisted to plan.json, same as every other mutating endpoint.
+    const persisted = JSON.parse(readFileSync(planPath, "utf8"));
+    assert.equal(persisted.boards[0].items[0].images[0], data.item.images[0]);
+  } finally {
+    if (server) await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    rmSync(runDir, { recursive: true, force: true });
+    rmSync(libraryRoot, { recursive: true, force: true });
+    rmSync(path.join(uploadedImagesRoot, testRowId), { recursive: true, force: true });
+  }
 });
