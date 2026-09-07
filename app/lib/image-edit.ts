@@ -1,5 +1,5 @@
 // Shared server-side machinery for calling OpenAI /v1/images/edits with
-// gpt-image-2: multipart transport, retry on transient failures, and
+// gpt-image-2: multipart transport, single-attempt execution, and
 // per-attempt diagnostics. Used by /api/generate (collage pipeline) and
 // /api/workbench/* (node editor).
 
@@ -33,8 +33,8 @@ export type ImageEditRequest = {
   // 0-100; OpenAI applies this only to jpeg/webp and ignores it for png, so
   // createImageEdit only sends it alongside those two formats.
   output_compression?: number;
-  // Number of candidates to generate in one call (1-10). Input tokens are
-  // charged once per request, so n>1 beats n separate calls.
+  // Number of requested candidates (1-10). Additional candidates consume
+  // output tokens; use the returned usage rather than assuming an input discount.
   n?: number;
   // Wall-clock ceiling for one attempt. Undefined uses IMAGE_EDIT_TIMEOUT_MS;
   // NULL disables the timer entirely, for long user-initiated work that must
@@ -78,8 +78,6 @@ export class DiagnosedGenerationError extends Error {
   }
 }
 
-const IMAGE_RETRY_DELAYS_MS = [1500];
-
 // Default wall-clock ceiling for ONE upstream attempt. A caller can override
 // it per request, including disabling it outright — see ImageEditRequest.
 export const IMAGE_EDIT_TIMEOUT_MS = 300_000;
@@ -88,69 +86,61 @@ export async function createImageEdit(
   apiKey: string,
   body: ImageEditRequest,
   diagnostics: AttemptDiagnostic[],
-  retry = true,
   callerSignal?: AbortSignal,
 ) {
-  let lastError: unknown;
-  const retryDelays = retry ? IMAGE_RETRY_DELAYS_MS : [];
-
-  for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
-    const startedAt = Date.now();
-    try {
-      const form = new FormData();
-      form.append("model", body.model);
-      form.append("prompt", body.prompt);
-      form.append("size", body.size);
-      form.append("quality", body.quality);
-      form.append("background", body.background);
-      form.append("output_format", body.output_format);
-      if (body.output_compression !== undefined && (body.output_format === "jpeg" || body.output_format === "webp")) {
-        form.append("output_compression", String(body.output_compression));
-      }
-      if (body.n && body.n > 1) form.append("n", String(body.n));
-      // GPT Image 2 uses high-fidelity image inputs automatically and rejects input_fidelity.
-      for (const reference of body.references) {
-        form.append("image[]", reference.blob, reference.filename);
-      }
-      if (body.mask) form.append("mask", body.mask.blob, body.mask.filename);
-
-      const response = await fetch("https://api.openai.com/v1/images/edits", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}` },
-        body: form,
-        // E1 cancellation threading: combine the caller's AbortSignal (aborted
-        // when the client fetch to /api/workbench/edit is cancelled) with the
-        // per-attempt timeout, so BOTH a client cancel and the timeout abort
-        // this upstream OpenAI call. A null body.timeoutMs drops only the
-        // timer — the caller's cancel still lands.
-        signal: combineAbortSignals(
-          callerSignal,
-          body.timeoutMs === null ? undefined : body.timeoutMs ?? IMAGE_EDIT_TIMEOUT_MS,
-        ),
-      });
-      const data = await readOpenAIResponse<OpenAIImageResponse>(response);
-      diagnostics.push({ stage: "image_edit", outcome: "succeeded", attempt: attempt + 1, durationMs: Date.now() - startedAt, size: body.size });
-      return { data, attempts: attempt + 1 };
-    } catch (error) {
-      diagnostics.push(diagnosticFor(error, "image_edit", attempt + 1, Date.now() - startedAt, body.size));
-      lastError = error;
-      if (!isRetryableImageError(error) || attempt === retryDelays.length) {
-        throw new DiagnosedGenerationError(error, {
-          model: body.model,
-          transport: "multipart",
-          quality: body.quality,
-          referenceCount: body.references.length,
-          totalReferenceBytes: body.references.reduce((sum, reference) => sum + reference.blob.size, 0),
-          largestReferenceBytes: Math.max(...body.references.map((reference) => reference.blob.size), 0),
-          references: body.references.map((reference) => ({ filename: reference.filename, bytes: reference.blob.size, mimeType: reference.blob.type })),
-          attempts: diagnostics,
-        });
-      }
-      await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+  validateImagePrompt(body.prompt);
+  const startedAt = Date.now();
+  try {
+    callerSignal?.throwIfAborted();
+    const form = new FormData();
+    form.append("model", body.model);
+    form.append("prompt", body.prompt);
+    form.append("size", body.size);
+    form.append("quality", body.quality);
+    form.append("background", body.background);
+    form.append("output_format", body.output_format);
+    if (body.output_compression !== undefined && (body.output_format === "jpeg" || body.output_format === "webp")) {
+      form.append("output_compression", String(body.output_compression));
     }
-  }
+    if (body.n && body.n > 1) form.append("n", String(body.n));
+    // GPT Image 2 uses high-fidelity image inputs automatically and rejects input_fidelity.
+    for (const reference of body.references) {
+      form.append("image[]", reference.blob, reference.filename);
+    }
+    if (body.mask) form.append("mask", body.mask.blob, body.mask.filename);
 
-  throw lastError instanceof Error ? lastError : new Error("OpenAI image generation failed.");
+    const response = await fetch("https://api.openai.com/v1/images/edits", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+      // E1 cancellation threading: combine the caller's AbortSignal (aborted
+      // when the client fetch to /api/workbench/edit is cancelled) with the
+      // per-attempt timeout, so BOTH a client cancel and the timeout abort
+      // this upstream OpenAI call. A null body.timeoutMs drops only the
+      // timer — the caller's cancel still lands.
+      signal: combineAbortSignals(
+        callerSignal,
+        body.timeoutMs === null ? undefined : body.timeoutMs ?? IMAGE_EDIT_TIMEOUT_MS,
+      ),
+    });
+    const data = await readOpenAIResponse<OpenAIImageResponse>(response);
+    diagnostics.push({ stage: "image_edit", outcome: "succeeded", attempt: 1, durationMs: Date.now() - startedAt, size: body.size });
+    return { data, attempts: 1 };
+  } catch (error) {
+    diagnostics.push(diagnosticFor(error, "image_edit", 1, Date.now() - startedAt, body.size));
+    // A failed provider request may have reached the service. Surface it to
+    // the caller instead of silently charging for a duplicate render.
+    throw new DiagnosedGenerationError(error, {
+      model: body.model,
+      transport: "multipart",
+      quality: body.quality,
+      referenceCount: body.references.length,
+      totalReferenceBytes: body.references.reduce((sum, reference) => sum + reference.blob.size, 0),
+      largestReferenceBytes: Math.max(...body.references.map((reference) => reference.blob.size), 0),
+      references: body.references.map((reference) => ({ filename: reference.filename, bytes: reference.blob.size, mimeType: reference.blob.type })),
+      attempts: diagnostics,
+    });
+  }
 }
 
 // Pure text-to-image (no input images) uses /v1/images/generations with a
@@ -161,8 +151,10 @@ export async function createImageGeneration(
   diagnostics: AttemptDiagnostic[],
   callerSignal?: AbortSignal,
 ) {
+  validateImagePrompt(body.prompt);
   const startedAt = Date.now();
   try {
+    callerSignal?.throwIfAborted();
     const response = await fetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
@@ -216,10 +208,15 @@ export function safeReferenceFilename(value: string) {
 
 export function isRetryableImageError(error: unknown): boolean {
   if (error instanceof DiagnosedGenerationError) return isRetryableImageError(error.causeError);
-  if (error instanceof TypeError) return true;
   if (!(error instanceof OpenAIRequestError)) return false;
-  if (error.status === 408 || error.status === 409 || error.status >= 500) return true;
+  if (error.errorType === "image_generation_user_error" || /quota|billing|credit|moderation_blocked/i.test(error.code ?? "")) return false;
+  if (error.status === 409 || error.status >= 500) return true;
   return error.status === 429 && !/quota|billing|credit/i.test(error.message);
+}
+
+export function validateImagePrompt(prompt: string) {
+  if (!prompt.trim()) throw new Error("Enter an image prompt before generating.");
+  if (prompt.length > 32_000) throw new Error("The prompt exceeds the 32,000 character limit. Shorten the item notes or prompt and retry.");
 }
 
 // gpt-image-2 size constraints: dimensions divisible by 16, aspect between

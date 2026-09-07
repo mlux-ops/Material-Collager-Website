@@ -6,15 +6,14 @@ from .models import CollageRequest
 
 
 UNIVERSAL_STYLE_RULES = """Universal style rules:
-- Pure white background, no exceptions.
+- Seamless pure white background (#FFFFFF).
 - Editorial overhead flat-lay composition with an organic curated arrangement, not a grid.
-- Soft natural light from the upper-left with subtle drop shadows so items float on the white surface.
+- Soft neutral light from the upper-left with realistic contact shadows, edge detail, and material thickness.
 - Photorealistic product photography quality, never illustrated or cartoon.
 - Leave breathing room; do not crowd items.
 - Slight overlap between items is encouraged when it feels natural.
 - The hero item should be the most prominent item.
 - No text, labels, annotations, watermarks, or callouts in the generated image.
-- No colored background.
 - Do not include unrequested objects."""
 
 
@@ -78,15 +77,24 @@ def build_generation_prompt(request: CollageRequest) -> str:
         object_count_lines.append(
             f"{supporting} of the {total_images} uploaded images "
             f"{'is a supporting view' if supporting == 1 else 'are supporting views'} that add no object "
-            f"of their own. Count the objects before finishing; if the count exceeds {object_count}, a "
-            "supporting view was rendered as its own object and must be removed."
+            "of their own."
         )
+    if request.collage_type != "appliance_collage":
+        object_count_lines.append(
+            "Styling props are excluded from this product count; allow at most one sprig and one small linen corner."
+        )
+
+    supporting_rules = []
+    if supporting:
+        supporting_rules = [
+            "- A supporting view is another photograph of the SAME physical item, never a second object. Use it to resolve geometry, hidden faces, thickness, component count, and pattern scale. Where they disagree, the primary view decides identity, color, and finish.",
+            "- Never place a supporting view on the canvas as its own element: no duplicates, mirrored twins, insets, exploded parts, or spare swatches.",
+        ]
 
     prompt_parts = [
         "Create one finished high-end interior design material collage board.",
         TYPE_PROMPTS[request.collage_type],
         UNIVERSAL_STYLE_RULES,
-        METAL_FINISH_RULES,
         "Reference image mapping. The image model can see these actual uploaded image files; use them directly as visual references:",
         "\n".join(labels),
         " ".join(object_count_lines),
@@ -95,14 +103,11 @@ def build_generation_prompt(request: CollageRequest) -> str:
         "- Do not invent alternate products when a reference image is provided.",
         "- Do not rely on the item labels as visual descriptions; the uploaded images are the visual source of truth.",
         "- Use metadata only to clarify item role, brand, finish name, and placement priority.",
-        "- A supporting view is another photograph of the SAME physical item shown in that item's primary view: the same faucet, the same tile, the same slab, at a different angle, crop, distance, or lighting. It is a guide for constructing that one object, never a second object.",
-        "- Build each item as one object and read all of its views into it: take identity, color, and finish from the primary view, and use every supporting view to resolve geometry, hidden faces, component count, edge profile, thickness, and pattern scale. Where they disagree, the primary view decides.",
-        "- Never place a supporting view on the canvas as its own element: no duplicate, mirrored twin, alternate colorway, inset, exploded part, detail vignette, or spare swatch beside the object it describes.",
+        *supporting_rules,
         "Output requirements:",
         f"- Orientation: {request.resolved_orientation()}.",
         f"- Canvas size target: {request.resolved_size()}.",
-        "- Background must be pure white.",
-        "- Photorealistic overhead product photography.",
+        "- Check product count, finish, geometry, visibility, and requested placement against the reference map before finishing.",
     ]
 
     if request.collage_type == "appliance_collage":

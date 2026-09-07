@@ -56,7 +56,7 @@ test("the prompt states the exact object count and discounts the supporting view
   assert.match(prompt, /OBJECT COUNT/);
   assert.match(prompt, /exactly 2 referenced objects, one per item ID: "faucet", "tile"/);
   assert.match(prompt, /2 of the 4 uploaded product images are supporting views that add no object of their own/);
-  assert.match(prompt, /if the count exceeds 2, a supporting view was rendered as its own object/);
+  assert.match(prompt, /Before finishing, check item count/);
 });
 
 test("the object count reads naturally for one object and omits the supporting sentence when there are none", () => {

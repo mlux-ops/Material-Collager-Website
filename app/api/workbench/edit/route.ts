@@ -93,7 +93,7 @@ export async function POST(request: Request) {
           background: "opaque",
           output_format: "png",
           n,
-        }, attempts, true, request.signal)
+        }, attempts, request.signal)
       : await createImageGeneration(apiKey, { prompt, size, quality, n }, attempts, request.signal);
 
     const images = (result.data.data ?? []).map((entry) => entry.b64_json).filter((value): value is string => Boolean(value));

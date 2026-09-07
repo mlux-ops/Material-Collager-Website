@@ -63,7 +63,6 @@ test("createImageEdit (image-edit path): the caller's AbortSignal is threaded in
         NOT_A_REAL_API_KEY,
         { model: "gpt-image-2", prompt: "p", references: [{ blob: pngBlob(), filename: "a.png" }], size: "1024x1024", quality: "medium", background: "opaque", output_format: "png" },
         [],
-        false,
         controller.signal,
       );
     },
@@ -90,7 +89,6 @@ test("createImageEdit: a caller abort during the in-flight upstream call aborts 
       NOT_A_REAL_API_KEY,
       { model: "gpt-image-2", prompt: "p", references: [{ blob: pngBlob(), filename: "a.png" }], size: "1024x1024", quality: "medium", background: "opaque", output_format: "png" },
       [],
-      false,
       callerController.signal,
     ),
   );
