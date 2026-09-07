@@ -4,6 +4,7 @@ import {
   buildGenerationPrompt,
   buildSummary,
   resolvedOutputFormat,
+  resolvedQuality,
   resolvedSize,
   type CollageRequestInput,
   type OutputFormat,
@@ -11,6 +12,7 @@ import {
 } from "@/app/lib/collage";
 import {
   OpenAIRequestError,
+  combineAbortSignals,
   errorResponse,
   readOpenAIResponse,
   resolveOpenAIKey,
@@ -46,7 +48,15 @@ export async function POST(request: Request) {
     if (typeof payloadText !== "string") throw new Error("Missing generation payload.");
     const payload = JSON.parse(payloadText) as CollageRequestInput;
     validateCollageRequest(payload);
-    if (payload.renderKind === "final" || payload.outputResolution === "final") payload.quality = "high";
+    // Finals always render at high quality (see resolvedQuality). The payload
+    // is normalized in place so the upstream request, the persisted job and
+    // the diagnostics all agree — and the caller is told when their requested
+    // tier was upgraded instead of having the change happen silently.
+    const requestedQuality = payload.quality;
+    payload.quality = resolvedQuality(payload);
+    const qualityNotice = requestedQuality !== payload.quality
+      ? `Final renders always use high quality; the requested "${requestedQuality}" quality was upgraded.`
+      : "";
     request.signal.throwIfAborted();
 
     const items = activeItems(payload);
@@ -169,8 +179,7 @@ export async function POST(request: Request) {
     }
     // One upstream attempt per user action preserves the requested settings
     // without risking a duplicate paid render after an ambiguous failure.
-    const imageResult = await createImageEdit(apiKey, imageRequest, diagnostics.attempts, request.signal);
-    const { data: imageJson, attempts: imageAttempts } = imageResult;
+    const { data: imageJson } = await createImageEdit(apiKey, imageRequest, diagnostics.attempts, request.signal);
     const imageBase64 = imageJson.data?.[0]?.b64_json;
     if (!imageBase64) {
       throw new Error("OpenAI did not return image data.");
@@ -207,19 +216,21 @@ export async function POST(request: Request) {
       jobId: stored?.id,
       libraryVisible: stored?.libraryVisible ?? false,
       renderKind,
-      notice: [imageAttempts > 1
-          ? `OpenAI completed the collage after ${imageAttempts} attempts.`
-          : "", storageNotice].filter(Boolean).join(" ") || undefined,
+      notice: [qualityNotice, storageNotice].filter(Boolean).join(" ") || undefined,
       diagnostics,
     });
   } catch (error) {
     const diagnosed = error instanceof DiagnosedGenerationError ? error : undefined;
     const rootError = diagnosed?.causeError ?? error;
-    const base = await errorResponse(rootError).json() as Record<string, unknown>;
+    const upstream = errorResponse(rootError);
+    const base = await upstream.json() as Record<string, unknown>;
     const status = rootError instanceof OpenAIRequestError ? rootError.status : 400;
+    // The body is re-wrapped to attach diagnostics; keep the provider's
+    // Retry-After header alongside it so HTTP clients see it too.
+    const retryAfter = upstream.headers.get("Retry-After");
     return Response.json(
       { ...base, diagnostics: diagnosed?.diagnostics ?? diagnostics },
-      { status: status >= 400 && status < 600 ? status : 500 },
+      { status: status >= 400 && status < 600 ? status : 500, headers: retryAfter ? { "Retry-After": retryAfter } : undefined },
     );
   }
 }
@@ -239,7 +250,7 @@ async function retrieveReferences(
     try {
       response = await fetch(`https://api.openai.com/v1/files/${encodeURIComponent(reference.fileId)}/content`, {
         headers: { Authorization: `Bearer ${apiKey}` },
-        signal: AbortSignal.any([callerSignal, AbortSignal.timeout(120_000)]),
+        signal: combineAbortSignals(callerSignal, 120_000),
       });
       if (!response.ok) await readOpenAIResponse<never>(response);
       source = await response.blob();

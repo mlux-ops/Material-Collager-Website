@@ -10,7 +10,7 @@ Implemented locally against GitHub `main` at `1e5dee9`. The workspace was fast-f
 - `app/api/economy/route.ts`: history polling records failed batches without buying a smaller replacement render; validates prompts before submission.
 - `src/material_collager/prompts.py`: omitted the unrelated metal-finish glossary, made supporting-view instructions conditional, condensed duplication, and clarified the styling count exception.
 - Regression coverage: `tests/image-efficiency.test.mjs`, `tests/image-routes.test.mjs`, `tests/collage-layout-master.test.mjs`, `tests/collage-prompt.test.mjs`, and `tests/test_prompts.py`.
-- Measurement tools: `scripts/benchmark-image-prompts.mjs` and `artifacts/image-optimization/compare-typecheck.mjs`.
+- Measurement tool: `scripts/benchmark-image-prompts.mjs`.
 
 ## Prompt measurements
 
@@ -31,7 +31,7 @@ These are text-length measurements, **not measured token billing or total-cost r
 - `PYTHONPATH=src python -m unittest discover -s tests -p 'test_*.py'`: 13 passing Python tests (set `PYTHONPATH` using PowerShell on Windows).
 - Targeted ESLint on the changed TypeScript, new JavaScript tests, and benchmark: passed.
 - `npm run build`: passed; existing large-chunk warning remains. Set `WRANGLER_LOG_PATH` to a writable local path for sandboxed builds.
-- `npm run typecheck`: 26 errors. Compiler comparison using `node artifacts/image-optimization/compare-typecheck.mjs` found identical errors against the pre-change source. These concern missing Cloudflare/Drizzle types and an existing scene geometry assertion, not newly introduced diagnostics.
+- `npm run typecheck`: 26 errors. A one-off compiler comparison (run locally during review, not kept in the repo — it baselined against `HEAD`, which is meaningless once the change is merged) found identical errors against the pre-change source. These concern missing Cloudflare/Drizzle types and an existing scene geometry assertion, not newly introduced diagnostics.
 - `git diff --check`: passed.
 - Preview attempted at `http://localhost:5173/generator`: HTTP 403. No Browser screenshots or visual-fidelity claim; the temporary preview server was stopped.
 

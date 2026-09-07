@@ -82,9 +82,22 @@ export function errorResponse(error: unknown) {
       error.requestId && !error.message.includes(error.requestId)
         ? `${error.message} (Request ID: ${error.requestId})`
         : error.message;
+    // Forward the provider's Retry-After (as both a JSON field and the
+    // standard header) and its error type, so clients — the generator UI and
+    // the autoboard CLI — can wait the right amount before trying again and
+    // can tell a user-correctable input error from a provider fault.
+    const headers = new Headers();
+    if (error.retryAfterMs !== undefined) headers.set("Retry-After", String(Math.ceil(error.retryAfterMs / 1000)));
     return Response.json(
-      { ok: false, error: displayError, code: error.code, requestId: error.requestId },
-      { status: error.status >= 400 && error.status < 600 ? error.status : 500 },
+      {
+        ok: false,
+        error: displayError,
+        code: error.code,
+        requestId: error.requestId,
+        ...(error.retryAfterMs !== undefined ? { retryAfterMs: error.retryAfterMs } : {}),
+        ...(error.errorType ? { errorType: error.errorType } : {}),
+      },
+      { status: error.status >= 400 && error.status < 600 ? error.status : 500, headers },
     );
   }
 
