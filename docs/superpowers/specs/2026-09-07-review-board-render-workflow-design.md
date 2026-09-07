@@ -41,7 +41,7 @@ Confirmed decisions:
 scripts/autoboard/
   cli.mjs                 thin: arg parsing; generate/redraft/confirm/finalize call lib/render.mjs
   lib/render.mjs          NEW  payload builders, postGeneration, result recording, cost table
-  lib/render-queue.mjs    NEW  in-process FIFO with progress, cancel, held/resume, persistence
+  lib/render-queue.mjs    NEW  in-memory FIFO with progress and cancel
   lib/access.mjs          NEW  (moved from cli.mjs) Cloudflare Access credential discovery, waitForServer
   lib/review-server.mjs   + render endpoints; owns one RenderQueue per run
   lib/review-page.mjs     + render panel per board, status polling, lightbox
