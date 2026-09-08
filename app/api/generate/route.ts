@@ -3,8 +3,8 @@ import {
   activeItems,
   buildGenerationPrompt,
   buildSummary,
-  resolvedOrientation,
   resolvedOutputFormat,
+  resolvedQuality,
   resolvedSize,
   type CollageRequestInput,
   type OutputFormat,
@@ -12,6 +12,7 @@ import {
 } from "@/app/lib/collage";
 import {
   OpenAIRequestError,
+  combineAbortSignals,
   errorResponse,
   readOpenAIResponse,
   resolveOpenAIKey,
@@ -20,9 +21,9 @@ import {
   DiagnosedGenerationError,
   createImageEdit,
   diagnosticFor,
-  isRetryableImageError,
   referenceContentType,
   safeReferenceFilename,
+  validateImagePrompt,
   type AttemptDiagnostic,
   type GenerationDiagnostics,
   type ImageEditRequest,
@@ -47,6 +48,16 @@ export async function POST(request: Request) {
     if (typeof payloadText !== "string") throw new Error("Missing generation payload.");
     const payload = JSON.parse(payloadText) as CollageRequestInput;
     validateCollageRequest(payload);
+    // Finals always render at high quality (see resolvedQuality). The payload
+    // is normalized in place so the upstream request, the persisted job and
+    // the diagnostics all agree — and the caller is told when their requested
+    // tier was upgraded instead of having the change happen silently.
+    const requestedQuality = payload.quality;
+    payload.quality = resolvedQuality(payload);
+    const qualityNotice = requestedQuality !== payload.quality
+      ? `Final renders always use high quality; the requested "${requestedQuality}" quality was upgraded.`
+      : "";
+    request.signal.throwIfAborted();
 
     const items = activeItems(payload);
     const directFiles = incoming.getAll("image[]").filter((value): value is File => value instanceof File);
@@ -67,6 +78,7 @@ export async function POST(request: Request) {
 
     const apiKey = resolveOpenAIKey(payload.apiKey);
     const prompt = buildGenerationPrompt(payload);
+    validateImagePrompt(prompt);
     const attempts: AttemptDiagnostic[] = [];
     diagnostics = {
       model: "gpt-image-2",
@@ -97,7 +109,7 @@ export async function POST(request: Request) {
       if (remoteReferences.length !== expectedReferences) {
         throw new Error("The approved draft or one of its full-quality references is no longer available. Upload it again and retry.");
       }
-      preparedReferences = await retrieveReferences(apiKey, remoteReferences, attempts);
+      preparedReferences = await retrieveReferences(apiKey, remoteReferences, attempts, request.signal);
     } else {
       throw new Error("One or more reference images were missing from the generation request.");
     }
@@ -140,7 +152,7 @@ export async function POST(request: Request) {
             // always PNG regardless of what the real render requested.
             output_format: "png",
             output_compression: undefined,
-          }, diagnostics.attempts, false);
+          }, diagnostics.attempts, request.signal);
           diagnosticImageBase64 = testResult.data.data?.[0]?.b64_json;
           isolationResults.push({ referenceCount: count, outcome: "succeeded" });
         } catch (error) {
@@ -165,20 +177,9 @@ export async function POST(request: Request) {
         filename: "isolation-test.png",
       });
     }
-    let imageResult: Awaited<ReturnType<typeof createImageEdit>>;
-    let usedStandardFallback = false;
-    try {
-      imageResult = await createImageEdit(apiKey, imageRequest, diagnostics.attempts);
-    } catch (error) {
-      const standardSize = standardSizeFor(payload);
-      // Every render — including Final — downgrades to a model-supported size
-      // rather than surfacing the failure, since the requested 2K/Final sizes
-      // are not always accepted by the image model.
-      if (!isRetryableImageError(error) || standardSize === requestedSize) throw error;
-      usedStandardFallback = true;
-      imageResult = await createImageEdit(apiKey, { ...imageRequest, size: standardSize }, diagnostics.attempts);
-    }
-    const { data: imageJson, attempts: imageAttempts } = imageResult;
+    // One upstream attempt per user action preserves the requested settings
+    // without risking a duplicate paid render after an ambiguous failure.
+    const { data: imageJson } = await createImageEdit(apiKey, imageRequest, diagnostics.attempts, request.signal);
     const imageBase64 = imageJson.data?.[0]?.b64_json;
     if (!imageBase64) {
       throw new Error("OpenAI did not return image data.");
@@ -192,7 +193,7 @@ export async function POST(request: Request) {
       stored = await persistGenerationOutput({
         imageBase64,
         filename: safeOutputFilename(payload.outputFilename, outputFormat),
-        format: usedStandardFallback ? standardSizeFor(payload) : requestedSize,
+        format: requestedSize,
         prompt,
         payload: payload as unknown as Record<string, unknown>,
         usage: imageJson.usage,
@@ -215,21 +216,21 @@ export async function POST(request: Request) {
       jobId: stored?.id,
       libraryVisible: stored?.libraryVisible ?? false,
       renderKind,
-      notice: [usedStandardFallback
-        ? `OpenAI could not complete the ${payload.outputResolution === "final" ? "Final" : "Studio 2K"} render at the requested size, so the board was generated at the standard resolution without changing reference fidelity or render quality.`
-        : imageAttempts > 1
-          ? `OpenAI completed the collage after ${imageAttempts} attempts.`
-          : "", storageNotice].filter(Boolean).join(" ") || undefined,
+      notice: [qualityNotice, storageNotice].filter(Boolean).join(" ") || undefined,
       diagnostics,
     });
   } catch (error) {
     const diagnosed = error instanceof DiagnosedGenerationError ? error : undefined;
     const rootError = diagnosed?.causeError ?? error;
-    const base = await errorResponse(rootError).json() as Record<string, unknown>;
+    const upstream = errorResponse(rootError);
+    const base = await upstream.json() as Record<string, unknown>;
     const status = rootError instanceof OpenAIRequestError ? rootError.status : 400;
+    // The body is re-wrapped to attach diagnostics; keep the provider's
+    // Retry-After header alongside it so HTTP clients see it too.
+    const retryAfter = upstream.headers.get("Retry-After");
     return Response.json(
       { ...base, diagnostics: diagnosed?.diagnostics ?? diagnostics },
-      { status: status >= 400 && status < 600 ? status : 500 },
+      { status: status >= 400 && status < 600 ? status : 500, headers: retryAfter ? { "Retry-After": retryAfter } : undefined },
     );
   }
 }
@@ -238,6 +239,7 @@ async function retrieveReferences(
   apiKey: string,
   references: Array<{ fileId: string; filename: string }>,
   diagnostics: AttemptDiagnostic[],
+  callerSignal: AbortSignal,
 ) {
   // Fetch all references concurrently — serialized multi-MB downloads add
   // many seconds of wall time to a final render before generation starts.
@@ -248,7 +250,7 @@ async function retrieveReferences(
     try {
       response = await fetch(`https://api.openai.com/v1/files/${encodeURIComponent(reference.fileId)}/content`, {
         headers: { Authorization: `Bearer ${apiKey}` },
-        signal: AbortSignal.timeout(120_000),
+        signal: combineAbortSignals(callerSignal, 120_000),
       });
       if (!response.ok) await readOpenAIResponse<never>(response);
       source = await response.blob();
@@ -265,13 +267,6 @@ async function retrieveReferences(
       fileId: reference.fileId,
     };
   }));
-}
-
-function standardSizeFor(payload: CollageRequestInput) {
-  const orientation = resolvedOrientation(payload);
-  if (orientation === "portrait") return "1024x1536";
-  if (orientation === "square") return "1024x1024";
-  return "1536x1024";
 }
 
 function safeOutputFilename(value: string | undefined, format: OutputFormat) {

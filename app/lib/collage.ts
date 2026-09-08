@@ -109,15 +109,20 @@ export const ITEM_PRESETS: Record<CollageType, CollageItemInput[]> = {
   ],
 };
 
+// Each subject line keeps its type-specific prohibition: the generic "no
+// unmapped products" sentence later in the prompt is not enough on its own,
+// because each board type has a named failure mode (a bathroom board growing
+// a sink basin, a kitchen palette growing tile or an appliance) that the
+// model avoids far more reliably when told so up front.
 const TYPE_PROMPTS: Record<CollageType, string> = {
-  kitchen_material_palette: `Purpose: a luxury residential kitchen material palette for an architecture and interiors editorial.
-Use only the referenced materials and fixtures. Do not add tile, appliances, or substitute samples unless they are referenced.`,
-  appliance_collage: `Purpose: a luxury appliance product composition for an architecture and interiors editorial.
-Use only the referenced appliances. Isolate them cleanly from their source backgrounds and preserve exact product identity.`,
-  bathroom_fixture_collage: `Purpose: a luxury bathroom fixture and finish board for an architecture and interiors editorial.
-Use only the referenced fixtures, finishes, tile, wood, stone, and hardware. Do not add sanitaryware or plumbing pieces that are not referenced.`,
-  bathroom_tile_collage: `Purpose: a luxury bathroom tile and finish palette for an architecture and interiors editorial.
-Use only the referenced tile, stone, wood, and metal finish samples. Preserve their real scale relationships and tactile character.`,
+  kitchen_material_palette:
+    "Subject: luxury residential kitchen materials and fixtures from the reference map. Do not add tile, appliances, or substitute samples that are not referenced.",
+  appliance_collage:
+    "Subject: luxury appliances from the reference map, preserving product identity and door/handle configuration. Do not add material samples or appliances that are not referenced.",
+  bathroom_fixture_collage:
+    "Subject: luxury bathroom fixtures and finishes from the reference map. Do not add sanitaryware (toilet, tub, sink basin) or plumbing pieces that are not referenced.",
+  bathroom_tile_collage:
+    "Subject: luxury bathroom tile and finishes from the reference map, with realistic pattern scale and tactile detail. Do not add tile or finish samples that are not referenced.",
 };
 
 const COMPOSITION_PROMPTS: Record<Composition, string> = {
@@ -257,13 +262,28 @@ export function resolvedLighting(request: CollageRequestInput): LightingOption {
   return request.lighting ?? "soft_daylight";
 }
 
-// Finals are always PNG regardless of what output format was requested: a
-// Final render (whether flagged via renderKind or via outputResolution, since
-// callers can set either) is the archival, library-visible artifact and must
-// not carry lossy compression.
+// A Final render is the archival, library-visible artifact. Callers can flag
+// it via renderKind or via outputResolution, so both are checked here — every
+// "is this a Final?" decision (format, quality, render kind) goes through
+// this one predicate instead of re-deriving the condition per call site.
+export function isFinalRender(request: CollageRequestInput): boolean {
+  return request.renderKind === "final" || request.outputResolution === "final";
+}
+
+// Finals are always PNG regardless of what output format was requested: they
+// must not carry lossy compression.
 export function resolvedOutputFormat(request: CollageRequestInput): OutputFormat {
-  if (request.renderKind === "final" || request.outputResolution === "final") return "png";
+  if (isFinalRender(request)) return "png";
   return request.outputFormat ?? "png";
+}
+
+// Finals always render at high quality regardless of the requested tier, so a
+// draft-tier setting left over in a client (or a CLI flag) can never quietly
+// produce a degraded deliverable. Callers compare the result against the
+// requested quality to tell the user when the upgrade happened.
+export function resolvedQuality(request: CollageRequestInput): Quality {
+  if (isFinalRender(request)) return "high";
+  return request.quality;
 }
 
 export function resolvedSize(request: CollageRequestInput) {
@@ -301,16 +321,15 @@ export function usesLayoutMaster(request: CollageRequestInput) {
 function layoutReferenceLines(request: CollageRequestInput) {
   if (!usesLayoutMaster(request)) {
     return [
-      "Image 1 -> approved draft used only for composition, item placement, scale hierarchy, overlap, camera, lighting direction, and negative space. It is not a product-identity reference.",
-      "Preserve the approved draft composition as closely as possible, but use Images 2 onward as the sole visual truth for product identity, geometry, finish, material, color, and detail. Never copy a draft error over an original reference.",
+      "Image 1 -> approved draft used only for composition, placement, scale, overlap, camera, lighting direction, and negative space. Preserve these as closely as possible.",
+      "Images 2 onward define product identity, geometry, finish, color, and detail. Never copy a draft error over an original reference.",
     ];
   }
   return [
-    "Image 1 -> a previously produced collage supplied as the LAYOUT MASTER. It is the single source of truth for composition and organization: item placement, reading order, relative scale hierarchy, rotation angles, overlap and stacking order, spacing rhythm, margins, and negative space. It is NOT a product-identity reference.",
-    "Reproduce that arrangement as a set of slots, then fill the slots with this board's items: keep each slot's position, footprint, angle, and layering from Image 1. Where Image 1 and any other composition or spacing instruction disagree, Image 1 wins.",
-    "Ignore every product, material, color, finish, and prop shown in Image 1 — none of its objects carry over, and none of them may appear in the output. Images 2 onward are the only source of product identity, geometry, finish, material, color, and detail.",
-    "If Image 1 holds a different number of objects than the item list below, keep its spatial logic and rhythm while adding or removing slots as needed, distributing the change so the composition stays balanced.",
-    "If Image 1's aspect ratio differs from the target canvas, keep the relative arrangement and adapt the margins and spacing to fill the target canvas. Never crop an item to force the old proportions.",
+    "Image 1 -> a previously produced collage supplied as the LAYOUT MASTER: the single source of truth for composition and organization. Fill its slots with this board's items, retaining position, scale, rotation, stacking, and spacing.",
+    "Where Image 1 and any other composition or spacing instruction disagree, Image 1 wins.",
+    "Ignore every product, material, color, finish, and prop shown in Image 1; none of them may appear in the output unless independently mapped below. Images 2 onward define product identity and detail.",
+    "For a different number of objects than the item list, add/remove slots while retaining spatial rhythm. If its aspect ratio differs from the target canvas, adapt margins. Never crop an item to force the old proportions.",
   ];
 }
 
@@ -350,39 +369,34 @@ export function buildGenerationPrompt(request: CollageRequestInput) {
       ? "Keep the layout master's existing emphasis; do not promote a different item to anchor."
       : "Choose the most visually substantial referenced item as the anchor without diminishing any other requested item.";
 
-  // The four supporting-view bullets only make sense once some item actually
+  // Supporting-view rules only make sense once some item actually
   // has a supporting view; a single-image-per-item board has nothing for them
   // to describe, so emitting them anyway is noise the model has to discard.
   const fidelityBullets = [
-    `- Include every mapped item exactly once as a distinct collage element. The item IDs are the complete object list; nothing outside them earns a place on the canvas.`,
     ...(supportingTotal > 0
       ? [
-          `- A supporting view is another photograph of the SAME physical item shown in that item's primary view: the same faucet, the same tile, the same slab, at a different angle, crop, distance, or lighting. It is a guide for constructing that one object, never a second object.`,
-          `- Build each item as one object and read all of its views into it: take identity, color, and finish from the primary view, and use every supporting view to resolve geometry, hidden faces, component count, edge profile, thickness, pattern scale, and any detail the primary view leaves ambiguous. Where they disagree, the primary view decides.`,
-          `- Never place a supporting view on the canvas as its own element: no duplicate, mirrored twin, rotated second copy, alternate colorway, alternate size, inset, exploded part, detail vignette, corner swatch, or spare fragment beside the object it describes.`,
-          `- If two objects on the canvas would trace back to one item ID, that is a defect: keep the one built from the primary view and remove the other.`,
+          `- A supporting view is another photograph of the SAME physical item. Use it to resolve geometry, hidden faces, thickness, component count, and pattern scale. Where they disagree, the primary view decides identity, color, and finish.`,
+          `- Never place a supporting view on the canvas as its own element: no duplicates, mirrored twins, insets, exploded parts, or spare swatches. If two objects on the canvas would trace back to one item ID, remove the extra.`,
         ]
       : []),
     `- Preserve recognizable product identity, silhouette, component count, proportions, edge profile, hardware geometry, finish temperature, sheen, grain direction, veining, pattern scale, texture, and color.`,
-    `- Remove source backgrounds cleanly, but do not redesign, simplify, mirror, recolor, or substitute the referenced item.`,
-    `- Metadata clarifies identity and role. If metadata and a visible reference appear to conflict, preserve the visible reference and do not invent a compromise.`,
-    `- Do not create generic stand-ins. Do not add a material, fixture, appliance, sample, or placeholder that is absent from the reference map.`,
+    `- Remove source backgrounds cleanly. Do not redesign, simplify, mirror, recolor, or substitute an item unless its specific instruction explicitly requests that change.`,
+    `- Metadata identifies products; item-specific instructions control requested placement and edits. Preserve visible reference details unless that item's instruction explicitly requests a change. Never invent a compromise between conflicting finishes.`,
     `- Keep each item readable. Overlap may crop only a small nonessential edge; never cover a defining product feature or most of a sample.`,
-    `- Do not repeat an item unless separate mapped item IDs explicitly request it.`,
   ];
 
   return [
     "GOAL",
-    "Create one finished, photorealistic interior-design material collage that feels art-directed, restrained, and publication-ready for a leading architecture and interiors magazine.",
+    "Create one photorealistic interior-design material collage for an architecture and interiors editorial.",
     TYPE_PROMPTS[request.collageType],
     "ART DIRECTION",
-    // A layout master already dictates arrangement and spacing, so emitting
+    // A layout reference already dictates arrangement and spacing, so emitting
     // the composition/density presets alongside it would contradict it. The
     // lighting and styling presets are independent of layout and still apply.
-    ...(layoutMaster ? [] : [COMPOSITION_PROMPTS[resolvedComposition(request)], DENSITY_PROMPTS[resolvedDensity(request)]]),
-    LIGHTING_PROMPTS[resolvedLighting(request)],
+    ...(request.layoutReference ? [] : [COMPOSITION_PROMPTS[resolvedComposition(request)], DENSITY_PROMPTS[resolvedDensity(request)]]),
+    ...(request.layoutReference && !layoutMaster ? [] : [LIGHTING_PROMPTS[resolvedLighting(request)]]),
     STYLING_PROMPTS[resolvedStyling(request)],
-    hero,
+    ...(request.layoutReference && !layoutMaster && !request.heroItemId ? [] : [hero]),
     "REFERENCE MAP",
     "Use the uploaded images by their exact order below. The images, not the text labels, are the visual source of truth.",
     ...(request.layoutReference ? layoutReferenceLines(request) : []),
@@ -391,19 +405,22 @@ export function buildGenerationPrompt(request: CollageRequestInput) {
     [
       `The finished collage contains exactly ${items.length} referenced object${items.length === 1 ? "" : "s"}, one per item ID: ${items.map((item) => `\"${item.id}\"`).join(", ")}.`,
       supportingTotal
-        ? `${supportingTotal} of the ${totalReferenceCount(request)} uploaded product images ${supportingTotal === 1 ? "is a supporting view" : "are supporting views"} that add no object of their own. Count the objects on the canvas before finishing; if the count exceeds ${items.length}, a supporting view was rendered as its own object and must be removed.`
+        ? `${supportingTotal} of the ${totalReferenceCount(request)} uploaded product images ${supportingTotal === 1 ? "is a supporting view" : "are supporting views"} that add no object of their own.`
         : "",
+      resolvedStyling(request) === "botanical_linen"
+        ? "Styling props are excluded from this product count; only the sprig and linen allowed above may be added."
+        : "No additional objects or props.",
     ].filter(Boolean).join(" "),
     "REFERENCE FIDELITY - NON-NEGOTIABLE",
     fidelityBullets.join("\n"),
     "PHOTOGRAPHY AND FINISH",
-    `- True overhead camera with corrected perspective; no oblique room scene and no rendered interior.
-- Seamless pure white background (#FFFFFF) with no gray cast, vignette, border, frame, or colored surface.
-- Realistic material thickness, contact shadows, reflective behavior, and edge detail. Avoid CGI gloss, plastic-looking stone, fake wood grain, warped fixtures, and impossible shadows.
-- Sophisticated scale hierarchy, quiet negative space, clean cutout edges, and a cohesive editorial color balance.
-- No text, labels, annotations, dimensions, logos added by the model, watermarks, people, hands, packaging, swatch names, or unrequested objects. The selected editorial styling option, if any, is the only exception.`,
+    request.layoutReference && !layoutMaster
+      ? "Keep the approved draft camera and lighting direction."
+      : "True overhead camera with corrected perspective; no room scene.",
+    "Seamless pure white background (#FFFFFF), clean cutout edges, realistic thickness, contact shadows, reflections, and surface texture. No CGI gloss, warped fixtures, gray cast, vignette, or border.",
+    "No added text, labels, annotations, logos, watermarks, people, hands, packaging, or unmapped products. Only the selected styling props are allowed.",
     "OUTPUT",
-    `Orientation: ${resolvedOrientation(request)}. Canvas: ${resolvedSize(request)}. Deliver one complete collage, not a contact sheet, presentation page, or set of alternatives.`,
+    `Orientation: ${resolvedOrientation(request)}. Canvas: ${resolvedSize(request)}. Deliver one complete collage, not a contact sheet. Before finishing, check item count, finish, geometry, visibility, and requested placement against the reference map.`,
   ].join("\n\n");
 }
 

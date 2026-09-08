@@ -21,6 +21,22 @@ function request(overrides = {}) {
   };
 }
 
+test("each board type keeps its own prohibition against inventing unreferenced pieces", () => {
+  assert.match(buildGenerationPrompt(request()), /Do not add sanitaryware \(toilet, tub, sink basin\) or plumbing pieces that are not referenced/);
+  assert.match(
+    buildGenerationPrompt(request({ collageType: "kitchen_material_palette" })),
+    /Do not add tile, appliances, or substitute samples that are not referenced/,
+  );
+  assert.match(
+    buildGenerationPrompt(request({ collageType: "bathroom_tile_collage" })),
+    /Do not add tile or finish samples that are not referenced/,
+  );
+  assert.match(
+    buildGenerationPrompt(request({ collageType: "appliance_collage" })),
+    /Do not add material samples or appliances that are not referenced/,
+  );
+});
+
 test("a multi-image item names its primary identity view and its supporting views", () => {
   const prompt = buildGenerationPrompt(request());
 
@@ -56,7 +72,7 @@ test("the prompt states the exact object count and discounts the supporting view
   assert.match(prompt, /OBJECT COUNT/);
   assert.match(prompt, /exactly 2 referenced objects, one per item ID: "faucet", "tile"/);
   assert.match(prompt, /2 of the 4 uploaded product images are supporting views that add no object of their own/);
-  assert.match(prompt, /if the count exceeds 2, a supporting view was rendered as its own object/);
+  assert.match(prompt, /Before finishing, check item count/);
 });
 
 test("the object count reads naturally for one object and omits the supporting sentence when there are none", () => {

@@ -157,8 +157,10 @@ function usage() {
                      Records candidate.confirmedAt; finalize then picks up
                      whatever revision this produced. Add --qa for the
                      automated accuracy check (see generate).
-  autoboard finalize --run <run-id> <variantId> [<variantId>...] [--quality <q>]
+  autoboard finalize --run <run-id> <variantId> [<variantId>...]
                      [--base-url <url>]
+                     Always renders at quality "high" (the server enforces this
+                     for every Final render, so --quality has no effect here).
                      Refuses to run if notes.json has edits that were never
                      redrafted and reviewed.
   autoboard batch-finalize --run <run-id> <variantId> [<variantId>...] [--base-url <url>]
@@ -371,8 +373,12 @@ async function postWithRetry(baseUrl, payload, files) {
   } catch (error) {
     const retryable = error.status === undefined || error.status === 429 || error.status >= 500;
     if (!retryable) throw error;
-    console.log(`    retrying once after error: ${error.message}`);
-    await sleep(5000);
+    // Honour the server's Retry-After when it sent one (a rate limit can ask
+    // for a minute or more), bounded so a bad header can't stall the run;
+    // otherwise fall back to the historical flat pause.
+    const delayMs = Math.min(Math.max(error.retryAfterMs ?? 5000, 5000), 120_000);
+    console.log(`    retrying once after error: ${error.message} (waiting ${Math.round(delayMs / 1000)}s)`);
+    await sleep(delayMs);
     return postGeneration(baseUrl, payload, files);
   }
 }
@@ -909,7 +915,13 @@ async function commandFinalize(values, variantIds) {
   const results = await readJson(resultsPath, { candidates: {}, finals: {} });
   results.finals ??= {};
   const baseUrl = (values["base-url"] ?? "http://localhost:3000").replace(/\/+$/, "");
-  const quality = values.quality ?? "high";
+  // Finals are always high quality — /api/generate enforces it (see
+  // resolvedQuality in app/lib/collage.ts), so passing anything else would
+  // only be silently upgraded. Say so instead of pretending the flag works.
+  if (values.quality && values.quality !== "high") {
+    console.log(`  note: --quality ${values.quality} is ignored for finalize; Final renders always use "high".`);
+  }
+  const quality = "high";
   const apiKey = loadOpenAIKey();
   await waitForServer(baseUrl);
 

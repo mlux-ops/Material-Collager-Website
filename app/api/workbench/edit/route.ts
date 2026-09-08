@@ -6,6 +6,7 @@ import {
   isRetryableImageError,
   safeReferenceFilename,
   validateEditSize,
+  validateImagePrompt,
   type AttemptDiagnostic,
   type GenerationDiagnostics,
   type ImageQuality,
@@ -36,8 +37,10 @@ export async function POST(request: Request) {
     const payload = JSON.parse(payloadText) as WorkbenchEditPayload;
 
     const prompt = payload.prompt?.trim() || "";
+    // The empty-prompt message is node-editor specific; the length limit is
+    // the shared rule from image-edit.ts so it can't drift from /api/generate.
     if (!prompt) throw new Error("Connect or enter a prompt before running this node.");
-    if (prompt.length > 32_000) throw new Error("The prompt exceeds the 32,000 character limit.");
+    validateImagePrompt(prompt);
     const size = payload.size || "1536x1024";
     const sizeError = validateEditSize(size);
     if (sizeError) throw new Error(sizeError);
@@ -93,7 +96,7 @@ export async function POST(request: Request) {
           background: "opaque",
           output_format: "png",
           n,
-        }, attempts, true, request.signal)
+        }, attempts, request.signal)
       : await createImageGeneration(apiKey, { prompt, size, quality, n }, attempts, request.signal);
 
     const images = (result.data.data ?? []).map((entry) => entry.b64_json).filter((value): value is string => Boolean(value));
@@ -111,11 +114,14 @@ export async function POST(request: Request) {
   } catch (error) {
     const diagnosed = error instanceof DiagnosedGenerationError ? error : undefined;
     const rootError = diagnosed?.causeError ?? error;
-    const base = await errorResponse(rootError).json() as Record<string, unknown>;
+    const upstream = errorResponse(rootError);
+    const base = await upstream.json() as Record<string, unknown>;
     const status = rootError instanceof OpenAIRequestError ? rootError.status : 400;
+    // Re-wrapped to attach diagnostics; keep the provider's Retry-After header.
+    const retryAfter = upstream.headers.get("Retry-After");
     return Response.json(
       { ...base, retryable: isRetryableImageError(rootError), diagnostics: diagnosed?.diagnostics ?? diagnostics },
-      { status: status >= 400 && status < 600 ? status : 500 },
+      { status: status >= 400 && status < 600 ? status : 500, headers: retryAfter ? { "Retry-After": retryAfter } : undefined },
     );
   }
 }

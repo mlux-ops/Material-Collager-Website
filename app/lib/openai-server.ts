@@ -2,6 +2,8 @@ export class OpenAIRequestError extends Error {
   status: number;
   code?: string;
   requestId?: string;
+  retryAfterMs?: number;
+  errorType?: string;
 
   constructor(message: string, status: number, code?: string, requestId?: string) {
     super(message);
@@ -39,7 +41,7 @@ export function resolveOpenAIKey(provided?: string) {
 
 export async function readOpenAIResponse<T>(response: Response): Promise<T> {
   const raw = await response.text();
-  let payload: { error?: { message?: string; code?: string } } & Record<string, unknown> = {};
+  let payload: { error?: { message?: string; code?: string; type?: string } } & Record<string, unknown> = {};
   const headerRequestId = response.headers.get("x-request-id") || undefined;
 
   if (raw) {
@@ -55,12 +57,20 @@ export async function readOpenAIResponse<T>(response: Response): Promise<T> {
 
   if (!response.ok) {
     const message = payload.error?.message || `OpenAI request failed with status ${response.status}.`;
-    throw new OpenAIRequestError(
+    const error = new OpenAIRequestError(
       message,
       response.status,
       payload.error?.code,
       headerRequestId || requestIdFrom(message),
     );
+    error.errorType = payload.error?.type;
+    const retryAfter = response.headers.get("retry-after");
+    if (retryAfter) {
+      const seconds = Number(retryAfter);
+      const delay = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter) - Date.now();
+      if (Number.isFinite(delay)) error.retryAfterMs = Math.max(0, delay);
+    }
+    throw error;
   }
 
   return payload as T;
@@ -72,9 +82,22 @@ export function errorResponse(error: unknown) {
       error.requestId && !error.message.includes(error.requestId)
         ? `${error.message} (Request ID: ${error.requestId})`
         : error.message;
+    // Forward the provider's Retry-After (as both a JSON field and the
+    // standard header) and its error type, so clients — the generator UI and
+    // the autoboard CLI — can wait the right amount before trying again and
+    // can tell a user-correctable input error from a provider fault.
+    const headers = new Headers();
+    if (error.retryAfterMs !== undefined) headers.set("Retry-After", String(Math.ceil(error.retryAfterMs / 1000)));
     return Response.json(
-      { ok: false, error: displayError, code: error.code, requestId: error.requestId },
-      { status: error.status >= 400 && error.status < 600 ? error.status : 500 },
+      {
+        ok: false,
+        error: displayError,
+        code: error.code,
+        requestId: error.requestId,
+        ...(error.retryAfterMs !== undefined ? { retryAfterMs: error.retryAfterMs } : {}),
+        ...(error.errorType ? { errorType: error.errorType } : {}),
+      },
+      { status: error.status >= 400 && error.status < 600 ? error.status : 500, headers },
     );
   }
 

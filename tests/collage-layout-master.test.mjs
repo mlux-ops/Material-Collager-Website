@@ -91,8 +91,8 @@ test("an approved-draft layout reference keeps its own wording and does not borr
 
   assert.match(prompt, /Image 1 -> approved draft used only for composition/);
   assert.doesNotMatch(prompt, /LAYOUT MASTER/);
-  // The draft path leaves the art-direction presets in place.
-  assert.match(prompt, /Polished luxury product arrangement/);
+  // The approved draft also owns placement; presets must not rearrange it.
+  assert.doesNotMatch(prompt, /Polished luxury product arrangement/);
 });
 
 test("layoutReference with no mode set defaults to the approved-draft wording (back-compat)", () => {

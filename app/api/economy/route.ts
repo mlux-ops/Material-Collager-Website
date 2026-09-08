@@ -1,6 +1,7 @@
 import { activeItems, buildGenerationPrompt, resolvedSize, validateCollageRequest, type CollageRequestInput } from "@/app/lib/collage";
 import { cleanupExpiredJobs, ensureJobStorage, publicJob, RETENTION_MS, runtimeStorage, type JobRow } from "@/app/lib/generation-jobs";
 import { errorResponse, readOpenAIResponse, resolveOpenAIKey } from "@/app/lib/openai-server";
+import { validateImagePrompt } from "@/app/lib/image-edit";
 
 export const runtime = "edge";
 
@@ -36,6 +37,7 @@ export async function POST(request: Request) {
 
     const apiKey = resolveOpenAIKey();
     const prompt = buildGenerationPrompt(payload);
+    validateImagePrompt(prompt);
     const jobId = crypto.randomUUID();
     const batch = await submitEconomyBatch(apiKey, jobId, prompt, allImageIds, resolvedSize(payload));
 
@@ -120,15 +122,6 @@ async function submitEconomyBatch(apiKey: string, jobId: string, prompt: string,
   }));
 }
 
-// The 2K final sizes are the ones the image model intermittently rejects; a
-// failed batch at one of them is resubmitted once at the standard size below
-// (never looping, since the retried row's format is no longer a 2K size).
-const FINAL_SIZE_FALLBACKS: Record<string, string> = {
-  "2560x1440": "1536x1024",
-  "1440x2560": "1024x1536",
-  "2048x2048": "1024x1024",
-};
-
 async function refreshJob(row: JobRow) {
   if (!row.openai_batch_id) return;
   const apiKey = resolveOpenAIKey();
@@ -144,21 +137,8 @@ async function refreshJob(row: JobRow) {
   }
   if (batch.status !== "completed" || !batch.output_file_id) {
     const error = batch.errors?.data?.map((entry) => entry.message).filter(Boolean).join(" ") || `Economy render ${batch.status}.`;
-    const fallbackSize = batch.status !== "cancelled" ? FINAL_SIZE_FALLBACKS[row.format] : undefined;
-    if (fallbackSize) {
-      // Claim the row (matching the still-2K format) before submitting the
-      // fallback so two overlapping polls can't each create a paid batch.
-      const claim = await DB.prepare("UPDATE generation_jobs SET status = 'resubmitting', updated_at = ? WHERE id = ? AND format = ? AND (status != 'resubmitting' OR updated_at < ?)")
-        .bind(Date.now(), row.id, row.format, Date.now() - 5 * 60 * 1000).run();
-      if (!claim.meta.changes) return;
-      const referenceIds = JSON.parse(row.reference_ids_json) as string[];
-      const payload = JSON.parse(row.payload_json) as CollageRequestInput;
-      const allImageIds = payload.layoutReferenceFileId ? [payload.layoutReferenceFileId, ...referenceIds] : referenceIds;
-      const retried = await submitEconomyBatch(apiKey, row.id, row.prompt, allImageIds, fallbackSize);
-      await DB.prepare("UPDATE generation_jobs SET status = ?, openai_batch_id = ?, format = ?, error = ?, updated_at = ? WHERE id = ?")
-        .bind(retried.status || "validating", retried.id, fallbackSize, `Retrying at ${fallbackSize} after: ${error}`, Date.now(), row.id).run();
-      return;
-    }
+    // Preserve the requested Final dimensions. A failed batch is terminal;
+    // polling history must not silently purchase a smaller replacement.
     await DB.prepare("UPDATE generation_jobs SET status = ?, error = ?, updated_at = ? WHERE id = ?")
       .bind(batch.status, error, Date.now(), row.id).run();
     return;

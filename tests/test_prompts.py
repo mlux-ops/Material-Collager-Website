@@ -5,6 +5,29 @@ from material_collager.prompts import build_generation_prompt
 
 
 class PromptTests(unittest.TestCase):
+    def test_single_reference_omits_unused_views_and_unrelated_finish_glossary(self):
+        request = CollageRequest.from_dict({
+            "collage_type": "bathroom_fixture_collage",
+            "items": [{"id": "tile", "role": "wall tile", "image_paths": ["tile.png"]}],
+        })
+        prompt = build_generation_prompt(request)
+        self.assertNotIn("supporting view", prompt.lower())
+        self.assertNotIn("Brushed Moderne Brass", prompt)
+        self.assertNotIn("Polished Nickel", prompt)
+        self.assertIn("Styling props are excluded from this product count", prompt)
+
+    def test_metal_finish_glossary_is_included_when_an_item_carries_a_metal_finish(self):
+        request = CollageRequest.from_dict({
+            "collage_type": "bathroom_fixture_collage",
+            "items": [
+                {"id": "faucet", "role": "vanity faucet", "image_paths": ["faucet.png"], "finish": "Polished Nickel"},
+                {"id": "tile", "role": "wall tile", "image_paths": ["tile.png"]},
+            ],
+        })
+        prompt = build_generation_prompt(request)
+        self.assertIn("Metal finish reference:", prompt)
+        self.assertIn("Polished Nickel: bright but slightly warmer than chrome.", prompt)
+
     def test_prompt_labels_image_roles_without_visual_handoff(self):
         request = CollageRequest.from_dict(
             {
