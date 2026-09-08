@@ -888,12 +888,17 @@ function resolveApprovedBoard(plan, runDir, results, variantId) {
   // Never read notes.json's live content here — only what a reviewed redraft
   // already recorded as `appliedNotes` on this candidate. If notes.json has
   // since diverged (edited but not redrafted and reviewed), refuse: the user
-  // must see a draft with those notes before anything gets finalized.
+  // must see a draft with those notes before anything gets finalized. A
+  // candidate can also carry appliedNotes from the review board's own
+  // item.note fields (via pickDraft) rather than notes.json at all — the
+  // message below covers both origins instead of assuming notes.json.
   const liveOverrides = readNoteOverrides(runDir, board.id);
   if (!overridesEqual(liveOverrides, candidate.appliedNotes)) {
     throw new Error(
-      `${notesFilePath(runDir, board.id)} has edits that were never drafted and reviewed. ` +
-        `Run \`npm run autoboard -- redraft --run ${plan.runId} ${variantId}\`, review the result, then finalize.`,
+      `Candidate ${variantId} was rendered with notes ${JSON.stringify(candidate.appliedNotes ?? {})}, ` +
+        `but the notes on record now are ${JSON.stringify(Object.fromEntries(liveOverrides))}. ` +
+        `If you edited ${notesFilePath(runDir, board.id)}, run \`npm run autoboard -- redraft --run ${plan.runId} ${variantId}\` and review the result. ` +
+        `If this candidate came from the review board, redraft it there (or render a fresh draft and pick it) and review before finalizing.`,
     );
   }
   const appliedOverrides = new Map(Object.entries(candidate.appliedNotes ?? {}));

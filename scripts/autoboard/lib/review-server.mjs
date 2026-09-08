@@ -33,6 +33,16 @@ import {
 
 const IMAGE_MIME = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp" };
 
+// The render-workflow endpoints this feature introduced (see the
+// Content-Type guard in the request handler below) — the money-spending one
+// is /api/render, but all six get the same cross-origin protection for
+// consistency. Pre-existing endpoints (/api/select etc.) are deliberately
+// not in this list; they predate this feature and are out of scope here.
+const RENDER_WORKFLOW_ENDPOINTS = new Set([
+  "/api/instruction", "/api/item-note", "/api/pick-draft",
+  "/api/approve-confirmed", "/api/render", "/api/render-cancel",
+]);
+
 function readBody(request) {
   return new Promise((resolve, reject) => {
     let data = "";
@@ -150,7 +160,13 @@ export async function startReviewServer({
       return board;
     }
     const source = renderSource(results, board.id, kind);
-    if (!source) throw Object.assign(new Error("Pick a draft (or approve a confirmed render) first."), { status: 400 });
+    if (!source) {
+      // Confirm can only ever be satisfied by a picked draft (see
+      // renderSource); only Final may also be satisfied by an approved
+      // confirmed render.
+      const hint = kind === "confirm" ? "Pick a draft" : "Pick a draft or approve a confirmed render";
+      throw Object.assign(new Error(`${hint} first.`), { status: 400 });
+    }
     if (kind === "final" && source.record.selectionHash !== selectionHash(board, record.instruction)) {
       throw Object.assign(new Error("The picked render is stale — the selection changed since it was rendered. Draft again first."), { status: 409 });
     }
@@ -220,10 +236,6 @@ export async function startReviewServer({
       // doesn't answer — the browser blocks it before it reaches us. The
       // older endpoints below predate this plan and are intentionally left
       // alone (out of scope for this fix).
-      const RENDER_WORKFLOW_ENDPOINTS = new Set([
-        "/api/instruction", "/api/item-note", "/api/pick-draft",
-        "/api/approve-confirmed", "/api/render", "/api/render-cancel",
-      ]);
       if (request.method === "POST" && RENDER_WORKFLOW_ENDPOINTS.has(url.pathname)) {
         const contentType = (request.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
         if (contentType !== "application/json") {

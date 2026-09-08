@@ -695,6 +695,8 @@ test("POST /api/render without a JSON content type is rejected (cross-origin POS
   try {
     const response = await fetch(s.baseUrl + "/api/render", { method: "POST", body: JSON.stringify({ boardId: s.boardId, kind: "draft", variant: "A", count: 1 }) });
     assert.equal(response.status, 400);
+    const json = await response.json();
+    assert.match(json.error, /Content-Type/);
   } finally { await s.cleanup(); }
 });
 
