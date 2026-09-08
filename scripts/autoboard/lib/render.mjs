@@ -33,7 +33,10 @@ export function formatCost(amount) {
 export function selectionHash(board, instruction = "") {
   const material = {
     instruction: String(instruction ?? "").trim(),
-    items: orderedBoardItems(board).map((item) => [item.slotId, item.images ?? [], String(item.notes ?? "").trim(), String(item.note ?? "").trim()]),
+    // item.notes goes through modelNotes so an edit to a legacy provenance
+    // sentence it strips anyway (see modelNotes/LEGACY_NOTE_PATTERNS in
+    // variants.mjs) doesn't mark an otherwise-unchanged draft stale.
+    items: orderedBoardItems(board).map((item) => [item.slotId, item.images ?? [], modelNotes(item.notes) ?? "", String(item.note ?? "").trim()]),
   };
   return createHash("sha1").update(JSON.stringify(material)).digest("hex");
 }
@@ -263,9 +266,11 @@ export async function runRenderJob(job, ctx) {
   const post = (payload, files) => postGeneration(ctx.baseUrl, payload, files, { accessHeaders: ctx.accessHeaders, signal: ctx.signal });
   // Recorded on the finished render so it reflects the board state actually
   // rendered — NOT job.selectionHash, which is only the state at enqueue
-  // time and may be stale by the time a queued job actually executes.
-  // job.selectionHash is still used below for the Final pre-check, which is
-  // deliberately comparing against click-time state, not execute-time state.
+  // time and may be stale by the time a queued job actually executes. The
+  // Final pre-check below also compares against this same execute-time
+  // value (not job.selectionHash) so a board edit made while a Final job
+  // waits in the queue is still caught, not just an edit made before it was
+  // enqueued.
   const executedSelectionHash = selectionHash(board, instruction);
   const common = { selectionHash: executedSelectionHash, instruction, itemNotes };
 
@@ -288,8 +293,13 @@ export async function runRenderJob(job, ctx) {
   }
 
   const source = renderSource(results, board.id, job.kind);
-  if (!source) throw Object.assign(new Error("Pick a draft (or approve a confirmed render) before rendering this step."), { status: 400 });
-  if (job.kind === "final" && source.record.selectionHash !== job.selectionHash) {
+  if (!source) {
+    // Confirm can only ever be satisfied by a picked draft (see renderSource);
+    // only Final may also be satisfied by an approved confirmed render.
+    const hint = job.kind === "confirm" ? "Pick a draft" : "Pick a draft or approve a confirmed render";
+    throw Object.assign(new Error(`${hint} before rendering this step.`), { status: 400 });
+  }
+  if (job.kind === "final" && source.record.selectionHash !== executedSelectionHash) {
     throw Object.assign(new Error("The picked render is stale — the board's selection changed since it was rendered. Draft again first."), { status: 409 });
   }
   const variant = plan.variants.find((entry) => entry.key === source.record.variant);
