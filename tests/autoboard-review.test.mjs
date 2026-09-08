@@ -17,6 +17,7 @@ import {
   roomKeyFor,
   slotKind,
 } from "../scripts/autoboard/lib/review-core.mjs";
+import { ensureRenders, recordDraft } from "../scripts/autoboard/lib/render.mjs";
 import { startReviewServer } from "../scripts/autoboard/lib/review-server.mjs";
 
 // A tiny real 1x1 PNG (valid header) — readImageSize needs actual bytes to
@@ -503,7 +504,7 @@ test("POST /api/replace-image swaps a real row's photo and returns the updated i
       runId: "test-run",
       source: "offline-manifest",
       libraryRoot,
-      variants: {},
+      variants: [],
       boards: [{
         id: "test-board", unitType: "Penthouse", roomLabel: "Bath 2", collageType: "bathroom_fixture_collage",
         kindLabel: "Fixture Collage", title: "Test Board",
@@ -515,7 +516,10 @@ test("POST /api/replace-image swaps a real row's photo and returns the updated i
     };
     writeFileSync(planPath, JSON.stringify(plan, null, 2));
 
-    server = await startReviewServer({ runDir, planPath, port: 0, renderReviewPage: () => "<html></html>" });
+    server = await startReviewServer({
+      runDir, planPath, port: 0, renderReviewPage: () => "<html></html>",
+      resolveAccess: async () => ({ headers: {}, label: "test" }),
+    });
     const { port } = server.address();
     const baseUrl = `http://127.0.0.1:${port}`;
 
@@ -543,4 +547,173 @@ test("POST /api/replace-image swaps a real row's photo and returns the updated i
     rmSync(libraryRoot, { recursive: true, force: true });
     rmSync(path.join(uploadedImagesRoot, testRowId), { recursive: true, force: true });
   }
+});
+
+const PNG_BYTES = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+
+// Scratch run for the render endpoints: temp run dir, one-board plan.json,
+// offline manifest + empty _BUILD_LOG.csv so startReviewServer's library
+// load succeeds without touching the real library.
+async function startScratchServer(extra = {}) {
+  const runDir = mkdtempSync(path.join(tmpdir(), "autoboard-review-render-"));
+  const libraryRoot = path.join(runDir, "library");
+  mkdirSync(path.join(libraryRoot, "Tile", "tiles"), { recursive: true });
+  mkdirSync(path.join(libraryRoot, "Master_Library_Build"), { recursive: true });
+  writeFileSync(path.join(libraryRoot, "Master_Library_Build", "_BUILD_LOG.csv"), "row_id,folder,matched_files\n");
+  writeFileSync(path.join(libraryRoot, "build_manifest_v2.csv"), "row_id,unit_type,room_type,cost_code,item_name,sku,qty,reference\n1,Penthouse,Bath 2,11 45 Plumbing,Hansgrohe Croma,S1,1,\n");
+  const photo = path.join(libraryRoot, "faucet.png");
+  writeFileSync(photo, PNG_BYTES);
+  const boardId = "penthouse-bath-2-fixture";
+  const plan = {
+    runId: "run-test", source: "offline-manifest", libraryRoot,
+    variants: [{ key: "A", composition: "editorial", density: "balanced", styling: "materials_only", lighting: "soft_daylight" }],
+    boards: [{
+      id: boardId, title: "Penthouse Bath 2 Fixture Collage", unitType: "Penthouse", roomLabel: "Bath 2", collageType: "bathroom_fixture_collage",
+      items: [{ slotId: "vanity_faucet", role: "vanity faucet", required: true, rowId: "1", sku: "S1", brand: "Hansgrohe", name: "Croma", notes: "", images: [photo], imageMeta: [] }],
+    }],
+  };
+  const planPath = path.join(runDir, "plan.json");
+  writeFileSync(planPath, JSON.stringify(plan, null, 2));
+  if (extra.notesJson) {
+    mkdirSync(path.join(runDir, "boards", boardId), { recursive: true });
+    writeFileSync(path.join(runDir, "boards", boardId, "notes.json"), JSON.stringify(extra.notesJson));
+  }
+  if (extra.results) writeFileSync(path.join(runDir, "results.json"), JSON.stringify(extra.results));
+  const server = await startReviewServer({
+    runDir, planPath, port: 0, renderReviewPage: () => "<html></html>",
+    baseUrl: "https://w.example",
+    resolveAccess: extra.resolveAccess ?? (async () => ({ headers: { "cf-access-token": "t" }, label: "test" })),
+    executeJob: extra.executeJob ?? (async () => {}),
+  });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const post = async (route, body) => { const r = await fetch(base + route, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); return { status: r.status, json: await r.json() }; };
+  const get = async (route) => { const r = await fetch(base + route); const ct = r.headers.get("content-type") || ""; return { status: r.status, json: ct.includes("json") ? await r.json() : null, raw: r }; };
+  const close = () => new Promise((resolve) => server.close(resolve));
+  const results = () => JSON.parse(readFileSync(path.join(runDir, "results.json"), "utf8"));
+  const planNow = () => JSON.parse(readFileSync(planPath, "utf8"));
+  const cleanup = async () => { await close(); rmSync(runDir, { recursive: true, force: true }); };
+  return { runDir, boardId, baseUrl: base, post, get, results, planNow, cleanup };
+}
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 25));
+
+test("server imports notes.json into item.note once and lets the UI clear it", async () => {
+  const s = await startScratchServer({ notesJson: { items: [{ slotId: "vanity_faucet", note: "keep the handle" }] } });
+  try {
+    assert.equal(s.planNow().boards[0].items[0].note, "keep the handle");
+    const r = await s.post("/api/item-note", { boardId: s.boardId, slotId: "vanity_faucet", note: "" });
+    assert.equal(r.status, 200);
+    assert.equal(s.planNow().boards[0].items[0].note, "");
+  } finally { await s.cleanup(); }
+});
+
+test("POST /api/instruction and /api/item-note persist and validate", async () => {
+  const s = await startScratchServer();
+  try {
+    let r = await s.post("/api/instruction", { boardId: s.boardId, instruction: "  more air  " });
+    assert.equal(r.status, 200);
+    assert.equal(s.results().renders[s.boardId].instruction, "more air");
+    r = await s.post("/api/item-note", { boardId: s.boardId, slotId: "nope", note: "x" });
+    assert.equal(r.status, 404);
+    r = await s.post("/api/instruction", { boardId: s.boardId, instruction: "x".repeat(2001) });
+    assert.equal(r.status, 400);
+  } finally { await s.cleanup(); }
+});
+
+test("pick-draft, approve-confirmed and render-image work; path escapes are refused", async () => {
+  const results = { candidates: {}, finals: {} };
+  recordDraft(results, "penthouse-bath-2-fixture", { variant: "A", index: 1, path: "boards/penthouse-bath-2-fixture/drafts/d-0001.png", jobId: "j", durationMs: 1, selectionHash: "h", instruction: "", itemNotes: {} });
+  const s = await startScratchServer({ results });
+  try {
+    mkdirSync(path.join(s.runDir, "boards", s.boardId, "drafts"), { recursive: true });
+    writeFileSync(path.join(s.runDir, "boards", s.boardId, "drafts", "d-0001.png"), PNG_BYTES);
+    let r = await s.post("/api/pick-draft", { boardId: s.boardId, draftId: "d-0001" });
+    assert.equal(r.status, 200);
+    assert.equal(s.results().renders[s.boardId].pickedDraftId, "d-0001");
+    assert.equal(s.results().candidates[`${s.boardId}--A`].status, "ok");
+    r = await s.post("/api/approve-confirmed", { boardId: s.boardId, confirmedId: "c-0009" });
+    assert.equal(r.status, 404);
+    r = await s.post("/api/approve-confirmed", { boardId: s.boardId, confirmedId: null });
+    assert.equal(r.status, 200);
+    const img = await s.get("/render-image?path=" + encodeURIComponent(`boards/${s.boardId}/drafts/d-0001.png`));
+    assert.equal(img.status, 200);
+    assert.equal(img.raw.headers.get("content-type"), "image/png");
+    assert.equal((await s.get("/render-image?path=" + encodeURIComponent("../plan.json"))).status, 404);
+  } finally { await s.cleanup(); }
+});
+
+test("POST /api/render validates and enqueues; status exposes queue, stale flags, costs", async () => {
+  const calls = [];
+  let release;
+  const executeJob = (job, ctx) => new Promise((resolve) => { calls.push({ job, ctx }); release = resolve; ctx.onProgress("1/2"); });
+  const s = await startScratchServer({ executeJob });
+  try {
+    assert.equal((await s.post("/api/render", { boardId: s.boardId, kind: "draft", variant: "Z", count: 2 })).status, 400);
+    assert.equal((await s.post("/api/render", { boardId: s.boardId, kind: "draft", variant: "A", count: 11 })).status, 400);
+    assert.equal((await s.post("/api/render", { boardId: s.boardId, kind: "confirm" })).status, 400);
+    const r = await s.post("/api/render", { boardId: s.boardId, kind: "draft", variant: "A", count: 2 });
+    assert.equal(r.status, 200);
+    assert.equal(r.json.position, 1);
+    await settle();
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].job.kind, "draft");
+    assert.equal(calls[0].ctx.baseUrl, "https://w.example");
+    assert.deepEqual(calls[0].ctx.accessHeaders, { "cf-access-token": "t" });
+    const status = (await s.get("/api/render-status")).json;
+    assert.equal(status.accessError, null);
+    assert.equal(status.queue[0].state, "running");
+    assert.equal(status.queue[0].progress, "1/2");
+    assert.equal(status.costs.draft, 0.016);
+    assert.match(status.selectionHashes[s.boardId], /^[0-9a-f]{40}$/);
+    release();
+    await settle();
+    assert.equal((await s.get("/api/render-status")).json.queue[0].state, "done");
+  } finally { await s.cleanup(); }
+});
+
+test("render-status marks drafts stale when the selection hash moved, and cancel works", async () => {
+  const results = { candidates: {}, finals: {} };
+  recordDraft(results, "penthouse-bath-2-fixture", { variant: "A", index: 1, path: "boards/penthouse-bath-2-fixture/drafts/d-0001.png", jobId: "j", durationMs: 1, selectionHash: "old", instruction: "", itemNotes: {} });
+  let release;
+  const s = await startScratchServer({ results, executeJob: () => new Promise((resolve) => { release = resolve; }) });
+  try {
+    const draft = (await s.get("/api/render-status")).json.renders[s.boardId].drafts[0];
+    assert.equal(draft.stale, true);
+    assert.equal(draft.url, "/render-image?path=" + encodeURIComponent(`boards/${s.boardId}/drafts/d-0001.png`));
+    await s.post("/api/render", { boardId: s.boardId, kind: "draft", variant: "A", count: 1 });
+    const b = await s.post("/api/render", { boardId: s.boardId, kind: "draft", variant: "A", count: 1 });
+    assert.equal(b.json.position, 2);
+    assert.deepEqual((await s.post("/api/render-cancel", { jobId: b.json.jobId })).json, { cancelled: true });
+    release();
+    await settle();
+    assert.deepEqual((await s.get("/api/render-status")).json.queue.map((job) => job.state), ["done", "cancelled"]);
+  } finally { await s.cleanup(); }
+});
+
+test("POST /api/render without a JSON content type is rejected (cross-origin POST protection)", async () => {
+  const s = await startScratchServer();
+  try {
+    const response = await fetch(s.baseUrl + "/api/render", { method: "POST", body: JSON.stringify({ boardId: s.boardId, kind: "draft", variant: "A", count: 1 }) });
+    assert.equal(response.status, 400);
+  } finally { await s.cleanup(); }
+});
+
+test("an expired Access session is reported in status and re-resolved on the next render click", async () => {
+  let attempts = 0;
+  const resolveAccess = async () => {
+    attempts++;
+    if (attempts === 1) throw Object.assign(new Error("rejected — run cloudflared access login"), { code: "access-rejected", status: 302 });
+    return { headers: { "cf-access-token": "fresh" }, label: "test" };
+  };
+  const seen = [];
+  const s = await startScratchServer({ resolveAccess, executeJob: async (job, ctx) => { seen.push(ctx.accessHeaders); } });
+  try {
+    assert.match((await s.get("/api/render-status")).json.accessError, /rejected/);
+    const r = await s.post("/api/render", { boardId: s.boardId, kind: "draft", variant: "A", count: 1 });
+    assert.equal(r.status, 200);
+    await settle();
+    assert.equal((await s.get("/api/render-status")).json.accessError, null);
+    assert.deepEqual(seen, [{ "cf-access-token": "fresh" }]);
+    assert.equal(attempts, 2);
+  } finally { await s.cleanup(); }
 });

@@ -13,8 +13,7 @@
 // finalize re-renders chosen candidates at final quality with the candidate
 //          as an approved-draft layout reference; those land in the Library.
 
-import { execFileSync } from "node:child_process";
-import { mkdirSync, existsSync, readFileSync } from "node:fs";
+import { mkdirSync, existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,7 +33,6 @@ import { uploadFileToOpenAI } from "./lib/openai-upload.mjs";
 import { startReviewServer } from "./lib/review-server.mjs";
 import { renderReviewPage } from "./lib/review-page.mjs";
 import { isStaleCandidate } from "./lib/review-core.mjs";
-import { prepareReferenceForUpload } from "./lib/transport.mjs";
 import { buildQaRequest, formatQaLine, runQa } from "./lib/qa-client.mjs";
 import { annotateReferenceMeta } from "./lib/image-meta.mjs";
 import {
@@ -45,6 +43,8 @@ import {
   readNoteOverrides,
   scaffoldNotesFile,
 } from "./lib/notes.mjs";
+import { loadOpenAIKey, resolveAccessHeaders } from "./lib/access.mjs";
+import { postGeneration as postGenerationShared } from "./lib/render.mjs";
 
 const RUNS_ROOT = "autoboard-runs";
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -130,33 +130,33 @@ function usage() {
   autoboard generate --run <run-id> [--dry-run] [--boards <id,id>] [--quality <q>]
                      [--resolution standard|studio] [--format png|jpeg|webp]
                      [--compression <0-100>] [--base-url <url>] [--force]
-                     [--no-qa] [--qa-model <name>]
+                     [--qa] [--qa-model <name>]
                      Drafts render at "standard" (1536x1024) by default; pass
                      --resolution studio for the old 2048x1360 draft canvas.
-                     After each saved candidate, calls the app's /api/qa
-                     endpoint for an automated accuracy check against its
-                     reference photos (never fails the render — pass --no-qa
-                     to skip it, or --qa-model to request a specific model).
+                     Pass --qa to run an automated accuracy check (the app's
+                     /api/qa endpoint, one vision-model call per candidate)
+                     after each saved draft. Off by default — the user reviews
+                     drafts directly. --qa-model picks the model when enabled.
   autoboard redraft  --run <run-id> <variantId> [<variantId>...] [--quality <q>]
                      [--resolution standard|studio] [--format png|jpeg|webp]
                      [--compression <0-100>] [--base-url <url>]
-                     [--no-qa] [--qa-model <name>]
+                     [--qa] [--qa-model <name>]
                      Applies that board's notes.json (edit it after reviewing a draft)
                      and re-renders at draft quality so you can review the effect
                      before anything reaches final quality or the Library.
-                     Also runs the automated QA accuracy check (see generate).
+                     Add --qa for the automated accuracy check (see generate).
   autoboard confirm  --run <run-id> <variantId> [<variantId>...] [--quality <q>]
                      [--resolution standard|studio] [--format png|jpeg|webp]
                      [--compression <0-100>] [--base-url <url>] [--dry-run]
-                     [--no-qa] [--qa-model <name>]
+                     [--qa] [--qa-model <name>]
                      One ~$0.04 medium render of the picked variant before the
                      high-quality final — reuses the approved-draft layout
                      reference and notes.json exactly like redraft, but (unlike
                      redraft) runs even when notes.json is unchanged, and
                      defaults to quality "medium" / resolution "standard".
                      Records candidate.confirmedAt; finalize then picks up
-                     whatever revision this produced. Also runs the automated
-                     QA accuracy check (see generate).
+                     whatever revision this produced. Add --qa for the
+                     automated accuracy check (see generate).
   autoboard finalize --run <run-id> <variantId> [<variantId>...]
                      [--base-url <url>]
                      Always renders at quality "high" (the server enforces this
@@ -172,12 +172,10 @@ function usage() {
                      Refreshes and reports every batch-finalize submission for
                      this run; downloads a local copy once a job completes
                      (it also becomes visible in the app Library automatically).
-  autoboard review   --run <run-id> [--port <n>]
-                     Opens a local web page (http://127.0.0.1:<port>) showing
-                     every board's slots with their current auto-pick; browse
-                     every real item in that room (or every tile) and swap a
-                     slot's selection in place. Saves directly into plan.json
-                     — no need to re-run plan. Ctrl+C to stop the server.
+  autoboard review   --run <run-id> [--port <n>] [--base-url <url>]
+                     Local review board: pick items, draft, pick a draft, add
+                     notes, confirm, final — renders go to --base-url
+                     (default: the deployed Worker).
 
 Environment (shell env, or the repo's git-ignored .dev.vars):
   SMARTSHEET_ACCESS_TOKEN  required unless --offline (live sheet ${SMARTSHEET_SHEET_ID})
@@ -197,125 +195,16 @@ function runDirFor(runId) {
   return path.join(RUNS_ROOT, runId);
 }
 
-// Secrets and tokens resolve from the shell env first, then the repo's
-// git-ignored .dev.vars — the same file the developer already uses for local
-// overrides. Commented lines and blank values are ignored. Never logged.
-const DEV_VARS = (() => {
-  try {
-    const vars = {};
-    for (const line of readFileSync(".dev.vars", "utf8").split(/\r?\n/)) {
-      const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*"?([^"\r\n]*)"?\s*$/);
-      if (match) vars[match[1]] = match[2].trim();
-    }
-    return vars;
-  } catch {
-    return {};
-  }
-})();
-
-function localVar(name) {
-  return process.env[name] || DEV_VARS[name] || undefined;
-}
-
-// The dev server resolves its OpenAI key from the request payload (the UI's
-// Settings field) or its own process env — .dev.vars is not exposed to the
-// route in local dev, so the CLI forwards the key in the payload.
-function loadOpenAIKey() {
-  return localVar("OPENAI_API_KEY");
-}
-
-// Cloudflare Access credentials for a deployed --base-url. The deployed
-// worker holds its own OPENAI_API_KEY secret, so rendering against it needs
-// no local OpenAI key — only a way through Access. Candidates are tried in
-// order and the first one Access accepts is locked in for the whole run:
-//   CF_ACCESS_CLIENT_ID + CF_ACCESS_CLIENT_SECRET  (an Access service token)
-//   CF_ACCESS_TOKEN                                 (an explicit user JWT)
-//   cloudflared's cached session                    (`cloudflared access login <url>`)
-const CLOUDFLARED_CANDIDATES = [
-  "cloudflared",
-  "C:\\Program Files (x86)\\cloudflared\\cloudflared.exe",
-  "C:\\Program Files\\cloudflared\\cloudflared.exe",
-];
-
-function cloudflaredToken(baseUrl) {
-  for (const executable of CLOUDFLARED_CANDIDATES) {
-    try {
-      const token = execFileSync(executable, ["access", "token", `-app=${baseUrl}`], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-        timeout: 15_000,
-      }).trim();
-      if (token.split(".").length === 3) return token;
-    } catch {
-      // executable missing or no cached session for this app; try the next one
-    }
-  }
-  return undefined;
-}
-
-function accessHeaderCandidates(baseUrl) {
-  const candidates = [];
-  const clientId = localVar("CF_ACCESS_CLIENT_ID");
-  const clientSecret = localVar("CF_ACCESS_CLIENT_SECRET");
-  if (clientId && clientSecret) {
-    candidates.push({
-      label: "Access service token",
-      headers: { "CF-Access-Client-Id": clientId, "CF-Access-Client-Secret": clientSecret },
-    });
-  }
-  const userToken = localVar("CF_ACCESS_TOKEN");
-  if (userToken) candidates.push({ label: "CF_ACCESS_TOKEN", headers: { "cf-access-token": userToken } });
-  if (!/^https?:\/\/(localhost|127\.0\.0\.1)/i.test(baseUrl)) {
-    const sessionToken = cloudflaredToken(baseUrl);
-    if (sessionToken) {
-      candidates.push({ label: "cloudflared session", headers: { "cf-access-token": sessionToken } });
-    }
-  }
-  candidates.push({ label: "no Access credentials", headers: {} });
-  return candidates;
-}
-
-// The credential set waitForServer locked in; postGeneration reuses it.
+// The credential set resolveAccessHeaders locked in for this run.
 let activeAccessHeaders = {};
 
 async function waitForServer(baseUrl) {
-  const candidates = accessHeaderCandidates(baseUrl);
-  let rejectedStatus;
-  for (let attempt = 1; attempt <= 10; attempt++) {
-    let reachable = false;
-    for (const candidate of candidates) {
-      let response;
-      try {
-        response = await fetch(`${baseUrl}/api/library`, {
-          headers: candidate.headers,
-          redirect: "manual",
-          signal: AbortSignal.timeout(8000),
-        });
-      } catch {
-        continue; // server not reachable (yet)
-      }
-      reachable = true;
-      // Access signals rejection with a 302 to the team login page or a 403
-      // from the worker's own JWT check.
-      if (response.status === 302 || response.status === 403) {
-        rejectedStatus = response.status;
-        continue;
-      }
-      activeAccessHeaders = candidate.headers;
-      if (Object.keys(candidate.headers).length) console.log(`  authenticated via ${candidate.label}`);
-      return;
-    }
-    if (reachable) break; // reachable but every credential was rejected
-    if (attempt === 1) console.log(`  waiting for ${baseUrl} ...`);
-    await sleep(3000);
-  }
-  if (rejectedStatus) {
-    throw new Error(
-      `${baseUrl} rejected every Access credential (HTTP ${rejectedStatus}). ` +
-        `Run \`cloudflared access login ${baseUrl}\` to refresh the session, or fix the service token in .dev.vars.`,
-    );
-  }
-  throw new Error(`No server responded at ${baseUrl}. Start it with \`npm run dev\` (or pass --base-url).`);
+  const resolved = await resolveAccessHeaders(baseUrl, { log: (line) => console.log(line) });
+  activeAccessHeaders = resolved.headers;
+}
+
+function postGeneration(baseUrl, payload, files) {
+  return postGenerationShared(baseUrl, payload, files, { accessHeaders: activeAccessHeaders });
 }
 
 async function readJson(filePath, fallback) {
@@ -478,54 +367,6 @@ function gapsMarkdown(runId, source, gaps) {
 // generate
 // ---------------------------------------------------------------------------
 
-async function postGeneration(baseUrl, payload, files) {
-  const form = new FormData();
-  form.append("payload", JSON.stringify(payload));
-  // Finding F2b: library photos run 8 KB-3.7 MB / up to 4000 px, while the
-  // app's own browser upload path already caps the long edge at 2048 — bring
-  // this path to parity instead of shipping raw bytes.
-  let resizedReferenceCount = 0;
-  for (const file of files) {
-    const prepared = await prepareReferenceForUpload(file.path);
-    if (prepared.resized) resizedReferenceCount++;
-    // Only the extension may change (see transport.mjs) — the caller's
-    // "slotId--basename" stem is preserved.
-    const stem = file.name.slice(0, file.name.length - path.extname(file.name).length);
-    const uploadName = `${stem}${path.extname(prepared.filename)}`;
-    form.append("image[]", new Blob([prepared.bytes], { type: prepared.mime }), uploadName);
-  }
-  const response = await fetch(`${baseUrl}/api/generate`, {
-    method: "POST",
-    body: form,
-    headers: activeAccessHeaders,
-    redirect: "manual",
-  });
-  if (response.status === 302 || response.status === 403) {
-    throw Object.assign(
-      new Error(`Cloudflare Access rejected the render request (HTTP ${response.status}) — the session may have expired. Run \`cloudflared access login ${baseUrl}\`.`),
-      { status: response.status },
-    );
-  }
-  let json;
-  try {
-    json = await response.json();
-  } catch {
-    throw Object.assign(new Error(`Non-JSON response (HTTP ${response.status}) from ${baseUrl}/api/generate`), {
-      status: response.status,
-    });
-  }
-  if (!response.ok || !json.ok) {
-    throw Object.assign(new Error(json.error ?? json.message ?? `HTTP ${response.status}`), {
-      status: response.status,
-      // The Worker forwards OpenAI's Retry-After so a rate-limited request
-      // can wait the right amount instead of guessing.
-      retryAfterMs: typeof json.retryAfterMs === "number" ? json.retryAfterMs : undefined,
-    });
-  }
-  json.resizedReferenceCount = resizedReferenceCount;
-  return json;
-}
-
 async function postWithRetry(baseUrl, payload, files) {
   try {
     return await postGeneration(baseUrl, payload, files);
@@ -549,7 +390,9 @@ async function postWithRetry(baseUrl, payload, files) {
 // response — is caught here, reported once per run via `qaState.disabled`,
 // and QA is skipped (silently) for the rest of that command's run.
 async function runQaForCandidate({ baseUrl, values, payload, files, savedPath, jobId, qaState }) {
-  if (values["no-qa"] || qaState.disabled) return null;
+  // Opt-in: the user reviews drafts directly, so the extra vision-model call
+  // per candidate is skipped unless --qa is passed (--no-qa still wins).
+  if (!values.qa || values["no-qa"] || qaState.disabled) return null;
   try {
     const request = await buildQaRequest({ payload, referenceFiles: files, outputPath: savedPath, jobId });
     if (values["qa-model"]) request.model = values["qa-model"];
@@ -625,7 +468,7 @@ async function commandGenerate(values) {
     }
     const skipped = boards.length * plan.variants.length - work.length;
     if (skipped) console.log(`  (${skipped} already completed and unchanged; use --force to re-render anyway)`);
-    if (!values["no-qa"]) {
+    if (values.qa && !values["no-qa"]) {
       console.log(`  QA: would run against ${baseUrl}/api/qa${values["qa-model"] ? ` (model ${values["qa-model"]})` : ""}`);
     }
     return;
@@ -962,7 +805,7 @@ async function commandConfirm(values, variantIds) {
         `  ${job.variantId}  (revision ${job.candidate.revision ?? 1} -> ${nextRevision}, ${referenceCount} reference image(s), notes: [${job.appliedSlotIds.join(", ") || "none"}])`,
       );
     }
-    if (!values["no-qa"]) {
+    if (values.qa && !values["no-qa"]) {
       console.log(`  QA: would run against ${baseUrl}/api/qa${values["qa-model"] ? ` (model ${values["qa-model"]})` : ""}`);
     }
     return;
@@ -1198,9 +1041,11 @@ async function commandBatchFinalize(values, variantIds) {
 }
 
 // ---------------------------------------------------------------------------
-// review — local web page for browsing/swapping each slot's pick before
-// generating anything. Saves directly into plan.json; no --base-url or
-// Access credentials needed since it never touches the deployed app.
+// review — local web page for browsing/swapping each slot's pick, and for
+// running the draft/confirm/final render workflow from the board (see
+// lib/review-server.mjs's render queue). Saves directly into plan.json /
+// results.json. Takes --base-url (default: the deployed Worker) and the
+// OpenAI key, passed through to startReviewServer.
 // ---------------------------------------------------------------------------
 
 async function commandReview(values) {
@@ -1209,9 +1054,13 @@ async function commandReview(values) {
   const planPath = path.join(runDir, "plan.json");
   if (!existsSync(planPath)) throw new Error(`${planPath} does not exist. Run \`plan\` first.`);
   const port = Number(values.port) || 4790;
-  await startReviewServer({ runDir, planPath, port, renderReviewPage });
+  // Renders from the board go to the deployed Worker by default (it holds
+  // the OpenAI key); pass --base-url http://localhost:3000 for a local dev
+  // server, in which case OPENAI_API_KEY must be available locally.
+  const baseUrl = (values["base-url"] ?? "https://material-collager.mlux-db1.workers.dev").replace(/\/+$/, "");
+  await startReviewServer({ runDir, planPath, port, renderReviewPage, baseUrl, apiKey: loadOpenAIKey() });
   console.log(`Review UI running at http://127.0.0.1:${port} — open it in a browser.`);
-  console.log("Changes save directly into plan.json as you make them. Press Ctrl+C to stop.");
+  console.log(`Renders from the board go to ${baseUrl}. Changes save directly into plan.json / results.json. Press Ctrl+C to stop.`);
 }
 
 async function commandBatchStatus(values) {
@@ -1293,6 +1142,7 @@ const { values, positionals } = parseArgs({
     "min-slots": { type: "string" },
     port: { type: "string" },
     force: { type: "boolean" },
+    qa: { type: "boolean" },
     "no-qa": { type: "boolean" },
     "no-merge": { type: "boolean" },
     "qa-model": { type: "string" },

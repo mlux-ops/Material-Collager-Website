@@ -10,6 +10,10 @@ import path from "node:path";
 
 import { addSlot, applySelection, buildRoomIndex, CUSTOM_ID_PREFIX, libraryOptionsForSlot, removeSlot, replaceItemImage, resetSelection, roomKeyFor, slotKind } from "./review-core.mjs";
 import { makeDiskImageResolver } from "./match.mjs";
+import { readNoteOverrides } from "./notes.mjs";
+import { resolveAccessHeaders } from "./access.mjs";
+import { COST_PER_IMAGE, approveConfirmed, ensureRenders, pickDraft, renderSource, runRenderJob, selectionHash } from "./render.mjs";
+import { RenderQueue } from "./render-queue.mjs";
 import { indexTileCodes, resolveTileCode } from "./tiles.mjs";
 import { loadLibraryRows } from "./source.mjs";
 import { heroFor } from "./variants.mjs";
@@ -43,8 +47,18 @@ function sendJson(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
-export async function startReviewServer({ runDir, planPath, port, renderReviewPage }) {
+export async function startReviewServer({
+  runDir, planPath, port, renderReviewPage,
+  baseUrl = "http://localhost:3000", apiKey,
+  resolveAccess = resolveAccessHeaders, executeJob = runRenderJob,
+}) {
   const plan = JSON.parse(await readFile(planPath, "utf8"));
+  const resultsPath = path.join(runDir, "results.json");
+  const results = existsSync(resultsPath) ? JSON.parse(await readFile(resultsPath, "utf8")) : { candidates: {}, finals: {} };
+  results.renders ??= {};
+  async function persistResults() {
+    await writeFile(resultsPath, JSON.stringify(results, null, 2), "utf8");
+  }
   const libraryRoot = plan.libraryRoot;
   const offline = plan.source === "offline-manifest";
   const { rows } = await loadLibraryRows({ offline, libraryRoot, token: process.env.SMARTSHEET_ACCESS_TOKEN });
@@ -65,6 +79,95 @@ export async function startReviewServer({ runDir, planPath, port, renderReviewPa
 
   async function persistPlan() {
     await writeFile(planPath, JSON.stringify(plan, null, 2), "utf8");
+  }
+
+  // One-time import of the legacy per-board notes.json into item.note. Only
+  // items that have never had a note (undefined) are filled, so clearing a
+  // note in the UI sticks across restarts.
+  let importedNotes = false;
+  for (const board of plan.boards) {
+    const overrides = readNoteOverrides(runDir, board.id);
+    for (const item of board.items) {
+      if (item.note === undefined) {
+        item.note = overrides.get(item.slotId) ?? "";
+        importedNotes = true;
+      }
+    }
+  }
+  if (importedNotes) await persistPlan();
+
+  // Access credentials: resolved once at startup and again on the next
+  // render click after a failure, so a fresh `cloudflared access login` is
+  // picked up without restarting the server. Headers never leave this closure.
+  let access = { headers: {}, error: null };
+  async function refreshAccess() {
+    try {
+      const resolved = await resolveAccess(baseUrl);
+      access = { headers: resolved.headers, error: null };
+    } catch (error) {
+      access = { headers: {}, error: error.message };
+    }
+  }
+  await refreshAccess();
+
+  const queue = new RenderQueue({
+    execute: (job, { signal, onProgress }) => executeJob(job, {
+      plan, results, runDir, baseUrl, apiKey,
+      accessHeaders: access.headers,
+      signal, onProgress, persist: persistResults,
+    }),
+  });
+
+  const boardsRoot = path.resolve(runDir, "boards");
+  function renderImagePath(relative) {
+    if (typeof relative !== "string" || !relative) return null;
+    const resolved = path.resolve(runDir, relative);
+    if (!resolved.startsWith(boardsRoot + path.sep)) return null;
+    return existsSync(resolved) ? resolved : null;
+  }
+
+  const MAX_TEXT_CHARS = 2000;
+  function cleanText(value, label) {
+    const text = String(value ?? "").replace(/\s+/g, " ").trim();
+    if (text.length > MAX_TEXT_CHARS) throw Object.assign(new Error(`${label} must be under ${MAX_TEXT_CHARS} characters.`), { status: 400 });
+    return text;
+  }
+  function findItem(board, slotId) {
+    const item = board.items.find((entry) => entry.slotId === slotId);
+    if (!item) throw Object.assign(new Error(`Board "${board.id}" has no slot "${slotId}".`), { status: 404 });
+    return item;
+  }
+
+  const VARIANT_KEYS = new Set(plan.variants.map((variant) => variant.key));
+  function validateRenderRequest({ boardId, kind, variant, count }) {
+    const board = findBoard(boardId);
+    if (!["draft", "confirm", "final"].includes(kind)) throw Object.assign(new Error(`Unknown render kind "${kind}".`), { status: 400 });
+    const record = ensureRenders(results, board.id);
+    if (kind === "draft") {
+      if (!VARIANT_KEYS.has(variant)) throw Object.assign(new Error(`Pick a variant: ${[...VARIANT_KEYS].join(", ")}.`), { status: 400 });
+      const n = Number(count);
+      if (!Number.isInteger(n) || n < 1 || n > 10) throw Object.assign(new Error("Count must be a whole number from 1 to 10."), { status: 400 });
+      return board;
+    }
+    const source = renderSource(results, board.id, kind);
+    if (!source) throw Object.assign(new Error("Pick a draft (or approve a confirmed render) first."), { status: 400 });
+    if (kind === "final" && source.record.selectionHash !== selectionHash(board, record.instruction)) {
+      throw Object.assign(new Error("The picked render is stale — the selection changed since it was rendered. Draft again first."), { status: 409 });
+    }
+    return board;
+  }
+
+  function renderStatus() {
+    const renders = {};
+    const selectionHashes = {};
+    for (const board of plan.boards) {
+      const record = ensureRenders(results, board.id);
+      const currentHash = selectionHash(board, record.instruction);
+      selectionHashes[board.id] = currentHash;
+      const decorate = (entry) => ({ ...entry, stale: entry.selectionHash !== currentHash, url: `/render-image?path=${encodeURIComponent(entry.path)}` });
+      renders[board.id] = { ...record, drafts: record.drafts.map(decorate), confirmed: record.confirmed.map(decorate), finals: record.finals.map(decorate) };
+    }
+    return { accessError: access.error, baseUrl, queue: queue.snapshot(), renders, costs: COST_PER_IMAGE, selectionHashes };
   }
 
   function findBoard(boardId) {
@@ -108,6 +211,26 @@ export async function startReviewServer({ runDir, planPath, port, renderReviewPa
   const server = http.createServer(async (request, response) => {
     try {
       const url = new URL(request.url, "http://127.0.0.1");
+
+      // These 6 endpoints run the render workflow (the last one spends real
+      // money) and the client never sets Content-Type, so a plain cross-origin
+      // fetch()/form POST from any other page open in the user's browser could
+      // otherwise hit them while this local server is running. Requiring JSON
+      // forces a CORS preflight for a cross-origin request, which this server
+      // doesn't answer — the browser blocks it before it reaches us. The
+      // older endpoints below predate this plan and are intentionally left
+      // alone (out of scope for this fix).
+      const RENDER_WORKFLOW_ENDPOINTS = new Set([
+        "/api/instruction", "/api/item-note", "/api/pick-draft",
+        "/api/approve-confirmed", "/api/render", "/api/render-cancel",
+      ]);
+      if (request.method === "POST" && RENDER_WORKFLOW_ENDPOINTS.has(url.pathname)) {
+        const contentType = (request.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
+        if (contentType !== "application/json") {
+          sendJson(response, 400, { error: "Expected Content-Type: application/json." });
+          return;
+        }
+      }
 
       if (request.method === "GET" && url.pathname === "/") {
         response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -333,6 +456,76 @@ export async function startReviewServer({ runDir, planPath, port, renderReviewPa
         removeSlot(board, slotId);
         await persistPlan();
         sendJson(response, 200, { ok: true });
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/render-image") {
+        const filePath = renderImagePath(url.searchParams.get("path"));
+        if (!filePath) { response.writeHead(404); response.end("Not found"); return; }
+        response.writeHead(200, { "Content-Type": IMAGE_MIME[path.extname(filePath).toLowerCase()] ?? "application/octet-stream", "Cache-Control": "private, max-age=3600" });
+        createReadStream(filePath).pipe(response);
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/render-status") {
+        sendJson(response, 200, renderStatus());
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/instruction") {
+        const { boardId, instruction } = JSON.parse(await readBody(request));
+        const board = findBoard(boardId);
+        ensureRenders(results, board.id).instruction = cleanText(instruction, "The board instruction");
+        await persistResults();
+        sendJson(response, 200, { instruction: ensureRenders(results, board.id).instruction });
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/item-note") {
+        const { boardId, slotId, note } = JSON.parse(await readBody(request));
+        const board = findBoard(boardId);
+        const item = findItem(board, slotId);
+        item.note = cleanText(note, "An item note");
+        await persistPlan();
+        sendJson(response, 200, { item: serializeItem(item) });
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/pick-draft") {
+        const { boardId, draftId } = JSON.parse(await readBody(request));
+        const board = findBoard(boardId);
+        const draft = pickDraft(results, runDir, board.id, draftId);
+        await persistResults();
+        sendJson(response, 200, { pickedDraftId: draft.id });
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/approve-confirmed") {
+        const { boardId, confirmedId } = JSON.parse(await readBody(request));
+        const board = findBoard(boardId);
+        approveConfirmed(results, board.id, confirmedId ?? null);
+        await persistResults();
+        sendJson(response, 200, { approvedConfirmedId: ensureRenders(results, board.id).approvedConfirmedId });
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/render") {
+        const body = JSON.parse(await readBody(request));
+        const board = validateRenderRequest(body);
+        if (access.error) await refreshAccess();
+        const record = ensureRenders(results, board.id);
+        const { jobId, position } = queue.enqueue({
+          boardId: board.id, kind: body.kind, variant: body.variant ?? null,
+          count: body.kind === "draft" ? Number(body.count) : null,
+          instructionSnapshot: record.instruction, selectionHash: selectionHash(board, record.instruction),
+        });
+        sendJson(response, 200, { jobId, position, accessError: access.error });
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/render-cancel") {
+        const { jobId } = JSON.parse(await readBody(request));
+        sendJson(response, 200, { cancelled: queue.cancel(jobId) });
         return;
       }
 
