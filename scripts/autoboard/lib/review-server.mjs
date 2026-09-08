@@ -212,6 +212,26 @@ export async function startReviewServer({
     try {
       const url = new URL(request.url, "http://127.0.0.1");
 
+      // These 6 endpoints run the render workflow (the last one spends real
+      // money) and the client never sets Content-Type, so a plain cross-origin
+      // fetch()/form POST from any other page open in the user's browser could
+      // otherwise hit them while this local server is running. Requiring JSON
+      // forces a CORS preflight for a cross-origin request, which this server
+      // doesn't answer — the browser blocks it before it reaches us. The
+      // older endpoints below predate this plan and are intentionally left
+      // alone (out of scope for this fix).
+      const RENDER_WORKFLOW_ENDPOINTS = new Set([
+        "/api/instruction", "/api/item-note", "/api/pick-draft",
+        "/api/approve-confirmed", "/api/render", "/api/render-cancel",
+      ]);
+      if (request.method === "POST" && RENDER_WORKFLOW_ENDPOINTS.has(url.pathname)) {
+        const contentType = (request.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
+        if (contentType !== "application/json") {
+          sendJson(response, 400, { error: "Expected Content-Type: application/json." });
+          return;
+        }
+      }
+
       if (request.method === "GET" && url.pathname === "/") {
         response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         response.end(renderReviewPage());

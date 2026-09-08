@@ -814,7 +814,7 @@ document.addEventListener("click", (event) => {
 });
 
 async function postJson(route, body) {
-  const response = await fetch(route, { method: "POST", body: JSON.stringify(body) });
+  const response = await fetch(route, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const json = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(json.error || ("HTTP " + response.status));
   return json;

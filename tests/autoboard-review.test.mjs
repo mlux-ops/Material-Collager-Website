@@ -586,13 +586,13 @@ async function startScratchServer(extra = {}) {
     executeJob: extra.executeJob ?? (async () => {}),
   });
   const base = `http://127.0.0.1:${server.address().port}`;
-  const post = async (route, body) => { const r = await fetch(base + route, { method: "POST", body: JSON.stringify(body) }); return { status: r.status, json: await r.json() }; };
+  const post = async (route, body) => { const r = await fetch(base + route, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); return { status: r.status, json: await r.json() }; };
   const get = async (route) => { const r = await fetch(base + route); const ct = r.headers.get("content-type") || ""; return { status: r.status, json: ct.includes("json") ? await r.json() : null, raw: r }; };
   const close = () => new Promise((resolve) => server.close(resolve));
   const results = () => JSON.parse(readFileSync(path.join(runDir, "results.json"), "utf8"));
   const planNow = () => JSON.parse(readFileSync(planPath, "utf8"));
   const cleanup = async () => { await close(); rmSync(runDir, { recursive: true, force: true }); };
-  return { runDir, boardId, post, get, results, planNow, cleanup };
+  return { runDir, boardId, baseUrl: base, post, get, results, planNow, cleanup };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 25));
@@ -687,6 +687,14 @@ test("render-status marks drafts stale when the selection hash moved, and cancel
     release();
     await settle();
     assert.deepEqual((await s.get("/api/render-status")).json.queue.map((job) => job.state), ["done", "cancelled"]);
+  } finally { await s.cleanup(); }
+});
+
+test("POST /api/render without a JSON content type is rejected (cross-origin POST protection)", async () => {
+  const s = await startScratchServer();
+  try {
+    const response = await fetch(s.baseUrl + "/api/render", { method: "POST", body: JSON.stringify({ boardId: s.boardId, kind: "draft", variant: "A", count: 1 }) });
+    assert.equal(response.status, 400);
   } finally { await s.cleanup(); }
 });
 
