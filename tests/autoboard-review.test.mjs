@@ -17,7 +17,7 @@ import {
   roomKeyFor,
   slotKind,
 } from "../scripts/autoboard/lib/review-core.mjs";
-import { ensureRenders, recordDraft } from "../scripts/autoboard/lib/render.mjs";
+import { ensureRenders, recordConfirmed, recordDraft } from "../scripts/autoboard/lib/render.mjs";
 import { startReviewServer } from "../scripts/autoboard/lib/review-server.mjs";
 
 // A tiny real 1x1 PNG (valid header) — readImageSize needs actual bytes to
@@ -642,7 +642,7 @@ test("pick-draft, approve-confirmed and render-image work; path escapes are refu
   } finally { await s.cleanup(); }
 });
 
-test("POST /api/render validates and enqueues; status exposes queue, stale flags, costs", async () => {
+test("POST /api/render validates and enqueues; status exposes queue, stale flags, and unavailable costs", async () => {
   const calls = [];
   let release;
   const executeJob = (job, ctx) => new Promise((resolve) => { calls.push({ job, ctx }); release = resolve; ctx.onProgress("1/2"); });
@@ -663,7 +663,7 @@ test("POST /api/render validates and enqueues; status exposes queue, stale flags
     assert.equal(status.accessError, null);
     assert.equal(status.queue[0].state, "running");
     assert.equal(status.queue[0].progress, "1/2");
-    assert.equal(status.costs.draft, 0.016);
+    assert.equal(status.costs.draft, null);
     assert.match(status.selectionHashes[s.boardId], /^[0-9a-f]{40}$/);
     release();
     await settle();
@@ -681,12 +681,104 @@ test("render-status marks drafts stale when the selection hash moved, and cancel
     assert.equal(draft.stale, true);
     assert.equal(draft.url, "/render-image?path=" + encodeURIComponent(`boards/${s.boardId}/drafts/d-0001.png`));
     await s.post("/api/render", { boardId: s.boardId, kind: "draft", variant: "A", count: 1 });
-    const b = await s.post("/api/render", { boardId: s.boardId, kind: "draft", variant: "A", count: 1 });
+    const b = await s.post("/api/render", { boardId: s.boardId, kind: "draft", variant: "A", count: 1, background: "transparent" });
     assert.equal(b.json.position, 2);
     assert.deepEqual((await s.post("/api/render-cancel", { jobId: b.json.jobId })).json, { cancelled: true });
     release();
     await settle();
     assert.deepEqual((await s.get("/api/render-status")).json.queue.map((job) => job.state), ["done", "cancelled"]);
+  } finally { await s.cleanup(); }
+});
+
+test("saved Review options survive reload, reach the queue, and prevent duplicate submissions", async () => {
+  const jobs = [];
+  const releases = [];
+  const s = await startScratchServer({ executeJob: (job) => new Promise((resolve) => { jobs.push(job); releases.push(resolve); }) });
+  try {
+    const before = s.planNow();
+    assert.equal(Object.prototype.hasOwnProperty.call(before.boards[0], "renderOptions"), false);
+    assert.equal((await s.get("/api/plan")).json.boards[0].renderOptions, null);
+
+    let response = await s.post("/api/render-options", { boardId: s.boardId, quality: "xhigh", background: "transparent" });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.json.renderOptions, { quality: "xhigh", background: "transparent" });
+    assert.deepEqual(s.planNow().boards[0].renderOptions, { quality: "xhigh", background: "transparent" });
+    assert.deepEqual((await s.get("/api/plan")).json.boards[0].renderOptions, { quality: "xhigh", background: "transparent" });
+
+    response = await s.post("/api/render", { boardId: s.boardId, kind: "draft", variant: "A", count: 1 });
+    assert.equal(response.status, 200);
+    await settle();
+    assert.deepEqual(jobs[0].renderOptionsSnapshot, { quality: "xhigh", background: "transparent" });
+    const duplicate = await s.post("/api/render", { boardId: s.boardId, kind: "draft", variant: "A", count: 1 });
+    assert.equal(duplicate.status, 200);
+    assert.equal(duplicate.json.duplicate, true);
+    assert.equal(duplicate.json.jobId, response.json.jobId);
+    assert.equal(jobs.length, 1);
+    releases.shift()();
+    await settle();
+
+    // Explicit CLI-equivalent overrides win over the saved board selection.
+    response = await s.post("/api/render", { boardId: s.boardId, kind: "draft", variant: "A", count: 1, quality: "max", background: "opaque" });
+    await settle();
+    assert.deepEqual(jobs[1].renderOptionsSnapshot, { quality: "max", background: "opaque" });
+    releases.shift()();
+    await settle();
+  } finally { await s.cleanup(); }
+});
+
+test("render dedupe includes the exact picked/approved source and final force", async () => {
+  const boardId = "penthouse-bath-2-fixture";
+  const results = { candidates: {}, finals: {} };
+  recordDraft(results, boardId, { id: "d-0001", variant: "A", index: 1, path: `boards/${boardId}/drafts/d-0001.png`, jobId: "d1", durationMs: 1, selectionHash: "h", instruction: "", itemNotes: {} });
+  recordDraft(results, boardId, { id: "d-0002", variant: "A", index: 2, path: `boards/${boardId}/drafts/d-0002.png`, jobId: "d2", durationMs: 1, selectionHash: "h", instruction: "", itemNotes: {} });
+  recordConfirmed(results, boardId, { id: "c-0001", variant: "A", fromDraftId: "d-0001", path: `boards/${boardId}/confirmed/c-0001.png`, jobId: "c1", durationMs: 1, selectionHash: "h", instruction: "", itemNotes: {} });
+  const jobs = [];
+  const releases = [];
+  const s = await startScratchServer({
+    results,
+    executeJob: (job) => new Promise((resolve) => { jobs.push(job); releases.push(resolve); }),
+  });
+  try {
+    for (const file of ["d-0001.png", "d-0002.png"]) {
+      mkdirSync(path.join(s.runDir, "boards", boardId, "drafts"), { recursive: true });
+      writeFileSync(path.join(s.runDir, "boards", boardId, "drafts", file), ONE_BY_ONE_PNG);
+    }
+    await s.post("/api/pick-draft", { boardId, draftId: "d-0001" });
+    const first = await s.post("/api/render", { boardId, kind: "final", force: true });
+    await settle();
+    const duplicate = await s.post("/api/render", { boardId, kind: "final", force: true });
+    assert.equal(duplicate.json.duplicate, true);
+    assert.equal(duplicate.json.jobId, first.json.jobId);
+
+    await s.post("/api/pick-draft", { boardId, draftId: "d-0002" });
+    const differentDraft = await s.post("/api/render", { boardId, kind: "final", force: true });
+    assert.equal(differentDraft.json.duplicate, false);
+    assert.notEqual(differentDraft.json.jobId, first.json.jobId);
+
+    await s.post("/api/approve-confirmed", { boardId, confirmedId: "c-0001" });
+    const differentApproved = await s.post("/api/render", { boardId, kind: "final", force: true });
+    assert.equal(differentApproved.json.duplicate, false);
+    assert.notEqual(differentApproved.json.jobId, differentDraft.json.jobId);
+    assert.equal(jobs.length, 1);
+    releases.shift()();
+    await settle();
+    releases.shift()();
+    await settle();
+    releases.shift()();
+    await settle();
+  } finally { await s.cleanup(); }
+});
+
+test("render rejects unsupported explicit quality/background before queueing", async () => {
+  const jobs = [];
+  const s = await startScratchServer({ executeJob: async (job) => { jobs.push(job); } });
+  try {
+    let response = await s.post("/api/render", { boardId: s.boardId, kind: "draft", variant: "A", count: 1, quality: "ultra" });
+    assert.equal(response.status, 400);
+    response = await s.post("/api/render", { boardId: s.boardId, kind: "draft", variant: "A", count: 1, background: "auto" });
+    assert.equal(response.status, 400);
+    await settle();
+    assert.equal(jobs.length, 0);
   } finally { await s.cleanup(); }
 });
 

@@ -97,6 +97,7 @@ export function modelNotes(notes) {
 export function boardPayload(board, variant, options = {}) {
   const {
     quality = "medium",
+    background = "opaque",
     outputResolution = "studio",
     renderKind = "studio",
     layoutReference = false,
@@ -109,6 +110,7 @@ export function boardPayload(board, variant, options = {}) {
     collageType: board.collageType,
     orientation: "default",
     quality,
+    background,
     outputResolution,
     composition: variant.composition,
     density: variant.density,

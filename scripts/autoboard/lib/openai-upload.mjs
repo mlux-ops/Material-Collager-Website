@@ -22,10 +22,17 @@ async function postJson(baseUrl, route, body, headers) {
     body: JSON.stringify(body),
   });
   const json = await response.json().catch(() => null);
-  if (!response.ok || !json?.ok) {
-    throw new Error(json?.error ?? json?.message ?? `HTTP ${response.status} from ${route}`);
-  }
+  if (!response.ok || !json?.ok) throw uploadError(json, response.status, route);
   return json;
+}
+
+function uploadError(json, status, route) {
+  return Object.assign(new Error(json?.error ?? json?.message ?? `HTTP ${status} from ${route}`), {
+    status: json?.status ?? status,
+    code: json?.code,
+    retryAfterMs: typeof json?.retryAfterMs === "number" ? json.retryAfterMs : undefined,
+    diagnostics: json?.diagnostics,
+  });
 }
 
 export async function uploadFileToOpenAI(baseUrl, headers, filePath, apiKey) {
@@ -47,7 +54,7 @@ export async function uploadFileToOpenAI(baseUrl, headers, filePath, apiKey) {
     form.append("data", new Blob([chunk], { type: mimeType }), "reference.part");
     const response = await fetch(`${baseUrl}/api/references/part`, { method: "POST", headers, body: form });
     const json = await response.json().catch(() => null);
-    if (!response.ok || !json?.ok) throw new Error(json?.error ?? `HTTP ${response.status} from /api/references/part`);
+    if (!response.ok || !json?.ok) throw uploadError(json, response.status, "/api/references/part");
     partIds.push(json.partId);
   }
 

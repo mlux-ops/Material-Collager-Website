@@ -1,11 +1,14 @@
 // Shared server-side machinery for calling OpenAI /v1/images/edits with
-// gpt-image-2: multipart transport, single-attempt execution, and
+// Sunburst: multipart transport, single-attempt execution, and
 // per-attempt diagnostics. Used by /api/generate (collage pipeline) and
 // /api/workbench/* (node editor).
 
 import { OpenAIRequestError, combineAbortSignals, readOpenAIResponse } from "./openai-server.ts";
+import { LEGACY_IMAGE_MODEL, SUNBURST_MODEL, type SunburstBackground, type SunburstQuality } from "./sunburst.ts";
 
-export type ImageQuality = "low" | "medium" | "high" | "auto";
+export type ImageQuality = SunburstQuality;
+export type ImageBackground = SunburstBackground;
+export type ImageModel = typeof SUNBURST_MODEL | typeof LEGACY_IMAGE_MODEL;
 
 export type OpenAIImageResponse = {
   data?: Array<{ b64_json?: string }>;
@@ -22,13 +25,13 @@ export type PreparedReference = {
 };
 
 export type ImageEditRequest = {
-  model: "gpt-image-2";
+  model: ImageModel;
   prompt: string;
   references: PreparedReference[];
   mask?: PreparedReference;
   size: string;
   quality: ImageQuality;
-  background: "opaque";
+  background: ImageBackground;
   output_format: "png" | "jpeg" | "webp";
   // 0-100; OpenAI applies this only to jpeg/webp and ignores it for png, so
   // createImageEdit only sends it alongside those two formats.
@@ -61,9 +64,11 @@ export type AttemptDiagnostic = {
 };
 
 export type GenerationDiagnostics = {
-  model: "gpt-image-2";
+  model: ImageModel;
   transport: "multipart";
   quality: ImageQuality;
+  background?: ImageBackground;
+  outputFormat?: "png" | "jpeg" | "webp";
   referenceCount: number;
   totalReferenceBytes: number;
   largestReferenceBytes: number;
@@ -94,6 +99,9 @@ export async function createImageEdit(
   callerSignal?: AbortSignal,
 ) {
   validateImagePrompt(body.prompt);
+  if (body.background === "transparent" && body.output_format === "jpeg") {
+    throw new Error("Transparent output requires PNG or WebP; choose a compatible format before generating.");
+  }
   const startedAt = Date.now();
   try {
     callerSignal?.throwIfAborted();
@@ -142,6 +150,8 @@ export async function createImageEdit(
       model: body.model,
       transport: "multipart",
       quality: body.quality,
+      background: body.background,
+      outputFormat: body.output_format,
       referenceCount: body.references.length,
       totalReferenceBytes: body.references.reduce((sum, reference) => sum + reference.blob.size, 0),
       largestReferenceBytes: Math.max(...body.references.map((reference) => reference.blob.size), 0),
@@ -155,11 +165,13 @@ export async function createImageEdit(
 // JSON body instead of multipart edits.
 export async function createImageGeneration(
   apiKey: string,
-  body: { prompt: string; size: string; quality: ImageQuality; n?: number },
+  body: { prompt: string; size: string; quality: ImageQuality; n?: number; model?: ImageModel; background?: ImageBackground },
   diagnostics: AttemptDiagnostic[],
   callerSignal?: AbortSignal,
 ) {
   validateImagePrompt(body.prompt);
+  const model = body.model ?? LEGACY_IMAGE_MODEL;
+  const background = body.background ?? "opaque";
   const startedAt = Date.now();
   try {
     callerSignal?.throwIfAborted();
@@ -167,11 +179,12 @@ export async function createImageGeneration(
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "gpt-image-2",
+        model,
         prompt: body.prompt,
         size: body.size,
         quality: body.quality,
         output_format: "png",
+        background,
         ...(body.n && body.n > 1 ? { n: body.n } : {}),
       }),
       // E1 cancellation threading — see createImageEdit above.
@@ -179,7 +192,7 @@ export async function createImageGeneration(
     });
     const data = await readOpenAIResponse<OpenAIImageResponse>(response, {
       label: "image.generate",
-      model: "gpt-image-2",
+        model,
     });
     diagnostics.push({ stage: "image_edit", outcome: "succeeded", attempt: 1, durationMs: Date.now() - startedAt, size: body.size });
     return { data };

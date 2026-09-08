@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .models import CollageRequest
+from .models import SUNBURST_MODEL, CollageRequest
 from .prompts import build_generation_prompt
 
 
@@ -22,6 +22,8 @@ class CollageResult:
     model: str
     size: str
     quality: str
+    background: str = "opaque"
+    output_format: str = "png"
     usage: Any | None = None
 
 
@@ -30,13 +32,17 @@ def generate_collage(
     *,
     client: Any | None = None,
     output_path: str | Path | None = None,
-    model: str = "gpt-image-2",
+    model: str = SUNBURST_MODEL,
 ) -> CollageResult:
     """Generate a collage using OpenAI image references and save it to disk."""
 
     request.validate(check_paths=True, check_roles=False)
     prompt = build_generation_prompt(request)
-    destination = Path(output_path or request.output_path or "material_collage.png")
+    requested_output = output_path or request.output_path
+    # Keep the implicit destination's extension aligned with the bytes the
+    # selected output_format produces (notably transparent WebP). Explicit
+    # caller paths remain untouched for backwards compatibility.
+    destination = Path(requested_output or f"material_collage.{request.output_format}")
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     api_client = client or _make_openai_client()
@@ -52,7 +58,7 @@ def generate_collage(
             prompt=prompt,
             size=request.resolved_size(),
             quality=request.quality,
-            background="opaque",
+            background=request.resolved_background(),
             output_format=request.output_format,
         )
 
@@ -65,6 +71,8 @@ def generate_collage(
         model=model,
         size=request.resolved_size(),
         quality=request.quality,
+        background=request.resolved_background(),
+        output_format=request.output_format,
         usage=getattr(response, "usage", None),
     )
 

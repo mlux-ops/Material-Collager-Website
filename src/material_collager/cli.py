@@ -76,6 +76,7 @@ def _generate(args: argparse.Namespace) -> int:
             quality=request.quality,
             output_path=request.output_path,
             output_format=request.output_format,
+            background=request.resolved_background(),
             auto_retry=args.auto_retry,
         )
 
@@ -110,7 +111,8 @@ def _wizard(args: argparse.Namespace) -> int:
     print("High-End Material Collage Agent")
     collage_type = _ask_choice("Collage type", sorted(COLLAGE_TYPES))
     orientation = _ask_optional("Orientation override (blank for default, or landscape/portrait/square)")
-    quality = _ask_optional("Quality (blank for high, or low/medium/high/auto)") or "high"
+    quality = _ask_optional("Quality (blank for high, or low/medium/high/xhigh/max/auto)") or "high"
+    background = _ask_optional("Background (blank for opaque, or transparent)") or "opaque"
 
     items: list[CollageItem] = []
     print("\nAdd each collage item. Leave item id blank when finished.")
@@ -143,6 +145,7 @@ def _wizard(args: argparse.Namespace) -> int:
         orientation=orientation or None,
         quality=quality,
         output_path=Path(args.output) if args.output else None,
+        background=background,
     )
     request.validate(check_paths=True, check_roles=False)
 
@@ -177,6 +180,7 @@ def _request_summary(request: CollageRequest) -> str:
         f"Orientation: {request.resolved_orientation()}",
         f"Size: {request.resolved_size()}",
         f"Quality: {request.quality}",
+        f"Background: {request.resolved_background()}",
         "Items:",
     ]
     for item in request.items:
@@ -192,6 +196,8 @@ def _save_request_if_requested(request: CollageRequest, path: str | None) -> Non
         "collage_type": request.collage_type,
         "orientation": request.orientation,
         "quality": request.quality,
+        "output_format": request.output_format,
+        "background": request.resolved_background(),
         "output_path": str(request.output_path) if request.output_path else None,
         "items": [
             {

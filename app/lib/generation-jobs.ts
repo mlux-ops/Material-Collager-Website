@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { calculateSunburstUsageCost } from "./sunburst.ts";
 
 export type RenderKind = "draft" | "studio" | "final" | "repair";
 
@@ -15,6 +16,11 @@ export type GenerationJob = {
   libraryVisible: boolean;
   title: string;
   estimatedUsd: number | null;
+  costUsd: number | null;
+  model: string | null;
+  quality: string | null;
+  background: string | null;
+  outputFormat: string | null;
   usage: Record<string, unknown> | null;
   qa: Record<string, unknown> | null;
   error: string | null;
@@ -39,6 +45,11 @@ export type JobRow = {
   library_visible: number;
   title: string;
   estimated_usd: number | null;
+  cost_usd: number | null;
+  model: string | null;
+  quality: string | null;
+  background: string | null;
+  output_format: string | null;
   usage_json: string | null;
   qa_json: string | null;
   error: string | null;
@@ -94,6 +105,11 @@ async function initJobStorage() {
     library_visible INTEGER NOT NULL DEFAULT 1,
     title TEXT NOT NULL DEFAULT '',
     estimated_usd REAL,
+    cost_usd REAL,
+    model TEXT,
+    quality TEXT,
+    background TEXT,
+    output_format TEXT,
     usage_json TEXT,
     qa_json TEXT,
     error TEXT,
@@ -110,6 +126,11 @@ async function initJobStorage() {
     ["library_visible", "ALTER TABLE generation_jobs ADD COLUMN library_visible INTEGER NOT NULL DEFAULT 1"],
     ["title", "ALTER TABLE generation_jobs ADD COLUMN title TEXT NOT NULL DEFAULT ''"],
     ["finalize_attempts", "ALTER TABLE generation_jobs ADD COLUMN finalize_attempts INTEGER NOT NULL DEFAULT 0"],
+    ["cost_usd", "ALTER TABLE generation_jobs ADD COLUMN cost_usd REAL"],
+    ["model", "ALTER TABLE generation_jobs ADD COLUMN model TEXT"],
+    ["quality", "ALTER TABLE generation_jobs ADD COLUMN quality TEXT"],
+    ["background", "ALTER TABLE generation_jobs ADD COLUMN background TEXT"],
+    ["output_format", "ALTER TABLE generation_jobs ADD COLUMN output_format TEXT"],
   ] as const;
   for (const [name, statement] of upgrades) {
     if (!names.has(name)) {
@@ -147,6 +168,10 @@ export async function persistGenerationOutput(input: {
   format: string;
   prompt: string;
   payload: Record<string, unknown>;
+  model?: string;
+  quality?: string;
+  background?: string;
+  outputFormat?: string;
   usage?: Record<string, unknown>;
   qa?: Record<string, unknown> | null;
   renderKind: RenderKind;
@@ -163,14 +188,20 @@ export async function persistGenerationOutput(input: {
   const outputKey = existing?.output_key || `generation-outputs/${id}.${outputExtension(input.filename)}`;
   const now = Date.now();
   const title = outputTitle(input.filename, input.collageType);
+  const model = input.model ?? stringField(input.payload, "model");
+  const quality = input.quality ?? stringField(input.payload, "quality");
+  const background = input.background ?? stringField(input.payload, "background");
+  const outputFormat = input.outputFormat ?? stringField(input.payload, "outputFormat") ?? outputExtension(input.filename);
+  const costUsd = calculateSunburstUsageCost(input.usage);
   // Never persist the caller's OpenAI API key with the job record.
-  const payloadJson = JSON.stringify({ ...input.payload, apiKey: undefined });
+  const payloadJson = JSON.stringify({ ...input.payload, apiKey: undefined, model, quality, background, outputFormat });
   await bucket.put(outputKey, base64Bytes(input.imageBase64), { httpMetadata: { contentType: mimeTypeForFilename(input.filename) } });
 
   if (existing) {
     await DB.prepare(`UPDATE generation_jobs SET
       mode = 'immediate', status = 'completed', output_key = ?, filename = ?, format = ?, prompt = ?, payload_json = ?,
-      usage_json = ?, qa_json = ?, error = NULL, updated_at = ?, expires_at = ?, render_kind = ?, collage_type = ?,
+      usage_json = ?, cost_usd = ?, qa_json = ?, error = NULL, updated_at = ?, expires_at = ?, render_kind = ?, collage_type = ?,
+      model = ?, quality = ?, background = ?, output_format = ?,
       library_visible = ?, title = ?
       WHERE id = ?`)
       .bind(
@@ -180,11 +211,16 @@ export async function persistGenerationOutput(input: {
         input.prompt,
         payloadJson,
         JSON.stringify(input.usage ?? {}),
+        costUsd,
         input.qa ? JSON.stringify(input.qa) : null,
         now,
         now + RETENTION_MS,
         input.renderKind,
         input.collageType,
+        model,
+        quality,
+        background,
+        outputFormat,
         input.renderKind === "final" ? 1 : 0,
         title,
         id,
@@ -192,8 +228,9 @@ export async function persistGenerationOutput(input: {
   } else {
     await DB.prepare(`INSERT INTO generation_jobs
       (id, mode, status, openai_batch_id, output_key, filename, format, prompt, payload_json, reference_ids_json,
-       render_kind, collage_type, library_visible, title, estimated_usd, usage_json, qa_json, error, created_at, updated_at, expires_at)
-      VALUES (?, 'immediate', 'completed', NULL, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?, ?)`)
+       render_kind, collage_type, library_visible, title, estimated_usd, usage_json, qa_json, error,
+       model, quality, background, output_format, cost_usd, created_at, updated_at, expires_at)
+       VALUES (?, 'immediate', 'completed', NULL, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(
         id,
         outputKey,
@@ -207,6 +244,11 @@ export async function persistGenerationOutput(input: {
         title,
         JSON.stringify(input.usage ?? {}),
         input.qa ? JSON.stringify(input.qa) : null,
+        model,
+        quality,
+        background,
+        outputFormat,
+        costUsd,
         now,
         now,
         now + RETENTION_MS,
@@ -260,6 +302,11 @@ export function publicJob(row: JobRow): GenerationJob {
     libraryVisible: Boolean(row.library_visible),
     title: row.title || outputTitle(row.filename, row.collage_type),
     estimatedUsd: row.estimated_usd,
+    costUsd: row.cost_usd ?? null,
+    model: row.model ?? null,
+    quality: row.quality ?? null,
+    background: row.background ?? null,
+    outputFormat: row.output_format ?? null,
     usage: parseJson(row.usage_json),
     qa: parseJson(row.qa_json),
     error: row.error,
@@ -295,6 +342,10 @@ function outputTitle(filename: string, collageType?: string) {
   const clean = filename.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim();
   if (clean && clean.toLowerCase() !== "material collage") return clean.replace(/\b\w/g, (letter) => letter.toUpperCase());
   return (collageType || "Material collage").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function stringField(record: Record<string, unknown>, key: string): string | undefined {
+  return typeof record[key] === "string" && record[key] ? record[key] as string : undefined;
 }
 
 function base64Bytes(value: string) {

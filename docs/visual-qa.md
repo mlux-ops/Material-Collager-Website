@@ -1,3 +1,108 @@
+# Visual QA - Sunburst migration Task 2 Autoboard Review
+
+Date: 2026-09-08
+Status: **PASSED - LOCAL ONLY**
+
+## Environment
+
+- Local URL: `http://127.0.0.1:4199/`
+- Browser: Playwright CLI (`autoboard-review` session)
+- Viewports: 1440 x 900, 1280 x 800, 1024 x 768, 390 x 844
+- Scope: Local Review board controls and persisted render-option summary; the
+  render button was not activated and no paid/live image request was made.
+
+## Checks
+
+| Check | Result |
+| --- | --- |
+| Quality control | Passed; Stage default, Low, Medium, High, Extra high, Max, and Auto are visible |
+| Background control | Passed; Solid white is selected by default and Transparent is available |
+| Cost treatment | Passed; controls say cost after completion and history entries say cost unavailable when usage is absent |
+| Review layout at required desktop/mobile viewports | Passed; no horizontal overflow or clipped option controls observed |
+| Browser console during load | Passed; 0 errors, 0 warnings |
+
+## Evidence captured
+
+- [1440 x 900](../output/playwright/autoboard-review-1440x900.png)
+- [1280 x 800](../output/playwright/autoboard-review-1280x800.png)
+- [1024 x 768](../output/playwright/autoboard-review-1024x768.png)
+- [390 x 844](../output/playwright/autoboard-review-390x844.png)
+
+## Discrepancies fixed
+
+- Added saved quality/background controls and a summary that includes the Final
+  high minimum while preserving old-plan defaults.
+- Added per-render metadata and status-aware cost text so pending, completed,
+  and failed states do not imply a pre-render estimate.
+- Completed status now reads usage cost from the stage that just finished;
+  an earlier draft cannot mask a Confirm or Final result.
+- Added an empty favicon response so the local browser console remains clean.
+
+## Remaining known deviations
+
+This pass did not click a render control or contact the deployed Worker. Queue,
+request-payload, persistence, stale-candidate, duplicate-prevention, and actual
+usage-cost behavior are covered by mocked regression tests.
+
+## No-deploy confirmation
+
+No deploy, publish, production-state write, or paid/live image request occurred.
+
+---
+
+# Visual QA - Sunburst migration Task 1
+
+Date: 2026-09-08
+Status: **PASSED - LOCAL ONLY**
+
+## Environment
+
+- Local URL: `http://127.0.0.1:3000/generator`
+- Browser: Playwright CLI (`sunburst` session)
+- Viewports: 1440 x 900, 1280 x 800, 1024 x 768, 390 x 844
+- Scope: Generator setup controls only; no generation was submitted and no paid
+  image call was made.
+
+## Checks
+
+| Check | Result |
+| --- | --- |
+| Solid white background is the default | Passed; visible in all four viewports |
+| Background control is visible and labeled | Passed; `Solid white` shown in all four viewports, then `Transparent` selected and verified in Browser |
+| Quality control retains high default | Passed; `High` shown in all four viewports |
+| Generator layout at required desktop/mobile viewports | Passed; no horizontal overflow or clipped background control observed |
+| Browser console during load | No migration-related errors observed |
+
+## Evidence captured
+
+- [1440 x 900](../output/playwright/generator-task1-1440x900.png)
+- [1280 x 800](../output/playwright/generator-task1-1280x800.png)
+- [1024 x 768](../output/playwright/generator-task1-1024x768.png)
+- [390 x 844](../output/playwright/generator-task1-390x844.png)
+- [1440 x 900 with Transparent selected](../output/playwright/generator-task1-1440x900-transparent.png)
+
+## Discrepancies fixed
+
+- Removed the legacy fixed-dollar labels from the Final Render Now and Economy
+  Final actions; both now state that usage-based cost is shown after completion.
+- History download labels now reflect the persisted output format instead of
+  always claiming PNG.
+- The new Background control fits the existing setup rail at each required
+  viewport and preserves the established default visual state.
+
+## Remaining known deviations
+
+This pass did not submit a live generation request, upload references, or
+exercise paid rendering in the browser. Those behaviors are covered by mocked
+regression tests in Task 1; production/deployment verification remains outside
+this implementation pass.
+
+## No-deploy confirmation
+
+No deploy, publish, or production-state write occurred during this QA pass.
+
+---
+
 # Visual QA - Workbench Node Editor Phase 2 (S32)
 
 Date: 2026-07-25

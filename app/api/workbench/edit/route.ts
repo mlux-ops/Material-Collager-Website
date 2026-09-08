@@ -1,4 +1,4 @@
-import { MAX_REFERENCE_FILE_BYTES, MAX_REFERENCE_IMAGES, QUALITIES } from "@/app/lib/collage";
+import { MAX_REFERENCE_FILE_BYTES, MAX_REFERENCE_IMAGES } from "@/app/lib/collage";
 import {
   DiagnosedGenerationError,
   createImageEdit,
@@ -13,6 +13,7 @@ import {
   type PreparedReference,
 } from "@/app/lib/image-edit";
 import { OpenAIRequestError, errorResponse, resolveOpenAIKey } from "@/app/lib/openai-server";
+import { resolveLegacyImageQuality } from "@/app/lib/sunburst";
 
 export const runtime = "edge";
 
@@ -44,9 +45,9 @@ export async function POST(request: Request) {
     const size = payload.size || "1536x1024";
     const sizeError = validateEditSize(size);
     if (sizeError) throw new Error(sizeError);
-    const quality: ImageQuality = QUALITIES.includes(payload.quality as (typeof QUALITIES)[number])
-      ? (payload.quality as ImageQuality)
-      : "medium";
+    // Workbench remains on gpt-image-2 until Task 3. Do not let the shared
+    // Sunburst quality list expand its legacy model's accepted contract.
+    const quality: ImageQuality = resolveLegacyImageQuality(payload.quality);
     const n = Math.max(1, Math.min(10, Math.round(Number(payload.n) || 1)));
 
     const imageFiles = incoming.getAll("image[]").filter((value): value is File => value instanceof File);

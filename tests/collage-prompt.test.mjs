@@ -117,3 +117,20 @@ test("a board where one item has two images still states the supporting-view rul
   assert.match(prompt, /A supporting view is another photograph of the SAME physical item/);
   assert.match(prompt, /1 of the 3 uploaded product images is a supporting view that add no object of their own/);
 });
+
+test("transparent prompts change only background wording while retaining product and layout guidance", () => {
+  const opaque = buildGenerationPrompt(request({ background: "opaque" }));
+  const transparent = buildGenerationPrompt(request({ background: "transparent" }));
+
+  assert.match(transparent, /Transparent background with preserved alpha and no white matte/);
+  assert.doesNotMatch(transparent, /Seamless pure white background \(#FFFFFF\)/);
+  for (const phrase of [
+    "Preserve recognizable product identity",
+    "Never place a supporting view on the canvas as its own element",
+    'Images 1-3 -> item "faucet"',
+    "Asymmetrical overhead flat lay",
+  ]) {
+    assert.ok(opaque.includes(phrase), `opaque prompt should retain ${phrase}`);
+    assert.ok(transparent.includes(phrase), `transparent prompt should retain ${phrase}`);
+  }
+});
