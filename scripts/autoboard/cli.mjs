@@ -1029,10 +1029,11 @@ async function commandBatchFinalize(values, variantIds) {
 }
 
 // ---------------------------------------------------------------------------
-// review — local web page for browsing/swapping each slot's pick, and for
-// running the whole draft/confirm/final render workflow from the board.
-// Renders go to --base-url (default: the deployed Worker), which is where
-// Access credentials come in.
+// review — local web page for browsing/swapping each slot's pick before
+// generating anything. Saves directly into plan.json. Takes --base-url
+// (default: the deployed Worker) and the OpenAI key, both passed through
+// to startReviewServer for use by the render workflow added in a later
+// change; the review server does not yet act on them.
 // ---------------------------------------------------------------------------
 
 async function commandReview(values) {
