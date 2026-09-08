@@ -1029,11 +1029,11 @@ async function commandBatchFinalize(values, variantIds) {
 }
 
 // ---------------------------------------------------------------------------
-// review — local web page for browsing/swapping each slot's pick before
-// generating anything. Saves directly into plan.json. Takes --base-url
-// (default: the deployed Worker) and the OpenAI key, both passed through
-// to startReviewServer for use by the render workflow added in a later
-// change; the review server does not yet act on them.
+// review — local web page for browsing/swapping each slot's pick, and for
+// running the draft/confirm/final render workflow from the board (see
+// lib/review-server.mjs's render queue). Saves directly into plan.json /
+// results.json. Takes --base-url (default: the deployed Worker) and the
+// OpenAI key, passed through to startReviewServer.
 // ---------------------------------------------------------------------------
 
 async function commandReview(values) {
