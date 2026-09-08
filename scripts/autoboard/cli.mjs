@@ -33,7 +33,6 @@ import { uploadFileToOpenAI } from "./lib/openai-upload.mjs";
 import { startReviewServer } from "./lib/review-server.mjs";
 import { renderReviewPage } from "./lib/review-page.mjs";
 import { isStaleCandidate } from "./lib/review-core.mjs";
-import { prepareReferenceForUpload } from "./lib/transport.mjs";
 import { buildQaRequest, formatQaLine, runQa } from "./lib/qa-client.mjs";
 import { annotateReferenceMeta } from "./lib/image-meta.mjs";
 import {
@@ -1030,9 +1029,10 @@ async function commandBatchFinalize(values, variantIds) {
 }
 
 // ---------------------------------------------------------------------------
-// review — local web page for browsing/swapping each slot's pick before
-// generating anything. Saves directly into plan.json; no --base-url or
-// Access credentials needed since it never touches the deployed app.
+// review — local web page for browsing/swapping each slot's pick, and for
+// running the whole draft/confirm/final render workflow from the board.
+// Renders go to --base-url (default: the deployed Worker), which is where
+// Access credentials come in.
 // ---------------------------------------------------------------------------
 
 async function commandReview(values) {
