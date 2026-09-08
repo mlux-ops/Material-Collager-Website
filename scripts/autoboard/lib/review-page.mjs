@@ -217,6 +217,11 @@ function renderStrip(board, list, kind, label) {
   return wrap;
 }
 
+// Matches DEFAULT_VARIANTS in scripts/autoboard/lib/variants.mjs (A/B/C ->
+// composition editorial/structured/catalog) — shown as a hover label on the
+// variant toggle so the letter isn't the only clue to what it renders.
+const VARIANT_LABELS = { A: "Editorial", B: "Structured", C: "Catalog" };
+
 function renderPanel(board) {
   const record = renderStatus.renders[board.id] || emptyRenders();
   const prefs = prefsFor(board.id);
@@ -225,7 +230,7 @@ function renderPanel(board) {
   panel.appendChild(el("h3", { text: "Render" }));
 
   const toggle = el("span", { className: "variant-toggle" }, ["A", "B", "C"].map((key) =>
-    el("button", { className: prefs.variant === key ? "active" : "", "data-action": "variant", "data-board": board.id, "data-variant": key, text: key })));
+    el("button", { className: prefs.variant === key ? "active" : "", "data-action": "variant", "data-board": board.id, "data-variant": key, title: VARIANT_LABELS[key], text: key })));
   const count = el("input", { type: "number", min: "1", max: "10", value: String(prefs.count), "data-action": "count", "data-board": board.id, title: "How many drafts of this variant" });
   // Renders as a button element with the attribute data-action="draft", picked up by the click-delegation handler below.
   const draftButton = el("button", { "data-action": "draft", "data-board": board.id, text: "Draft \\u00d7" + prefs.count + " \\u00b7 " + money("draft", prefs.count) });
@@ -249,8 +254,11 @@ function renderPanel(board) {
   const confirmButton = el("button", { "data-action": "confirm", "data-board": board.id, text: "Confirm \\u25b6 medium \\u00b7 " + money("confirm", 1) });
   if (!picked) { confirmButton.disabled = true; confirmButton.title = "Pick a draft first"; }
   const finalButton = el("button", { "data-action": "final", "data-board": board.id, text: "Final \\u25b6 high \\u2192 Library \\u00b7 " + money("final", 1) });
+  // Staleness does not disable Final — it only strengthens the confirm
+  // dialog's wording (see the click handler below), which sends force:true.
+  // Only a genuinely missing source (nothing picked/approved) hard-blocks it.
   if (!source) { finalButton.disabled = true; finalButton.title = "Pick a draft or approve a confirmed render first"; }
-  else if (source.selectionHash !== hash) { finalButton.disabled = true; finalButton.title = "The picked render is stale: the selection changed since it was rendered. Draft again first."; }
+  else if (source.selectionHash !== hash) { finalButton.title = "The picked render is stale: the board's selection changed since it was rendered. You can still finalize it, but the final will not reflect your latest changes."; }
   panel.appendChild(el("div", { className: "render-actions" }, [confirmButton, finalButton]));
 
   panel.appendChild(renderStrip(board, record.confirmed, "confirm", "Confirmed"));
@@ -904,8 +912,15 @@ document.addEventListener("click", async (event) => {
     else if (action === "final") {
       const record = renderStatus.renders[boardId] || emptyRenders();
       const source = record.approvedConfirmedId ? "confirmed " + record.approvedConfirmedId : "draft " + record.pickedDraftId;
-      if (!window.confirm("Render final at high quality, " + money("final", 1) + ", from " + source + "? It will appear in the site Library.")) return;
-      await postJson("/api/render", { boardId: boardId, kind: "final" });
+      const sourceRecord = record.approvedConfirmedId
+        ? record.confirmed.find((entry) => entry.id === record.approvedConfirmedId)
+        : record.drafts.find((entry) => entry.id === record.pickedDraftId);
+      const stale = Boolean(sourceRecord) && sourceRecord.selectionHash !== renderStatus.selectionHashes[boardId];
+      const message = stale
+        ? "This picked render is stale - the board's selection changed since it was rendered, so the final will not reflect your latest changes. Render final anyway at high quality, " + money("final", 1) + ", from " + source + "? It will appear in the site Library."
+        : "Render final at high quality, " + money("final", 1) + ", from " + source + "? It will appear in the site Library.";
+      if (!window.confirm(message)) return;
+      await postJson("/api/render", { boardId: boardId, kind: "final", force: stale });
       showStatus("Queued final render");
       await pollOnce();
     }

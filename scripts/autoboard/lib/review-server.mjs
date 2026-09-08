@@ -149,7 +149,7 @@ export async function startReviewServer({
   }
 
   const VARIANT_KEYS = new Set(plan.variants.map((variant) => variant.key));
-  function validateRenderRequest({ boardId, kind, variant, count }) {
+  function validateRenderRequest({ boardId, kind, variant, count, force }) {
     const board = findBoard(boardId);
     if (!["draft", "confirm", "final"].includes(kind)) throw Object.assign(new Error(`Unknown render kind "${kind}".`), { status: 400 });
     const record = ensureRenders(results, board.id);
@@ -167,7 +167,10 @@ export async function startReviewServer({
       const hint = kind === "confirm" ? "Pick a draft" : "Pick a draft or approve a confirmed render";
       throw Object.assign(new Error(`${hint} first.`), { status: 400 });
     }
-    if (kind === "final" && source.record.selectionHash !== selectionHash(board, record.instruction)) {
+    // force:true (from the panel's stronger confirm dialog) is the user
+    // explicitly acknowledging the staleness and choosing to finalize the
+    // outdated source anyway — never applies to draft/confirm, only final.
+    if (kind === "final" && !force && source.record.selectionHash !== selectionHash(board, record.instruction)) {
       throw Object.assign(new Error("The picked render is stale — the selection changed since it was rendered. Draft again first."), { status: 409 });
     }
     return board;
@@ -530,6 +533,7 @@ export async function startReviewServer({
           boardId: board.id, kind: body.kind, variant: body.variant ?? null,
           count: body.kind === "draft" ? Number(body.count) : null,
           instructionSnapshot: record.instruction, selectionHash: selectionHash(board, record.instruction),
+          force: Boolean(body.force),
         });
         sendJson(response, 200, { jobId, position, accessError: access.error });
         return;

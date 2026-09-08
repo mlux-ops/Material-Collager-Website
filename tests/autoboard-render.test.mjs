@@ -308,3 +308,20 @@ test("runRenderJob rejects confirm/final without a source and final with a stale
   await assert.rejects(runRenderJob({ jobId: "q", boardId, kind: "final", selectionHash: "new" }, ctx), /stale/i);
   rmSync(runDir, { recursive: true, force: true });
 });
+
+test("runRenderJob renders a stale final anyway when job.force is true", async (t) => {
+  const { runDir, plan, results } = scratchRun();
+  const boardId = plan.boards[0].id;
+  const rel = await saveRenderImage(runDir, boardId, "draft", "d-0001", PNG.toString("base64"));
+  recordDraft(results, boardId, { variant: "A", index: 1, path: rel, jobId: "j", durationMs: 1, selectionHash: "old", instruction: "", itemNotes: {} });
+  ensureRenders(results, boardId).pickedDraftId = "d-0001";
+  t.mock.method(globalThis, "fetch", async () => Response.json({ ok: true, imageBase64: PNG.toString("base64"), mimeType: "image/png", jobId: "job-force", libraryVisible: true }));
+  const ctx = { plan, results, runDir, baseUrl: "https://w.example", accessHeaders: {}, signal: new AbortController().signal, onProgress: () => {}, persist: async () => {} };
+  // Without force, the same stale source still rejects.
+  await assert.rejects(runRenderJob({ jobId: "q1", boardId, kind: "final", selectionHash: "new" }, ctx), /stale/i);
+  // With force:true, the stale source renders anyway.
+  await runRenderJob({ jobId: "q2", boardId, kind: "final", selectionHash: "new", force: true }, ctx);
+  assert.equal(results.renders[boardId].finals.length, 1);
+  assert.equal(results.finals[`${boardId}--A`].jobId, "job-force");
+  rmSync(runDir, { recursive: true, force: true });
+});
