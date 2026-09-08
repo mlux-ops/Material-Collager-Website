@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createImageEdit, isRetryableImageError } from "../app/lib/image-edit.ts";
+import { createImageEdit, isRetryableImageError, resolveTransport } from "../app/lib/image-edit.ts";
 import { OpenAIRequestError, readOpenAIResponse } from "../app/lib/openai-server.ts";
 import { buildGenerationPrompt } from "../app/lib/collage.ts";
 
@@ -93,4 +93,70 @@ test("Retry-After is surfaced without an automatic repeat", async (t) => {
   });
   await assert.rejects(createImageEdit("test-only", body, []));
   assert.equal(calls, 1);
+});
+
+test("input_fidelity is sent only for Sunburst, and only when the caller asks for it", async (t) => {
+  const sent = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    sent.push(init.body);
+    return Response.json({ data: [{ b64_json: "AA==" }], usage: {} });
+  });
+
+  // Sunburst, explicitly requested: the field goes on the wire.
+  await createImageEdit("k", { ...body, model: "gpt-image-2.5-sunburst", input_fidelity: "high" }, []);
+  assert.equal(sent[0].get("input_fidelity"), "high");
+  // The stored alias still resolves to the pinned snapshot on the same request.
+  assert.equal(sent[0].get("model"), "gpt-image-2.5-sunburst-2026-09-08");
+
+  // Sunburst, nothing requested: unset, because the docs do not yet confirm
+  // the model honours it and an unverified parameter must not reach a paid render.
+  await createImageEdit("k", { ...body, model: "gpt-image-2.5-sunburst" }, []);
+  assert.equal(sent[1].has("input_fidelity"), false);
+
+  // gpt-image-2 rejects the field outright, so it is stripped even if asked for.
+  await createImageEdit("k", { ...body, model: "gpt-image-2", input_fidelity: "high" }, []);
+  assert.equal(sent[2].has("input_fidelity"), false);
+  assert.equal(sent[2].get("model"), "gpt-image-2");
+});
+
+test("references already uploaded to OpenAI are named by id instead of re-sent as bytes", async (t) => {
+  let sent;
+  let contentType;
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    sent = init.body;
+    contentType = init.headers["Content-Type"];
+    return Response.json({ data: [{ b64_json: "AA==" }], usage: {} });
+  });
+  await createImageEdit("k", {
+    ...body,
+    model: "gpt-image-2.5-sunburst",
+    references: [
+      { filename: "faucet.png", fileId: "file-aaa" },
+      { filename: "tile.png", fileId: "file-bbb" },
+    ],
+  }, []);
+  assert.equal(contentType, "application/json");
+  const json = JSON.parse(sent);
+  assert.deepEqual(json.images, [{ file_id: "file-aaa" }, { file_id: "file-bbb" }]);
+  assert.equal(json.model, "gpt-image-2.5-sunburst-2026-09-08");
+  assert.equal(json.size, "2560x1440");
+  assert.equal(json.background, "opaque");
+});
+
+test("a single bytes-only reference keeps the whole request on multipart", () => {
+  // The endpoint takes one form or the other; a mixed set must not be split.
+  assert.equal(resolveTransport({
+    ...body,
+    references: [{ filename: "a.png", fileId: "file-aaa" }, { blob: new Blob(["x"]), filename: "b.png" }],
+  }), "multipart");
+  assert.equal(resolveTransport({
+    ...body,
+    references: [{ filename: "a.png", fileId: "file-aaa" }],
+  }), "file_id");
+  // A mask that exists only as bytes drags the request back to multipart too.
+  assert.equal(resolveTransport({
+    ...body,
+    references: [{ filename: "a.png", fileId: "file-aaa" }],
+    mask: { blob: new Blob(["m"]), filename: "mask.png" },
+  }), "multipart");
 });

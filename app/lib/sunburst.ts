@@ -1,7 +1,47 @@
 /** Shared contracts and accounting for the Sunburst image API model. */
 
+// The floating alias. It stays the stored/UI identity: node params, saved
+// workflows, plan files, and cache keys all carry this value, so an old
+// workflow keeps importing and a Sunburst render keeps matching a Sunburst
+// cache entry across snapshot bumps.
 export const SUNBURST_MODEL = "gpt-image-2.5-sunburst" as const;
+
+// The dated snapshot actually sent upstream. Pinning it means a silent
+// server-side alias bump cannot change how a board renders underneath stored
+// provenance; bumping it here is a deliberate, reviewable change.
+export const SUNBURST_MODEL_SNAPSHOT = "gpt-image-2.5-sunburst-2026-09-08" as const;
+
 export const LEGACY_IMAGE_MODEL = "gpt-image-2" as const;
+
+/**
+ * Map a stored model identity onto the exact model id to put on the wire.
+ *
+ * Only the Sunburst alias is redirected. A caller that already holds a dated
+ * snapshot (a replayed historical job, say) keeps it, and the legacy model is
+ * passed through untouched.
+ */
+export function resolveWireModel(model: string): string {
+  return model === SUNBURST_MODEL ? SUNBURST_MODEL_SNAPSHOT : model;
+}
+
+/** True for the Sunburst alias and every dated Sunburst snapshot. */
+export function isSunburstModel(model: string): boolean {
+  return model === SUNBURST_MODEL || model.startsWith(`${SUNBURST_MODEL}-`);
+}
+
+/**
+ * Fidelity to the input images on an edit request.
+ *
+ * `/v1/images/edits` accepts `input_fidelity: "high" | "low"`, but the image
+ * generation guide documents the parameter only under the earlier GPT Image
+ * models and states that `gpt-image-2` rejects it. Whether Sunburst honours it
+ * is therefore unconfirmed by the published docs, so nothing sends it by
+ * default. `scripts/probe-input-fidelity.mjs` settles it against the live API
+ * for one low-quality image; flip SUNBURST_DEFAULT_INPUT_FIDELITY once it does.
+ */
+export const SUNBURST_INPUT_FIDELITIES = ["high", "low"] as const;
+export type SunburstInputFidelity = (typeof SUNBURST_INPUT_FIDELITIES)[number];
+export const SUNBURST_DEFAULT_INPUT_FIDELITY: SunburstInputFidelity | undefined = undefined;
 
 export const SUNBURST_QUALITIES = ["low", "medium", "high", "xhigh", "max", "auto"] as const;
 export type SunburstQuality = (typeof SUNBURST_QUALITIES)[number];

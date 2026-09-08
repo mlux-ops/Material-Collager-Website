@@ -13,16 +13,14 @@ import {
 } from "@/app/lib/collage";
 import {
   OpenAIRequestError,
-  combineAbortSignals,
   errorResponse,
-  readOpenAIResponse,
   resolveOpenAIKey,
 } from "@/app/lib/openai-server";
 import {
   DiagnosedGenerationError,
   createImageEdit,
-  diagnosticFor,
-  referenceContentType,
+  referenceBytes,
+  resolveTransport,
   safeReferenceFilename,
   validateImagePrompt,
   type AttemptDiagnostic,
@@ -31,7 +29,7 @@ import {
   type PreparedReference,
 } from "@/app/lib/image-edit";
 import { persistGenerationOutput, type RenderKind } from "@/app/lib/generation-jobs";
-import { calculateSunburstUsageCost, SUNBURST_MODEL } from "@/app/lib/sunburst";
+import { calculateSunburstUsageCost, resolveWireModel, SUNBURST_MODEL } from "@/app/lib/sunburst";
 
 export const runtime = "edge";
 
@@ -91,6 +89,7 @@ export async function POST(request: Request) {
     const attempts: AttemptDiagnostic[] = [];
     diagnostics = {
       model: SUNBURST_MODEL,
+      wireModel: resolveWireModel(SUNBURST_MODEL),
       transport: "multipart",
       quality: payload.quality,
       background: resolvedBackground(payload),
@@ -120,16 +119,27 @@ export async function POST(request: Request) {
       if (remoteReferences.length !== expectedReferences) {
         throw new Error("The approved draft or one of its full-quality references is no longer available. Upload it again and retry.");
       }
-      preparedReferences = await retrieveReferences(apiKey, remoteReferences, attempts, request.signal);
+      // These references already live in OpenAI's Files API, so name them by
+      // id rather than downloading every one and posting the same bytes back.
+      // The old round trip cost a full download plus re-upload of up to 16
+      // multi-MB images before generation could even start.
+      preparedReferences = remoteReferences.map((reference) => ({
+        filename: safeReferenceFilename(reference.filename),
+        fileId: reference.fileId,
+      }));
     } else {
       throw new Error("One or more reference images were missing from the generation request.");
     }
-    diagnostics.totalReferenceBytes = preparedReferences.reduce((sum, reference) => sum + reference.blob.size, 0);
-    diagnostics.largestReferenceBytes = Math.max(...preparedReferences.map((reference) => reference.blob.size), 0);
+    // Byte counters stay 0 for the file_id transport: nothing is uploaded, so
+    // there are no request bytes to report. `transport` distinguishes that
+    // from a genuinely empty multipart request.
+    diagnostics.totalReferenceBytes = preparedReferences.reduce((sum, reference) => sum + referenceBytes(reference), 0);
+    diagnostics.largestReferenceBytes = Math.max(...preparedReferences.map(referenceBytes), 0);
     diagnostics.references = preparedReferences.map((reference) => ({
       filename: reference.filename,
-      bytes: reference.blob.size,
-      mimeType: reference.blob.type,
+      bytes: referenceBytes(reference),
+      mimeType: reference.blob?.type ?? "",
+      ...(reference.fileId ? { fileId: reference.fileId } : {}),
     }));
     const requestedSize = resolvedSize(payload);
     const outputFormat = resolvedOutputFormat(payload);
@@ -146,6 +156,7 @@ export async function POST(request: Request) {
         ? { output_compression: payload.outputCompression }
         : {}),
     };
+    diagnostics.transport = resolveTransport(imageRequest);
     if (diagnosticMode) {
       const counts = [requestedDiagnosticCount];
       const isolationResults: Array<{ referenceCount: number; outcome: "succeeded" | "failed"; requestId?: string; error?: string }> = [];
@@ -256,40 +267,6 @@ export async function POST(request: Request) {
       { status: status >= 400 && status < 600 ? status : 500, headers: retryAfter ? { "Retry-After": retryAfter } : undefined },
     );
   }
-}
-
-async function retrieveReferences(
-  apiKey: string,
-  references: Array<{ fileId: string; filename: string }>,
-  diagnostics: AttemptDiagnostic[],
-  callerSignal: AbortSignal,
-) {
-  // Fetch all references concurrently — serialized multi-MB downloads add
-  // many seconds of wall time to a final render before generation starts.
-  return Promise.all(references.map(async (reference, index): Promise<PreparedReference> => {
-    const startedAt = Date.now();
-    let source: Blob;
-    let response: Response;
-    try {
-      response = await fetch(`https://api.openai.com/v1/files/${encodeURIComponent(reference.fileId)}/content`, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-        signal: combineAbortSignals(callerSignal, 120_000),
-      });
-      if (!response.ok) await readOpenAIResponse<never>(response);
-      source = await response.blob();
-      if (!source.size) throw new Error(`Reference ${reference.filename} could not be read.`);
-      diagnostics.push({ stage: "reference_fetch", outcome: "succeeded", attempt: index + 1, durationMs: Date.now() - startedAt });
-    } catch (error) {
-      diagnostics.push(diagnosticFor(error, "reference_fetch", index + 1, Date.now() - startedAt));
-      throw error;
-    }
-    const contentType = referenceContentType(response.headers.get("content-type"), reference.filename);
-    return {
-      blob: source.type === contentType ? source : source.slice(0, source.size, contentType),
-      filename: safeReferenceFilename(reference.filename),
-      fileId: reference.fileId,
-    };
-  }));
 }
 
 function safeOutputFilename(value: string | undefined, format: OutputFormat) {

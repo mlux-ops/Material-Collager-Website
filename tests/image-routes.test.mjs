@@ -47,7 +47,7 @@ test("Final uses high quality, original pixels, requested dimensions and lossles
   });
   const response = await POST(request({ outputFormat: "jpeg", outputCompression: 50 }));
   assert.equal(response.status, 200);
-  assert.equal(submitted.get("model"), "gpt-image-2.5-sunburst");
+  assert.equal(submitted.get("model"), "gpt-image-2.5-sunburst-2026-09-08");
   assert.equal(submitted.get("quality"), "high");
   assert.equal(submitted.get("background"), "opaque");
   assert.equal(submitted.get("size"), "2560x1440");
@@ -109,7 +109,7 @@ test("transparent generation sends Sunburst background and preserves only the ba
     outputFormat: "webp",
   }));
   assert.equal(response.status, 200);
-  assert.equal(submitted.get("model"), "gpt-image-2.5-sunburst");
+  assert.equal(submitted.get("model"), "gpt-image-2.5-sunburst-2026-09-08");
   assert.equal(submitted.get("quality"), "low");
   assert.equal(submitted.get("background"), "transparent");
   assert.equal(submitted.get("output_format"), "webp");
@@ -129,7 +129,7 @@ test("diagnostic isolation sends Sunburst with the selected background and quali
     "http://localhost/api/generate?diagnostic=isolation&count=1",
   ));
   assert.equal(response.status, 200);
-  assert.equal(submitted.get("model"), "gpt-image-2.5-sunburst");
+  assert.equal(submitted.get("model"), "gpt-image-2.5-sunburst-2026-09-08");
   assert.equal(submitted.get("quality"), "low");
   assert.equal(submitted.get("background"), "transparent");
   assert.equal(submitted.get("output_format"), "png");
@@ -255,7 +255,7 @@ test("Economy submission sends Sunburst with selected quality/background and sto
     } }),
   }));
   assert.equal(response.status, 200);
-  assert.equal(requestLine.body.model, "gpt-image-2.5-sunburst");
+  assert.equal(requestLine.body.model, "gpt-image-2.5-sunburst-2026-09-08");
   assert.equal(requestLine.body.quality, "max");
   assert.equal(requestLine.body.background, "transparent");
   assert.equal(requestLine.body.output_format, "png");

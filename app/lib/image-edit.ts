@@ -4,7 +4,16 @@
 // /api/workbench/* (node editor).
 
 import { OpenAIRequestError, combineAbortSignals, readOpenAIResponse } from "./openai-server.ts";
-import { LEGACY_IMAGE_MODEL, SUNBURST_MODEL, type SunburstBackground, type SunburstQuality } from "./sunburst.ts";
+import {
+  LEGACY_IMAGE_MODEL,
+  SUNBURST_DEFAULT_INPUT_FIDELITY,
+  SUNBURST_MODEL,
+  isSunburstModel,
+  resolveWireModel,
+  type SunburstBackground,
+  type SunburstInputFidelity,
+  type SunburstQuality,
+} from "./sunburst.ts";
 
 export type ImageQuality = SunburstQuality;
 export type ImageBackground = SunburstBackground;
@@ -15,14 +24,25 @@ export type OpenAIImageResponse = {
   usage?: Record<string, unknown>;
 };
 
+/**
+ * One reference image, held either as bytes or as an already-uploaded file.
+ *
+ * A reference that OpenAI already stores needs neither half of the old
+ * round trip: `blob` stays undefined and the edit request names the file by id
+ * instead of downloading it and posting the same bytes straight back.
+ */
 export type PreparedReference = {
-  blob: Blob;
+  // Undefined for a reference that exists only as an uploaded OpenAI file.
+  blob?: Blob;
   filename: string;
-  // Present when the reference also exists as an uploaded OpenAI file (the
-  // legacy full-quality path); lets QA reference it by ID instead of inlining
-  // a multi-MB base64 copy into the review request.
+  // Present when the reference exists as an uploaded OpenAI file. Also lets QA
+  // reference it by ID instead of inlining a multi-MB base64 copy.
   fileId?: string;
 };
+
+export function referenceBytes(reference: PreparedReference): number {
+  return reference.blob?.size ?? 0;
+}
 
 export type ImageEditRequest = {
   model: ImageModel;
@@ -36,6 +56,11 @@ export type ImageEditRequest = {
   // 0-100; OpenAI applies this only to jpeg/webp and ignores it for png, so
   // createImageEdit only sends it alongside those two formats.
   output_compression?: number;
+  // How strongly the model preserves detail from the supplied references.
+  // Sent only for Sunburst and only when set — gpt-image-2 rejects the field
+  // outright, and Sunburst's support for it is not yet confirmed by the docs.
+  // See SUNBURST_DEFAULT_INPUT_FIDELITY.
+  input_fidelity?: SunburstInputFidelity;
   // Number of requested candidates (1-10). Additional candidates consume
   // output tokens; use the returned usage rather than assuming an input discount.
   n?: number;
@@ -63,16 +88,23 @@ export type AttemptDiagnostic = {
   error?: string;
 };
 
+export type ImageEditTransport = "multipart" | "file_id";
+
 export type GenerationDiagnostics = {
   model: ImageModel;
-  transport: "multipart";
+  // The exact model id put on the wire. Differs from `model` whenever the
+  // stored Sunburst alias resolves to its pinned dated snapshot, so a stored
+  // diagnostic records which snapshot actually produced the pixels.
+  wireModel?: string;
+  inputFidelity?: SunburstInputFidelity;
+  transport: ImageEditTransport;
   quality: ImageQuality;
   background?: ImageBackground;
   outputFormat?: "png" | "jpeg" | "webp";
   referenceCount: number;
   totalReferenceBytes: number;
   largestReferenceBytes: number;
-  references: Array<{ filename: string; bytes: number; mimeType: string }>;
+  references: Array<{ filename: string; bytes: number; mimeType: string; fileId?: string }>;
   attempts: AttemptDiagnostic[];
 };
 
@@ -92,6 +124,45 @@ export class DiagnosedGenerationError extends Error {
 // it per request, including disabling it outright — see ImageEditRequest.
 export const IMAGE_EDIT_TIMEOUT_MS = 300_000;
 
+/**
+ * Pick the transport for one edit request.
+ *
+ * `file_id` needs every reference to be an uploaded file and no bytes-only
+ * mask, since the endpoint takes one form or the other, never a mix. Anything
+ * else falls back to multipart, which always works.
+ */
+export function resolveTransport(body: ImageEditRequest): ImageEditTransport {
+  if (body.references.length === 0) return "multipart";
+  if (!body.references.every((reference) => reference.fileId && !reference.blob)) return "multipart";
+  if (body.mask && !body.mask.fileId) return "multipart";
+  return "file_id";
+}
+
+function buildEditForm(body: ImageEditRequest, wireModel: string, inputFidelity: SunburstInputFidelity | undefined) {
+  const form = new FormData();
+  form.append("model", wireModel);
+  form.append("prompt", body.prompt);
+  form.append("size", body.size);
+  form.append("quality", body.quality);
+  form.append("background", body.background);
+  form.append("output_format", body.output_format);
+  if (body.output_compression !== undefined && (body.output_format === "jpeg" || body.output_format === "webp")) {
+    form.append("output_compression", String(body.output_compression));
+  }
+  if (body.n && body.n > 1) form.append("n", String(body.n));
+  if (inputFidelity) form.append("input_fidelity", inputFidelity);
+  for (const reference of body.references) {
+    if (!reference.blob) {
+      // resolveTransport only selects multipart when at least one reference
+      // lacks bytes, so reaching here means the caller mixed forms.
+      throw new Error(`Reference ${reference.filename} has no image data to upload.`);
+    }
+    form.append("image[]", reference.blob, reference.filename);
+  }
+  if (body.mask?.blob) form.append("mask", body.mask.blob, body.mask.filename);
+  return form;
+}
+
 export async function createImageEdit(
   apiKey: string,
   body: ImageEditRequest,
@@ -103,29 +174,47 @@ export async function createImageEdit(
     throw new Error("Transparent output requires PNG or WebP; choose a compatible format before generating.");
   }
   const startedAt = Date.now();
+  const wireModel = resolveWireModel(body.model);
+  // GPT Image 2 processes every image input at high fidelity automatically and
+  // rejects input_fidelity, so the field is Sunburst-only and opt-in.
+  const inputFidelity = isSunburstModel(body.model)
+    ? body.input_fidelity ?? SUNBURST_DEFAULT_INPUT_FIDELITY
+    : undefined;
+  // Declared outside the try so the failure diagnostics below can report what
+  // was actually attempted.
+  const transport: ImageEditTransport = resolveTransport(body);
   try {
     callerSignal?.throwIfAborted();
-    const form = new FormData();
-    form.append("model", body.model);
-    form.append("prompt", body.prompt);
-    form.append("size", body.size);
-    form.append("quality", body.quality);
-    form.append("background", body.background);
-    form.append("output_format", body.output_format);
-    if (body.output_compression !== undefined && (body.output_format === "jpeg" || body.output_format === "webp")) {
-      form.append("output_compression", String(body.output_compression));
-    }
-    if (body.n && body.n > 1) form.append("n", String(body.n));
-    // GPT Image 2 uses high-fidelity image inputs automatically and rejects input_fidelity.
-    for (const reference of body.references) {
-      form.append("image[]", reference.blob, reference.filename);
-    }
-    if (body.mask) form.append("mask", body.mask.blob, body.mask.filename);
 
+    // Every reference OpenAI already stores can be named by id instead of
+    // shipped as bytes. That drops a download and a re-upload of the same
+    // multi-MB images per render and keeps the request far below the 32 MB
+    // body cap. It does NOT buy the cached image-input rate: /v1/images/edits
+    // exposes no cache parameter, so any caching there is implicit and
+    // unsteerable. Mixing the two forms in one request is not supported, so a
+    // single bytes-only reference sends the whole set as multipart.
     const response = await fetch("https://api.openai.com/v1/images/edits", {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: form,
+      headers: transport === "file_id"
+        ? { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }
+        : { Authorization: `Bearer ${apiKey}` },
+      body: transport === "file_id"
+        ? JSON.stringify({
+          model: wireModel,
+          prompt: body.prompt,
+          images: body.references.map((reference) => ({ file_id: reference.fileId })),
+          size: body.size,
+          quality: body.quality,
+          background: body.background,
+          output_format: body.output_format,
+          ...(body.output_compression !== undefined && body.output_format !== "png"
+            ? { output_compression: body.output_compression }
+            : {}),
+          ...(body.n && body.n > 1 ? { n: body.n } : {}),
+          ...(inputFidelity ? { input_fidelity: inputFidelity } : {}),
+          ...(body.mask?.fileId ? { mask: { file_id: body.mask.fileId } } : {}),
+        })
+        : buildEditForm(body, wireModel, inputFidelity),
       // E1 cancellation threading: combine the caller's AbortSignal (aborted
       // when the client fetch to /api/workbench/edit is cancelled) with the
       // per-attempt timeout, so BOTH a client cancel and the timeout abort
@@ -148,14 +237,23 @@ export async function createImageEdit(
     // the caller instead of silently charging for a duplicate render.
     throw new DiagnosedGenerationError(error, {
       model: body.model,
-      transport: "multipart",
+      wireModel,
+      ...(inputFidelity ? { inputFidelity } : {}),
+      // A file_id request carries no bytes, so the byte counters below are 0
+      // by construction. `transport` is what tells the two cases apart.
+      transport,
       quality: body.quality,
       background: body.background,
       outputFormat: body.output_format,
       referenceCount: body.references.length,
-      totalReferenceBytes: body.references.reduce((sum, reference) => sum + reference.blob.size, 0),
-      largestReferenceBytes: Math.max(...body.references.map((reference) => reference.blob.size), 0),
-      references: body.references.map((reference) => ({ filename: reference.filename, bytes: reference.blob.size, mimeType: reference.blob.type })),
+      totalReferenceBytes: body.references.reduce((sum, reference) => sum + referenceBytes(reference), 0),
+      largestReferenceBytes: Math.max(...body.references.map(referenceBytes), 0),
+      references: body.references.map((reference) => ({
+        filename: reference.filename,
+        bytes: referenceBytes(reference),
+        mimeType: reference.blob?.type ?? "",
+        ...(reference.fileId ? { fileId: reference.fileId } : {}),
+      })),
       attempts: diagnostics,
     });
   }
@@ -170,6 +268,10 @@ export async function createImageGeneration(
   callerSignal?: AbortSignal,
 ) {
   validateImagePrompt(body.prompt);
+  // Still the legacy model, deliberately: the Workbench text-to-image path
+  // omits `model`, and its pre-migration quality contract is pinned by
+  // tests/workbench-quality-contract.test.mjs until the Workbench migration
+  // (Task 3) lands. Flipping this default is that task's call, not this one's.
   const model = body.model ?? LEGACY_IMAGE_MODEL;
   const background = body.background ?? "opaque";
   const startedAt = Date.now();
@@ -179,7 +281,7 @@ export async function createImageGeneration(
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model,
+        model: resolveWireModel(model),
         prompt: body.prompt,
         size: body.size,
         quality: body.quality,

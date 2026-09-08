@@ -3,15 +3,48 @@ import test from "node:test";
 
 import {
   calculateSunburstUsageCost,
+  isSunburstModel,
+  LEGACY_IMAGE_MODEL,
   LEGACY_IMAGE_QUALITIES,
   resolveLegacyImageQuality,
+  resolveWireModel,
+  SUNBURST_DEFAULT_INPUT_FIDELITY,
   SUNBURST_MODEL,
+  SUNBURST_MODEL_SNAPSHOT,
   SUNBURST_QUALITIES,
 } from "../app/lib/sunburst.ts";
 
 test("Sunburst contracts expose the migrated model and all supported quality tiers", () => {
   assert.equal(SUNBURST_MODEL, "gpt-image-2.5-sunburst");
   assert.deepEqual(SUNBURST_QUALITIES, ["low", "medium", "high", "xhigh", "max", "auto"]);
+});
+
+test("the stored Sunburst identity is the alias while the wire model is the pinned snapshot", () => {
+  // Storage keeps the alias so old plans, saved workflows and cache keys stay
+  // valid across snapshot bumps; only the upstream request is pinned.
+  assert.equal(SUNBURST_MODEL_SNAPSHOT, "gpt-image-2.5-sunburst-2026-09-08");
+  assert.equal(resolveWireModel(SUNBURST_MODEL), SUNBURST_MODEL_SNAPSHOT);
+  assert.notEqual(SUNBURST_MODEL, SUNBURST_MODEL_SNAPSHOT);
+});
+
+test("resolveWireModel passes through an explicit snapshot and the legacy model untouched", () => {
+  assert.equal(resolveWireModel(SUNBURST_MODEL_SNAPSHOT), SUNBURST_MODEL_SNAPSHOT);
+  assert.equal(resolveWireModel(LEGACY_IMAGE_MODEL), LEGACY_IMAGE_MODEL);
+  assert.equal(resolveWireModel("gpt-image-2.5-flare"), "gpt-image-2.5-flare");
+});
+
+test("isSunburstModel accepts the alias and its dated snapshots but not other models", () => {
+  assert.equal(isSunburstModel(SUNBURST_MODEL), true);
+  assert.equal(isSunburstModel(SUNBURST_MODEL_SNAPSHOT), true);
+  assert.equal(isSunburstModel(LEGACY_IMAGE_MODEL), false);
+  assert.equal(isSunburstModel("gpt-image-2.5-flare"), false);
+});
+
+test("input_fidelity stays unsent until the live probe confirms Sunburst honours it", () => {
+  // The edits schema accepts the field, but the guide documents it only for
+  // earlier GPT Image models. Until scripts/probe-input-fidelity.mjs settles
+  // it, no paid render may carry an unverified parameter.
+  assert.equal(SUNBURST_DEFAULT_INPUT_FIDELITY, undefined);
 });
 
 test("legacy Workbench quality contract keeps xhigh and max on their prior medium fallback", () => {
