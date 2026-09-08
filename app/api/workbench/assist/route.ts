@@ -88,7 +88,7 @@ export async function POST(request: Request) {
         input: [{ role: "user", content }],
       }),
     });
-    const json = await readOpenAIResponse<ResponsesOutput>(response);
+    const json = await readOpenAIResponse<ResponsesOutput>(response, { label: "workbench.assist", model });
     const text = extractOutputText(json).trim();
     if (!text) throw new Error("The assistant did not return any text.");
     return Response.json({ ok: true, text });

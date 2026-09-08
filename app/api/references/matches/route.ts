@@ -13,12 +13,13 @@ export async function POST(request: Request) {
     const query = body.query?.trim();
     if (!query) throw new Error("Analyze the primary image before finding matches.");
     const apiKey = resolveOpenAIKey(body.apiKey);
+    const model = process.env.MATERIAL_COLLAGER_MATCH_MODEL || "gpt-5.4-mini";
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       signal: AbortSignal.timeout(120_000),
       body: JSON.stringify({
-        model: process.env.MATERIAL_COLLAGER_MATCH_MODEL || "gpt-5.4-mini",
+        model,
         reasoning: { effort: "low" },
         tools: [{ type: "web_search" }],
         text: {
@@ -59,7 +60,7 @@ Prioritize official manufacturer product pages and technical documents, then rep
 Inspect the confirmed page's Open Graph or JSON-LD product-image metadata when available. Use a direct product image URL only when the page exposes one; otherwise leave imageUrl empty.`,
       }),
     });
-    const json = await readOpenAIResponse<ResponsesOutput>(response);
+    const json = await readOpenAIResponse<ResponsesOutput>(response, { label: "references.matches", model });
     const parsed = JSON.parse(extractOutputText(json).replace(/^```json\s*/i, "").replace(/```$/i, "").trim()) as {
       candidates?: Array<Record<string, unknown>>;
     };

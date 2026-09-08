@@ -20,7 +20,10 @@ Node 22.13+ required (`engines` in `package.json`).
 
 ### Tests
 
-There is no run-all script. Suites are invoked individually:
+`npm run test:transitions` is misnamed: its glob is `tests/*.test.mjs`, so it runs
+the **entire** suite (466 tests), not just transitions. Use it as the run-all.
+
+Individual suites:
 
 ```bash
 npm run test:collage
