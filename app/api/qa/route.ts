@@ -47,7 +47,7 @@ export async function POST(request: Request) {
       body: JSON.stringify(requestBody),
       signal: combineAbortSignals(request.signal, 120_000),
     });
-    const json = await readOpenAIResponse<ResponsesApiPayload>(response);
+    const json = await readOpenAIResponse<ResponsesApiPayload>(response, { label: "qa", model });
 
     const rawText = outputTextFrom(json);
     if (!rawText) {

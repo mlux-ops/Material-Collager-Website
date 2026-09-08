@@ -18,12 +18,13 @@ export async function POST(request: Request) {
     }
 
     const imageUrl = await fileDataUrl(image);
+    const model = process.env.MATERIAL_COLLAGER_ANALYSIS_MODEL || "gpt-5-mini";
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       signal: AbortSignal.timeout(120_000),
       body: JSON.stringify({
-        model: process.env.MATERIAL_COLLAGER_ANALYSIS_MODEL || "gpt-5-mini",
+        model,
         reasoning: { effort: "low" },
         text: {
           format: {
@@ -70,7 +71,7 @@ Confidence is an integer 0-100. Do not invent an exact brand, model, SKU, collec
         }],
       }),
     });
-    const json = await readOpenAIResponse<ResponsesOutput>(response);
+    const json = await readOpenAIResponse<ResponsesOutput>(response, { label: "references.analyze", model });
     const parsed = parseJson(extractOutputText(json)) as Record<string, unknown>;
     return Response.json({ ok: true, analysis: normalizeAnalysis(parsed) });
   } catch (error) {

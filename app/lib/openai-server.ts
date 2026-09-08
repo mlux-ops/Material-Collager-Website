@@ -39,7 +39,66 @@ export function resolveOpenAIKey(provided?: string) {
   return apiKey;
 }
 
-export async function readOpenAIResponse<T>(response: Response): Promise<T> {
+export type OpenAIUsage = {
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+};
+
+// OpenAI reports prompt-cache hits inside the usage block, but nests them
+// differently per endpoint: the Responses API uses input_tokens_details, Chat
+// Completions uses prompt_tokens_details. Read both so a single extractor
+// covers every call site. Endpoints with no usage block at all (uploads,
+// files, batches) yield undefined rather than a zeroed record, so they are
+// omitted from the metrics instead of diluting the hit rate with fake zeroes.
+export function extractOpenAIUsage(payload: unknown): OpenAIUsage | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const usage = (payload as { usage?: unknown }).usage;
+  if (!usage || typeof usage !== "object") return undefined;
+
+  const record = usage as Record<string, unknown>;
+  const inputTokens = numberOr(record.input_tokens ?? record.prompt_tokens, NaN);
+  const outputTokens = numberOr(record.output_tokens ?? record.completion_tokens, NaN);
+  if (!Number.isFinite(inputTokens) && !Number.isFinite(outputTokens)) return undefined;
+
+  const details = (record.input_tokens_details ?? record.prompt_tokens_details) as
+    | Record<string, unknown>
+    | undefined;
+  const cachedInputTokens =
+    details && typeof details === "object" ? numberOr(details.cached_tokens, 0) : 0;
+
+  return {
+    inputTokens: Number.isFinite(inputTokens) ? inputTokens : 0,
+    cachedInputTokens,
+    outputTokens: Number.isFinite(outputTokens) ? outputTokens : 0,
+  };
+}
+
+// input_tokens is inclusive of cached tokens, so the hit rate is cached/input.
+export function cacheHitRate(usage: OpenAIUsage): number {
+  if (usage.inputTokens <= 0) return 0;
+  return usage.cachedInputTokens / usage.inputTokens;
+}
+
+// Emitted to Workers Logs (observability is enabled in wrangler.jsonc) as a
+// single greppable line per paid call. Deliberately not dev-gated: the point
+// is production hit rates, which cannot be measured locally.
+export function logOpenAIUsage(usage: OpenAIUsage, context?: { label?: string; model?: string }): void {
+  const percent = (cacheHitRate(usage) * 100).toFixed(1);
+  console.info(
+    `[openai-usage] label=${context?.label ?? "unknown"} model=${context?.model ?? "unknown"} ` +
+      `input=${usage.inputTokens} cached=${usage.cachedInputTokens} hit=${percent}% output=${usage.outputTokens}`,
+  );
+}
+
+function numberOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+export async function readOpenAIResponse<T>(
+  response: Response,
+  context?: { label?: string; model?: string },
+): Promise<T> {
   const raw = await response.text();
   let payload: { error?: { message?: string; code?: string; type?: string } } & Record<string, unknown> = {};
   const headerRequestId = response.headers.get("x-request-id") || undefined;
@@ -72,6 +131,9 @@ export async function readOpenAIResponse<T>(response: Response): Promise<T> {
     }
     throw error;
   }
+
+  const usage = extractOpenAIUsage(payload);
+  if (usage) logOpenAIUsage(usage, context);
 
   return payload as T;
 }

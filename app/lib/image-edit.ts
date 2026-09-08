@@ -128,7 +128,10 @@ export async function createImageEdit(
         body.timeoutMs === null ? undefined : body.timeoutMs ?? IMAGE_EDIT_TIMEOUT_MS,
       ),
     });
-    const data = await readOpenAIResponse<OpenAIImageResponse>(response);
+    const data = await readOpenAIResponse<OpenAIImageResponse>(response, {
+      label: "image.edit",
+      model: body.model,
+    });
     diagnostics.push({ stage: "image_edit", outcome: "succeeded", attempt: 1, durationMs: Date.now() - startedAt, size: body.size });
     return { data };
   } catch (error) {
@@ -174,7 +177,10 @@ export async function createImageGeneration(
       // E1 cancellation threading — see createImageEdit above.
       signal: combineAbortSignals(callerSignal, 300_000),
     });
-    const data = await readOpenAIResponse<OpenAIImageResponse>(response);
+    const data = await readOpenAIResponse<OpenAIImageResponse>(response, {
+      label: "image.generate",
+      model: "gpt-image-2",
+    });
     diagnostics.push({ stage: "image_edit", outcome: "succeeded", attempt: 1, durationMs: Date.now() - startedAt, size: body.size });
     return { data };
   } catch (error) {
