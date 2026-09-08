@@ -12,7 +12,7 @@ import { addSlot, applySelection, buildRoomIndex, CUSTOM_ID_PREFIX, libraryOptio
 import { makeDiskImageResolver } from "./match.mjs";
 import { readNoteOverrides } from "./notes.mjs";
 import { resolveAccessHeaders } from "./access.mjs";
-import { COST_PER_IMAGE, approveConfirmed, ensureRenders, pickDraft, runRenderJob, selectionHash } from "./render.mjs";
+import { COST_PER_IMAGE, approveConfirmed, ensureRenders, pickDraft, renderSource, runRenderJob, selectionHash } from "./render.mjs";
 import { RenderQueue } from "./render-queue.mjs";
 import { indexTileCodes, resolveTileCode } from "./tiles.mjs";
 import { loadLibraryRows } from "./source.mjs";
@@ -149,11 +149,9 @@ export async function startReviewServer({
       if (!Number.isInteger(n) || n < 1 || n > 10) throw Object.assign(new Error("Count must be a whole number from 1 to 10."), { status: 400 });
       return board;
     }
-    const source = record.approvedConfirmedId
-      ? record.confirmed.find((entry) => entry.id === record.approvedConfirmedId)
-      : record.drafts.find((entry) => entry.id === record.pickedDraftId);
+    const source = renderSource(results, board.id, kind);
     if (!source) throw Object.assign(new Error("Pick a draft (or approve a confirmed render) first."), { status: 400 });
-    if (kind === "final" && source.selectionHash !== selectionHash(board, record.instruction)) {
+    if (kind === "final" && source.record.selectionHash !== selectionHash(board, record.instruction)) {
       throw Object.assign(new Error("The picked render is stale — the selection changed since it was rendered. Draft again first."), { status: 409 });
     }
     return board;
@@ -476,7 +474,7 @@ export async function startReviewServer({
       if (request.method === "POST" && url.pathname === "/api/pick-draft") {
         const { boardId, draftId } = JSON.parse(await readBody(request));
         const board = findBoard(boardId);
-        const draft = pickDraft(results, runDir, board.id, draftId, { appliedNotes: Object.fromEntries(readNoteOverrides(runDir, board.id)) });
+        const draft = pickDraft(results, runDir, board.id, draftId);
         await persistResults();
         sendJson(response, 200, { pickedDraftId: draft.id });
         return;

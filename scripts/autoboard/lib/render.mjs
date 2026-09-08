@@ -11,7 +11,7 @@ import path from "node:path";
 import { validateCollageRequest } from "../../../app/lib/collage.ts";
 import { AccessError, accessLoginHint, isAccessRejection } from "./access.mjs";
 import { prepareReferenceForUpload } from "./transport.mjs";
-import { boardPayload, boardReferenceFiles, orderedBoardItems } from "./variants.mjs";
+import { boardPayload, boardReferenceFiles, modelNotes, orderedBoardItems } from "./variants.mjs";
 
 // Approximate USD per image. Constants, labelled "~$" in the UI.
 export const COST_PER_IMAGE = { draft: 0.016, confirm: 0.04, final: 0.19 };
@@ -33,7 +33,7 @@ export function formatCost(amount) {
 export function selectionHash(board, instruction = "") {
   const material = {
     instruction: String(instruction ?? "").trim(),
-    items: orderedBoardItems(board).map((item) => [item.slotId, item.images ?? [], String(item.note ?? "").trim()]),
+    items: orderedBoardItems(board).map((item) => [item.slotId, item.images ?? [], String(item.notes ?? "").trim(), String(item.note ?? "").trim()]),
   };
   return createHash("sha1").update(JSON.stringify(material)).digest("hex");
 }
@@ -48,7 +48,7 @@ export function boardForRender(board, instruction = "") {
   return {
     ...board,
     items: board.items.map((item) => {
-      const parts = [String(item.note ?? "").trim()];
+      const parts = [modelNotes(item.notes) ?? "", String(item.note ?? "").trim()];
       if (cleanInstruction && item.slotId === heroSlotId) parts.push(`Board instruction: ${cleanInstruction}`);
       return { ...item, notes: parts.filter(Boolean).join(" ") };
     }),
@@ -157,23 +157,27 @@ function currentRevision(renders, hash) {
   return latest.selectionHash === hash ? latest.revision : latest.revision + 1;
 }
 
+// `record.id`, when given (see runRenderJob, which computes the id once to
+// name the saved image file and passes that same id through here), is used
+// verbatim instead of computing a second one — nextRenderId is only called
+// as a fallback for callers (tests, mainly) that don't pass an id.
 export function recordDraft(results, boardId, record) {
   const renders = ensureRenders(results, boardId);
-  const draft = { id: nextRenderId(renders, "d"), revision: currentRevision(renders, record.selectionHash), createdAt: new Date().toISOString(), ...record };
+  const draft = { revision: currentRevision(renders, record.selectionHash), createdAt: new Date().toISOString(), ...record, id: record.id ?? nextRenderId(renders, "d") };
   renders.drafts.push(draft);
   return draft;
 }
 
 export function recordConfirmed(results, boardId, record) {
   const renders = ensureRenders(results, boardId);
-  const confirmed = { id: nextRenderId(renders, "c"), createdAt: new Date().toISOString(), ...record };
+  const confirmed = { createdAt: new Date().toISOString(), ...record, id: record.id ?? nextRenderId(renders, "c") };
   renders.confirmed.push(confirmed);
   return confirmed;
 }
 
 export function recordFinal(results, boardId, record) {
   const renders = ensureRenders(results, boardId);
-  const final = { id: nextRenderId(renders, "f"), createdAt: new Date().toISOString(), ...record };
+  const final = { createdAt: new Date().toISOString(), ...record, id: record.id ?? nextRenderId(renders, "f") };
   renders.finals.push(final);
   return final;
 }
@@ -186,9 +190,14 @@ function findRender(renders, list, id) {
 
 // Picking mirrors the draft into the legacy candidate slot and the legacy
 // file name so the CLI's confirm/finalize keep working on the same picture.
-export function pickDraft(results, runDir, boardId, draftId, { appliedNotes = {} } = {}) {
+// `appliedNotes` defaults to the draft's own recorded `itemNotes` — the
+// per-item notes actually baked into THIS render at execute time (see
+// runRenderJob's itemNotesOf) — not whatever the legacy notes.json file
+// happens to hold right now. Pass an explicit `appliedNotes` to override.
+export function pickDraft(results, runDir, boardId, draftId, { appliedNotes } = {}) {
   const renders = ensureRenders(results, boardId);
   const draft = findRender(renders, "drafts", draftId);
+  const notes = appliedNotes ?? draft.itemNotes ?? {};
   renders.pickedDraftId = draftId;
   const legacyPath = path.join(runDir, "boards", boardId, `${draft.variant}.png`);
   const source = path.join(runDir, draft.path);
@@ -206,7 +215,7 @@ export function pickDraft(results, runDir, boardId, draftId, { appliedNotes = {}
     jobId: draft.jobId ?? null,
     renderKind: "studio",
     revision: draft.revision,
-    appliedNotes,
+    appliedNotes: notes,
     completedAt: draft.createdAt,
     durationMs: draft.durationMs,
     pickedDraftId: draftId,
@@ -220,9 +229,17 @@ export function approveConfirmed(results, boardId, confirmedId) {
   renders.approvedConfirmedId = confirmedId;
 }
 
-// Approved confirmed render wins as the layout source; otherwise the picked draft.
-export function renderSource(results, boardId) {
+// Which render a Confirm/Final job sources its layout reference from.
+// Final may source from either the picked draft or an approved confirmed
+// render (approved confirmed wins). Confirm always sources the picked draft
+// specifically — confirming an already-confirmed render would be a
+// confirm-of-a-confirm, which the panel's own Confirm button never offers.
+export function renderSource(results, boardId, kind = "final") {
   const renders = ensureRenders(results, boardId);
+  if (kind === "confirm") {
+    if (!renders.pickedDraftId) return null;
+    return { kind: "draft", record: findRender(renders, "drafts", renders.pickedDraftId) };
+  }
   if (renders.approvedConfirmedId) return { kind: "confirm", record: findRender(renders, "confirmed", renders.approvedConfirmedId) };
   if (renders.pickedDraftId) return { kind: "draft", record: findRender(renders, "drafts", renders.pickedDraftId) };
   return null;
@@ -244,7 +261,13 @@ export async function runRenderJob(job, ctx) {
   const instruction = job.instructionSnapshot ?? ensureRenders(results, board.id).instruction ?? "";
   const itemNotes = itemNotesOf(board);
   const post = (payload, files) => postGeneration(ctx.baseUrl, payload, files, { accessHeaders: ctx.accessHeaders, signal: ctx.signal });
-  const common = { selectionHash: job.selectionHash, instruction, itemNotes };
+  // Recorded on the finished render so it reflects the board state actually
+  // rendered — NOT job.selectionHash, which is only the state at enqueue
+  // time and may be stale by the time a queued job actually executes.
+  // job.selectionHash is still used below for the Final pre-check, which is
+  // deliberately comparing against click-time state, not execute-time state.
+  const executedSelectionHash = selectionHash(board, instruction);
+  const common = { selectionHash: executedSelectionHash, instruction, itemNotes };
 
   if (job.kind === "draft") {
     const variant = plan.variants.find((entry) => entry.key === job.variant);
@@ -257,14 +280,14 @@ export async function runRenderJob(job, ctx) {
       const json = await post(payload, files);
       const id = nextRenderId(ensureRenders(results, board.id), "d");
       const rel = await saveRenderImage(runDir, board.id, "draft", id, json.imageBase64);
-      recordDraft(results, board.id, { variant: variant.key, index, path: rel, jobId: json.jobId ?? null, durationMs: Date.now() - startedAt, ...common });
+      recordDraft(results, board.id, { id, variant: variant.key, index, path: rel, jobId: json.jobId ?? null, durationMs: Date.now() - startedAt, ...common });
       await ctx.persist();
       ctx.onProgress(`${index}/${count}`);
     }
     return;
   }
 
-  const source = renderSource(results, board.id);
+  const source = renderSource(results, board.id, job.kind);
   if (!source) throw Object.assign(new Error("Pick a draft (or approve a confirmed render) before rendering this step."), { status: 400 });
   if (job.kind === "final" && source.record.selectionHash !== job.selectionHash) {
     throw Object.assign(new Error("The picked render is stale — the board's selection changed since it was rendered. Draft again first."), { status: 409 });
@@ -278,7 +301,7 @@ export async function runRenderJob(job, ctx) {
     const json = await post(payload, files);
     const id = nextRenderId(ensureRenders(results, board.id), "c");
     const rel = await saveRenderImage(runDir, board.id, "confirm", id, json.imageBase64);
-    recordConfirmed(results, board.id, { variant: variant.key, fromDraftId: source.record.id, path: rel, jobId: json.jobId ?? null, durationMs: Date.now() - startedAt, ...common });
+    recordConfirmed(results, board.id, { id, variant: variant.key, fromDraftId: source.record.id, path: rel, jobId: json.jobId ?? null, durationMs: Date.now() - startedAt, ...common });
     const candidate = results.candidates?.[`${board.id}--${variant.key}`];
     if (candidate) Object.assign(candidate, { confirmedAt: new Date().toISOString(), quality: "medium" });
     await ctx.persist();
@@ -291,7 +314,7 @@ export async function runRenderJob(job, ctx) {
     const json = await post(payload, files);
     const id = nextRenderId(ensureRenders(results, board.id), "f");
     const rel = await saveRenderImage(runDir, board.id, "final", id, json.imageBase64);
-    recordFinal(results, board.id, { variant: variant.key, fromRenderId: source.record.id, path: rel, jobId: json.jobId ?? null, libraryJobId: json.jobId ?? null, libraryVisible: json.libraryVisible ?? false, durationMs: Date.now() - startedAt, ...common });
+    recordFinal(results, board.id, { id, variant: variant.key, fromRenderId: source.record.id, path: rel, jobId: json.jobId ?? null, libraryJobId: json.jobId ?? null, libraryVisible: json.libraryVisible ?? false, durationMs: Date.now() - startedAt, ...common });
     results.finals ??= {};
     results.finals[`${board.id}--${variant.key}`] = { jobId: json.jobId ?? null, savedPath: path.join(runDir, rel), libraryVisible: json.libraryVisible ?? false, notice: json.notice ?? null, appliedNoteSlotIds: Object.keys(itemNotes), completedAt: new Date().toISOString() };
     await ctx.persist();

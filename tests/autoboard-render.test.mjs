@@ -232,6 +232,19 @@ test("renderSource prefers an approved confirmed render over the picked draft", 
   assert.throws(() => approveConfirmed(results, "b", "c-0042"), (error) => error.status === 404);
 });
 
+test("renderSource with kind \"confirm\" always uses the picked draft, even after a confirmed render is approved", () => {
+  const results = { candidates: {}, finals: {} };
+  recordDraft(results, "b", { variant: "A", index: 1, path: "p1", jobId: "j", durationMs: 1, selectionHash: "h", instruction: "", itemNotes: {} });
+  ensureRenders(results, "b").pickedDraftId = "d-0001";
+  recordConfirmed(results, "b", { variant: "A", fromDraftId: "d-0001", path: "p2", jobId: "j2", durationMs: 1, selectionHash: "h", instruction: "", itemNotes: {} });
+  approveConfirmed(results, "b", "c-0001");
+  const confirmSource = renderSource(results, "b", "confirm");
+  assert.equal(confirmSource.kind, "draft");
+  assert.equal(confirmSource.record.id, "d-0001");
+  // Final, unaffected, still prefers the approved confirmed render.
+  assert.equal(renderSource(results, "b", "final").kind, "confirm");
+});
+
 test("runRenderJob renders N drafts sequentially, reporting progress and recording each as it lands", async (t) => {
   const { runDir, plan, results } = scratchRun();
   const boardId = plan.boards[0].id;
@@ -271,7 +284,13 @@ test("runRenderJob confirm and final use the current source render and mirror in
   assert.equal(results.renders[boardId].confirmed.length, 1);
   assert.ok(results.candidates[`${boardId}--A`].confirmedAt);
   approveConfirmed(results, boardId, "c-0001");
-  await runRenderJob({ jobId: "q3", boardId, kind: "final", instructionSnapshot: "", selectionHash: "h" }, ctx);
+  // Fix 5: a record's selectionHash now reflects the board state actually
+  // rendered (computed fresh in runRenderJob), not job.selectionHash at
+  // enqueue time — so the confirmed record above was saved with the real
+  // hash of this board/instruction, not the fixture "h" used above. The
+  // Final job's own selectionHash must match that real state to pass the
+  // pre-check (job.selectionHash still models "board state when clicked").
+  await runRenderJob({ jobId: "q3", boardId, kind: "final", instructionSnapshot: "", selectionHash: selectionHash(plan.boards[0], "") }, ctx);
   assert.deepEqual(seen, [["medium", "studio", "approved-draft.png"], ["high", "final", "approved-draft.png"]]);
   assert.equal(results.renders[boardId].finals[0].fromRenderId, "c-0001");
   assert.equal(results.renders[boardId].finals[0].libraryJobId, "job-2");
