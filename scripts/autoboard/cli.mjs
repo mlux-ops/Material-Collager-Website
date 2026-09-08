@@ -130,33 +130,33 @@ function usage() {
   autoboard generate --run <run-id> [--dry-run] [--boards <id,id>] [--quality <q>]
                      [--resolution standard|studio] [--format png|jpeg|webp]
                      [--compression <0-100>] [--base-url <url>] [--force]
-                     [--no-qa] [--qa-model <name>]
+                     [--qa] [--qa-model <name>]
                      Drafts render at "standard" (1536x1024) by default; pass
                      --resolution studio for the old 2048x1360 draft canvas.
-                     After each saved candidate, calls the app's /api/qa
-                     endpoint for an automated accuracy check against its
-                     reference photos (never fails the render — pass --no-qa
-                     to skip it, or --qa-model to request a specific model).
+                     Pass --qa to run an automated accuracy check (the app's
+                     /api/qa endpoint, one vision-model call per candidate)
+                     after each saved draft. Off by default — the user reviews
+                     drafts directly. --qa-model picks the model when enabled.
   autoboard redraft  --run <run-id> <variantId> [<variantId>...] [--quality <q>]
                      [--resolution standard|studio] [--format png|jpeg|webp]
                      [--compression <0-100>] [--base-url <url>]
-                     [--no-qa] [--qa-model <name>]
+                     [--qa] [--qa-model <name>]
                      Applies that board's notes.json (edit it after reviewing a draft)
                      and re-renders at draft quality so you can review the effect
                      before anything reaches final quality or the Library.
-                     Also runs the automated QA accuracy check (see generate).
+                     Add --qa for the automated accuracy check (see generate).
   autoboard confirm  --run <run-id> <variantId> [<variantId>...] [--quality <q>]
                      [--resolution standard|studio] [--format png|jpeg|webp]
                      [--compression <0-100>] [--base-url <url>] [--dry-run]
-                     [--no-qa] [--qa-model <name>]
+                     [--qa] [--qa-model <name>]
                      One ~$0.04 medium render of the picked variant before the
                      high-quality final — reuses the approved-draft layout
                      reference and notes.json exactly like redraft, but (unlike
                      redraft) runs even when notes.json is unchanged, and
                      defaults to quality "medium" / resolution "standard".
                      Records candidate.confirmedAt; finalize then picks up
-                     whatever revision this produced. Also runs the automated
-                     QA accuracy check (see generate).
+                     whatever revision this produced. Add --qa for the
+                     automated accuracy check (see generate).
   autoboard finalize --run <run-id> <variantId> [<variantId>...] [--quality <q>]
                      [--base-url <url>]
                      Refuses to run if notes.json has edits that were never
@@ -540,7 +540,9 @@ async function postWithRetry(baseUrl, payload, files) {
 // response — is caught here, reported once per run via `qaState.disabled`,
 // and QA is skipped (silently) for the rest of that command's run.
 async function runQaForCandidate({ baseUrl, values, payload, files, savedPath, jobId, qaState }) {
-  if (values["no-qa"] || qaState.disabled) return null;
+  // Opt-in: the user reviews drafts directly, so the extra vision-model call
+  // per candidate is skipped unless --qa is passed (--no-qa still wins).
+  if (!values.qa || values["no-qa"] || qaState.disabled) return null;
   try {
     const request = await buildQaRequest({ payload, referenceFiles: files, outputPath: savedPath, jobId });
     if (values["qa-model"]) request.model = values["qa-model"];
@@ -616,7 +618,7 @@ async function commandGenerate(values) {
     }
     const skipped = boards.length * plan.variants.length - work.length;
     if (skipped) console.log(`  (${skipped} already completed and unchanged; use --force to re-render anyway)`);
-    if (!values["no-qa"]) {
+    if (values.qa && !values["no-qa"]) {
       console.log(`  QA: would run against ${baseUrl}/api/qa${values["qa-model"] ? ` (model ${values["qa-model"]})` : ""}`);
     }
     return;
@@ -953,7 +955,7 @@ async function commandConfirm(values, variantIds) {
         `  ${job.variantId}  (revision ${job.candidate.revision ?? 1} -> ${nextRevision}, ${referenceCount} reference image(s), notes: [${job.appliedSlotIds.join(", ") || "none"}])`,
       );
     }
-    if (!values["no-qa"]) {
+    if (values.qa && !values["no-qa"]) {
       console.log(`  QA: would run against ${baseUrl}/api/qa${values["qa-model"] ? ` (model ${values["qa-model"]})` : ""}`);
     }
     return;
@@ -1278,6 +1280,7 @@ const { values, positionals } = parseArgs({
     "min-slots": { type: "string" },
     port: { type: "string" },
     force: { type: "boolean" },
+    qa: { type: "boolean" },
     "no-qa": { type: "boolean" },
     "no-merge": { type: "boolean" },
     "qa-model": { type: "string" },
