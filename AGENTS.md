@@ -1,8 +1,14 @@
 # Material Collager — Frontend Fidelity Rules
 
-## Binding objective
+Standing rules for frontend visual and interaction work. Build/test/deploy context
+lives in `CLAUDE.md`.
 
-Rebuild the Material Collager frontend with agency-level visual and interaction fidelity. The landing page must reproduce the approved spatial, scroll-driven reference behavior. The generator must remain a functional professional material-composition workspace and must not be treated as a generic landing page.
+## Standard
+
+The landing page reproduces the approved spatial, scroll-driven reference behavior at
+agency-level fidelity. The generator is a functional professional material-composition
+workspace and must not be treated as a generic landing page. Both constraints hold for
+any change, not just a rebuild.
 
 ## Source-of-truth order
 
@@ -16,17 +22,17 @@ When references conflict, use this order:
 6. Existing application behavior and data requirements
 7. Prompt prose
 
-Never claim the live reference was inspected unless Browser actually opened it and the inspection evidence is recorded.
+Never claim the live reference was inspected unless Browser actually opened it and the
+inspection evidence is recorded.
 
-## Mandatory workflow
+## Verification workflow
 
-1. Analyze first. Do not edit application code during the reference-audit task.
-2. Produce `docs/reference-spec.md` and obtain user approval.
-3. Implement the landing experience as a vertical slice before redesigning the generator.
-4. Run the app locally and inspect it with Browser.
-5. Capture deterministic screenshots and compare them with reference states.
-6. Record discrepancies in `docs/visual-qa.md` and fix them.
-7. Do not deploy until the user approves the local build.
+For any change to the landing experience or generator UI:
+
+1. Run the app locally and inspect it with Browser.
+2. Capture deterministic screenshots and compare them with reference states.
+3. Record discrepancies in `docs/visual-qa.md` and fix them.
+4. Do not deploy until the user approves the local build.
 
 ## Exact-reference rules for the landing page
 
@@ -38,29 +44,47 @@ Never claim the live reference was inspected unless Browser actually opened it a
 - Do not flatten depth into box shadows.
 - Reproduce composition, camera/perspective, panel geometry, overlap, opacity, blur, crop, motion, easing, and fixed UI chrome.
 - Use the real approved project imagery and fonts when licensing permits.
-- Add a development-only deterministic scene state, such as `?qa=1&progress=0.35`, so visual comparisons can be frozen at exact positions.
 - Preserve a reduced-motion fallback without changing the normal reference behavior.
 
-## Architecture decision
+### Deterministic QA scene state
 
-Do not choose a rendering stack from habit. In `docs/reference-spec.md`, explicitly choose and justify one of:
+`app/hooks/useSceneLabQA.ts` implements the frozen-state contract used for visual
+comparison. Preserve it and its parameter names:
 
-- DOM + CSS 3D transforms
-- React Three Fiber / Three.js
-- another approach supported by evidence
+| Param | Effect |
+|---|---|
+| `qa=1` | Enables QA mode; required by every other param |
+| `progress=0..1` | Sets scroll progress, clamped |
+| `anchor=<name>` | Jumps to a named anchor and **freezes** the scene |
+| `render=world` | World-space debug rendering |
+| `failTexture=<track>` | Forces a texture-load failure for fallback testing |
 
-Use CSS 3D when panels need normal DOM semantics and the effect can be reproduced with perspective transforms. Use WebGL when the recording shows texture-plane behavior, depth compositing, shader-like blur/distortion, or camera motion that CSS cannot faithfully reproduce.
+Example: `?qa=1&progress=0.35`.
+
+## Rendering architecture (decided)
+
+The panel field is **React Three Fiber / Three.js** on a full-viewport WebGL canvas,
+with semantic React DOM for chrome, navigation, view controls, loading state,
+accessible equivalents, focus management, and reduced-motion mode. Full rationale and
+the WebGL rendering contract are in `docs/reference-spec.md` §9.
+
+DOM + CSS 3D was evaluated and rejected for the field: a large continuously moving
+transparent texture stack has less predictable depth sorting, crop, and depth softness,
+and diverges from the observed renderer. Do not reopen this without evidence that
+contradicts the recorded spike results — and do not migrate frameworks as a workaround
+for an R3F problem; fall back to direct Three.js instead.
 
 ## Existing functionality
 
 - Preserve all generator functions, state, uploads, reference items, review controls, draft behavior, and routes.
-- Before changing the generator, inventory all existing interactions and write regression checks.
+- The interaction inventory is `docs/workbench-interaction-inventory.md`. Consult it before changing the generator, keep it current, and write regression checks for anything you touch.
 - Do not rewrite working state management or data logic solely for styling convenience.
 - Do not redesign the generator in the same task as the landing interaction.
 
 ## Generator design rules
 
-The Unveil reference is art direction, not an information architecture template for the generator.
+The Unveil reference is art direction, not an information architecture template for the
+generator.
 
 - The generator needs a dedicated approved full-screen design concept.
 - Retain a clear setup rail, reference workspace, and review/output region only if usability analysis supports them.
@@ -78,14 +102,7 @@ Required viewports unless the approved spec states otherwise:
 - 1024 × 768
 - 390 × 844
 
-Required landing scene states:
-
-- progress 0.00
-- progress 0.20
-- progress 0.40
-- progress 0.60
-- progress 0.80
-- progress 1.00
+Required landing scene states: progress 0.00, 0.20, 0.40, 0.60, 0.80, 1.00.
 
 At each state, compare:
 
@@ -97,7 +114,8 @@ At each state, compare:
 - background and border colors
 - scroll response and easing
 
-A task may not be declared complete while any high-severity visual, interaction, responsive, or functionality discrepancy remains.
+A task may not be declared complete while any high-severity visual, interaction,
+responsive, or functionality discrepancy remains.
 
 ## Completion report
 
@@ -112,4 +130,5 @@ Every implementation task must end with:
 - tests performed;
 - confirmation that no deployment occurred unless explicitly requested.
 
-If Browser, the live reference, a font, an asset, or the screen recording is inaccessible, stop and report that specific blocker. Do not fabricate fidelity.
+If Browser, the live reference, a font, an asset, or the screen recording is
+inaccessible, stop and report that specific blocker. Do not fabricate fidelity.
