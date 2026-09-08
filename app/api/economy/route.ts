@@ -2,7 +2,7 @@ import { activeItems, buildGenerationPrompt, resolvedBackground, resolvedOutputF
 import { cleanupExpiredJobs, ensureJobStorage, publicJob, RETENTION_MS, runtimeStorage, type JobRow } from "@/app/lib/generation-jobs";
 import { errorResponse, readOpenAIResponse, resolveOpenAIKey } from "@/app/lib/openai-server";
 import { validateImagePrompt } from "@/app/lib/image-edit";
-import { SUNBURST_MODEL, calculateSunburstUsageCost } from "@/app/lib/sunburst";
+import { SUNBURST_MODEL, calculateSunburstUsageCost, resolveWireModel } from "@/app/lib/sunburst";
 
 export const runtime = "edge";
 
@@ -110,7 +110,7 @@ async function submitEconomyBatch(
     method: "POST",
     url: "/v1/images/edits",
     body: {
-      model: SUNBURST_MODEL,
+      model: resolveWireModel(SUNBURST_MODEL),
       prompt,
       images: imageFileIds.map((fileId) => ({ file_id: fileId })),
       size,
