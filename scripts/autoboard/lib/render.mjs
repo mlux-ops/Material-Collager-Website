@@ -299,7 +299,9 @@ export async function runRenderJob(job, ctx) {
     const hint = job.kind === "confirm" ? "Pick a draft" : "Pick a draft or approve a confirmed render";
     throw Object.assign(new Error(`${hint} before rendering this step.`), { status: 400 });
   }
-  if (job.kind === "final" && source.record.selectionHash !== executedSelectionHash) {
+  // job.force is the user explicitly acknowledging staleness (via the
+  // panel's stronger confirm dialog) and choosing to finalize anyway.
+  if (job.kind === "final" && !job.force && source.record.selectionHash !== executedSelectionHash) {
     throw Object.assign(new Error("The picked render is stale — the board's selection changed since it was rendered. Draft again first."), { status: 409 });
   }
   const variant = plan.variants.find((entry) => entry.key === source.record.variant);

@@ -690,6 +690,26 @@ test("render-status marks drafts stale when the selection hash moved, and cancel
   } finally { await s.cleanup(); }
 });
 
+test("POST /api/render final with a stale source is rejected without force, and accepted with force:true", async () => {
+  const boardId = "penthouse-bath-2-fixture";
+  const results = { candidates: {}, finals: {} };
+  recordDraft(results, boardId, { variant: "A", index: 1, path: `boards/${boardId}/drafts/d-0001.png`, jobId: "j", durationMs: 1, selectionHash: "old", instruction: "", itemNotes: {} });
+  ensureRenders(results, boardId).pickedDraftId = "d-0001";
+  const jobs = [];
+  const s = await startScratchServer({ results, executeJob: async (job) => { jobs.push(job); } });
+  try {
+    let r = await s.post("/api/render", { boardId, kind: "final" });
+    assert.equal(r.status, 409);
+    assert.match(r.json.error, /stale/i);
+    r = await s.post("/api/render", { boardId, kind: "final", force: true });
+    assert.equal(r.status, 200);
+    await settle();
+    assert.equal(jobs.length, 1);
+    assert.equal(jobs[0].kind, "final");
+    assert.equal(jobs[0].force, true);
+  } finally { await s.cleanup(); }
+});
+
 test("POST /api/render without a JSON content type is rejected (cross-origin POST protection)", async () => {
   const s = await startScratchServer();
   try {

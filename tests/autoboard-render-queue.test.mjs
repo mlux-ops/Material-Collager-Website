@@ -71,3 +71,17 @@ test("cancel removes a queued job and aborts a running one, keeping its progress
   assert.equal(queue.cancel(a.jobId), false);
   await queue.idle;
 });
+
+test("enqueue threads force through to the job execute() receives and to snapshot(), defaulting to false", async () => {
+  const seen = [];
+  const execute = (job) => { seen.push(job.force); return Promise.resolve(); };
+  const queue = new RenderQueue({ execute });
+  const a = queue.enqueue({ boardId: "a", kind: "final", force: true });
+  await tick();
+  const b = queue.enqueue({ boardId: "b", kind: "draft", variant: "A", count: 1 });
+  await tick();
+  assert.deepEqual(seen, [true, false]);
+  assert.equal(queue.snapshot().find((job) => job.jobId === a.jobId).force, true);
+  assert.equal(queue.snapshot().find((job) => job.jobId === b.jobId).force, false);
+  await queue.idle;
+});

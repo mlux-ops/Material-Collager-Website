@@ -31,6 +31,9 @@ export class RenderQueue {
       count: fields.count ?? null,
       instructionSnapshot: fields.instructionSnapshot ?? "",
       selectionHash: fields.selectionHash ?? null,
+      // Only meaningful for kind:"final" — overrides the staleness gate when
+      // the user explicitly acknowledged rendering from an outdated source.
+      force: Boolean(fields.force),
       state: "queued",
       progress: null,
       error: null,
