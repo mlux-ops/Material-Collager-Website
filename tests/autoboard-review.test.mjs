@@ -516,7 +516,10 @@ test("POST /api/replace-image swaps a real row's photo and returns the updated i
     };
     writeFileSync(planPath, JSON.stringify(plan, null, 2));
 
-    server = await startReviewServer({ runDir, planPath, port: 0, renderReviewPage: () => "<html></html>" });
+    server = await startReviewServer({
+      runDir, planPath, port: 0, renderReviewPage: () => "<html></html>",
+      resolveAccess: async () => ({ headers: {}, label: "test" }),
+    });
     const { port } = server.address();
     const baseUrl = `http://127.0.0.1:${port}`;
 
