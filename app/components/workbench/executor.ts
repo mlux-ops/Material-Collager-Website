@@ -1,7 +1,7 @@
 import type { Edge } from "@xyflow/react";
 import { imageCacheKeysFromValue } from "./nodes/generation";
 import { executeMap, isExecutable } from "./nodes/index";
-import { alwaysExecuteMap, draftOverrideMap, estimateCostMap, outputValuesFor } from "./nodes/manifests";
+import { alwaysExecuteMap, draftOverrideMap, estimateCostMap, outputValuesFor, paidMap } from "./nodes/manifests";
 import { activeRunOf, isPinned, signatureFor, type SignatureContext } from "./signature";
 import { downstreamOf, useWorkbenchStore } from "./store";
 import { acceptedKindsFor, specFor, type ExecuteContext, type NodeOutputValue, type WorkbenchNode } from "./types";
@@ -273,12 +273,13 @@ function scheduledOrder(context: GraphContext, targetIds: string[]): string[] {
 // executor never re-bills them), and cache hits (unchanged signature) --
 // mirroring runNodes' own scheduling/skip logic exactly so the Run Workflow
 // button's number never overstates what a press would actually cost.
-export function estimateStaleCost(targetIds: string[]): { totalUsd: number | null; staleCount: number } {
+export function estimateStaleCost(targetIds: string[]): { totalUsd: number | null; staleCount: number; costUnknown: boolean } {
   const { nodes, edges, draft } = useWorkbenchStore.getState();
   const context = buildContext(nodes, edges, new AbortController().signal);
   const signatureContext = signatureContextFor(context, draft);
   let total = 0;
   let counted = false;
+  let costUnknown = false;
   let staleCount = 0;
   for (const id of scheduledOrder(context, targetIds)) {
     const node = currentNode(id);
@@ -295,7 +296,10 @@ export function estimateStaleCost(targetIds: string[]): { totalUsd: number | nul
     if (cached && cached.signature === signature && node.data.status !== "error") continue; // cache hit — no charge
     staleCount += 1;
     const estimateCost = estimateCostMap[node.data.kind];
-    if (!estimateCost) continue;
+    if (!estimateCost) {
+      if (paidMap[node.data.kind]) costUnknown = true;
+      continue;
+    }
     const override = draft ? draftOverrideMap[node.data.kind] : undefined;
     const effectiveParams = override ? override(node.data.params) : node.data.params;
     const inputImages = countConnectedImages(context, id);
@@ -303,9 +307,11 @@ export function estimateStaleCost(targetIds: string[]): { totalUsd: number | nul
     if (value !== null) {
       total += value;
       counted = true;
+    } else if (paidMap[node.data.kind]) {
+      costUnknown = true;
     }
   }
-  return { totalUsd: counted ? total : null, staleCount };
+  return { totalUsd: counted && !costUnknown ? total : null, staleCount, costUnknown };
 }
 
 // Every required input port (across every scheduled node) that has no edge

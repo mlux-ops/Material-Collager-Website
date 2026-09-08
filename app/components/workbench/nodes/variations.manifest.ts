@@ -1,4 +1,3 @@
-import { estimateRunUsd } from "../cost.ts";
 import type {
   CostEstimateInput,
   ImportParamRule,
@@ -8,10 +7,15 @@ import type {
   WorkbenchParams,
 } from "../types";
 import { GENERATION_QUALITIES, GENERATION_SIZES, generationDraftOverride } from "./generation.ts";
+import { GENERATION_BACKGROUNDS, GENERATION_FORMATS } from "./generation.ts";
+import { SUNBURST_MODEL } from "../../../lib/sunburst.ts";
 
 export const VARIATIONS_PARAM_RULES = {
   size: { type: "enum", optional: true, values: GENERATION_SIZES },
   quality: { type: "enum", optional: true, values: GENERATION_QUALITIES },
+  model: { type: "enum", optional: true, values: [SUNBURST_MODEL] },
+  background: { type: "enum", optional: true, values: GENERATION_BACKGROUNDS },
+  outputFormat: { type: "enum", optional: true, values: GENERATION_FORMATS },
   n: { type: "number", optional: true, integer: true, min: 1, max: 10 },
   separateOutputs: { type: "boolean", optional: true },
 } satisfies Record<string, ImportParamRule>;
@@ -53,16 +57,11 @@ export function resolveVariationOutput(run: NodeRun, portId: string): NodeOutput
   return value ? [value] : [];
 }
 
-// A single /api/workbench/edit call producing n (clamped 1-10) candidates:
-// input tokens are billed once, output scaled by n.
+// A Sunburst call's exact usage is only available after the provider responds.
 export function estimateVariationsCost({ params, inputImages }: CostEstimateInput): number | null {
-  const n = Math.min(10, Math.max(1, params.n ?? 4));
-  return estimateRunUsd({
-    size: params.size || "1536x1024",
-    quality: params.quality || "medium",
-    candidates: n,
-    inputImages,
-  });
+  void params;
+  void inputImages;
+  return null;
 }
 
 // Edit-shaped PAID node: one call fans out to n candidates (cacheKeys
@@ -92,7 +91,7 @@ export const variationsManifest: NodeManifest = {
     outputs: [{ id: "image", kind: "image", label: "Selected image" }, ...VARIATION_OUTPUT_PORTS],
     paid: true,
   },
-  defaultParams: { size: "1536x1024", quality: "medium", n: 4, separateOutputs: false },
+  defaultParams: { model: SUNBURST_MODEL, size: "1536x1024", quality: "medium", n: 4, separateOutputs: false, background: "opaque", outputFormat: "png" },
   importSchema: {
     paramKeys: { ...VARIATIONS_PARAM_RULES },
     sourceBlobKeys: [],

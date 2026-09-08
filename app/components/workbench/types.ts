@@ -1,4 +1,5 @@
 import type { Node } from "@xyflow/react";
+import type { SunburstBackground, SunburstQuality } from "../../lib/sunburst";
 
 // Data kinds carried by connections, color-coded on ports and edges.
 export type PortKind = "image" | "text" | "references" | "mask";
@@ -105,7 +106,19 @@ export type PendingReferenceSelection = {
 };
 
 export type NodeOutputValue =
-  | { kind: "image"; url: string; cacheKey: string }
+  | {
+      kind: "image";
+      url: string;
+      cacheKey: string;
+      // Media metadata travels with the value instead of being reconstructed
+      // from a filename/object URL after a reload. This is especially
+      // important for transparent Sunburst outputs and WebP/PNG exports.
+      mimeType?: "image/png" | "image/jpeg" | "image/webp";
+      outputFormat?: "png" | "jpeg" | "webp";
+      background?: SunburstBackground;
+      model?: string;
+      provenance?: string;
+    }
   | { kind: "text"; text: string }
   | { kind: "references"; items: ReferenceItem[]; order: string[] } // order: item ids
   | { kind: "mask"; cacheKey: string };
@@ -140,7 +153,9 @@ export type WorkbenchParams = {
   extraDirection?: string;
   // imageGenerate / imageEdit
   size?: string;
-  quality?: "low" | "medium" | "high";
+  quality?: SunburstQuality;
+  background?: SunburstBackground;
+  outputFormat?: "png" | "jpeg" | "webp";
   candidates?: number;
   // saveToLibrary
   filename?: string;

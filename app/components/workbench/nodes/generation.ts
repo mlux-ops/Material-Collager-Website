@@ -5,20 +5,40 @@
 // here touches the DOM at module scope.
 
 import { smallestValidEditSize } from "../../../lib/image-edit.ts";
+import {
+  SUNBURST_BACKGROUNDS,
+  SUNBURST_MODEL,
+  SUNBURST_QUALITIES,
+  type SunburstBackground,
+  type SunburstQuality,
+} from "../../../lib/sunburst.ts";
 import { estimateRunUsd } from "../cost.ts";
 import type { CostEstimateInput, ImportParamRule, NodeOutputValue, ReferenceItem, WorkbenchParams } from "../types";
 
 export const GENERATION_SIZES = ["1024x1024", "1536x1024", "1024x1536", "2048x2048", "2560x1440"] as const;
-export const GENERATION_QUALITIES = ["low", "medium", "high"] as const;
+export const GENERATION_QUALITIES = SUNBURST_QUALITIES;
+export const GENERATION_BACKGROUNDS = SUNBURST_BACKGROUNDS;
+export const GENERATION_FORMATS = ["png", "webp", "jpeg"] as const;
 
 // Import-validation rules shared by both generation-shaped nodes.
 export const GENERATION_PARAM_RULES = {
   size: { type: "enum", optional: true, values: GENERATION_SIZES },
   quality: { type: "enum", optional: true, values: GENERATION_QUALITIES },
   candidates: { type: "number", optional: true, integer: true, min: 1, max: 4 },
+  model: { type: "enum", optional: true, values: [SUNBURST_MODEL] },
+  background: { type: "enum", optional: true, values: GENERATION_BACKGROUNDS },
+  outputFormat: { type: "enum", optional: true, values: GENERATION_FORMATS },
 } satisfies Record<string, ImportParamRule>;
 
-export type GenerationPayload = { prompt: string; size: string; quality: string; n: number };
+export type GenerationPayload = {
+  prompt: string;
+  size: string;
+  quality: SunburstQuality;
+  n: number;
+  model: typeof SUNBURST_MODEL;
+  background: SunburstBackground;
+  outputFormat: (typeof GENERATION_FORMATS)[number];
+};
 
 export function promptTextsFrom(values: NodeOutputValue[]): string[] {
   return values.map((value) => (value.kind === "text" ? value.text : "")).filter(Boolean);
@@ -29,11 +49,19 @@ export function promptTextsFrom(values: NodeOutputValue[]): string[] {
 export function buildGenerationPayload(params: WorkbenchParams, promptValues: NodeOutputValue[]): GenerationPayload {
   const promptParts = promptTextsFrom(promptValues);
   if (!promptParts.length) throw new Error("Connect a prompt (Text or Prompt Builder) first.");
+  const background = params.background || "opaque";
+  const outputFormat = params.outputFormat === "jpeg" || params.outputFormat === "webp" ? params.outputFormat : "png";
+  if (background === "transparent" && outputFormat === "jpeg") {
+    throw new Error("Transparent output requires PNG or WebP; choose a compatible format before generating.");
+  }
   return {
     prompt: promptParts.join("\n"),
     size: params.size || "1536x1024",
-    quality: params.quality || "medium",
+    quality: (params.quality || "medium") as SunburstQuality,
     n: params.candidates || 1,
+    model: SUNBURST_MODEL,
+    background,
+    outputFormat,
   };
 }
 
@@ -103,6 +131,15 @@ export function estimateGenerationCost({ params, inputImages }: CostEstimateInpu
     candidates: params.candidates || 1,
     inputImages,
   });
+}
+
+// Sunburst pricing is usage-based and its image/token allocation is not
+// knowable before the provider responds. Keep the legacy estimator above for
+// historical callers, but every Sunburst-backed Workbench manifest uses this
+// explicit unknown estimate so a partial subtotal is never shown as a
+// complete pre-render price.
+export function estimateSunburstCost(_input: CostEstimateInput): number | null {
+  return null;
 }
 
 // Draft mode's cheaper variant (AC22/issue-3): lowest quality tier AND the

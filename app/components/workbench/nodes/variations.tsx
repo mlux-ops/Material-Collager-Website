@@ -5,7 +5,6 @@ import { useEdges } from "@xyflow/react";
 import { memo, useMemo, useState } from "react";
 import { readApiResponse } from "@/app/lib/api-client";
 import { putBlob } from "../blob-cache";
-import { recordUsageCalibration } from "../cost";
 import { useWorkbenchStore } from "../store";
 import { useModalDismiss } from "../useModalDismiss";
 import styles from "../workbench.module.css";
@@ -224,9 +223,9 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
   const images: NodeOutputValue[] = response.images.map((base64, index) => {
     const cacheKey = `${ctx.nodeId}:${runId}:${index}`;
     const bytes = decodeBase64Image(base64);
-    const cachedUrl = putBlob(cacheKey, new Blob([bytes], { type: response.mimeType || "image/png" }));
-    return { kind: "image", url: cachedUrl, cacheKey };
+    const mimeType = response.mimeType || (payload.outputFormat === "jpeg" ? "image/jpeg" : payload.outputFormat === "webp" ? "image/webp" : "image/png");
+    const cachedUrl = putBlob(cacheKey, new Blob([bytes], { type: mimeType }));
+    return { kind: "image", url: cachedUrl, cacheKey, mimeType: mimeType as "image/png" | "image/jpeg" | "image/webp", outputFormat: payload.outputFormat, background: payload.background, model: payload.model };
   });
   ctx.applyRun({ runId, signature: ctx.signature, at: Date.now(), values: [images], usage: response.usage });
-  recordUsageCalibration(payload.size, payload.quality, response.usage, 1);
 }
