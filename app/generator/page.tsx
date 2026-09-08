@@ -10,6 +10,7 @@ import { RouteReady } from "../components/RouteReady";
 import {
   COLLAGE_TYPES,
   COMPOSITIONS,
+  SUNBURST_BACKGROUNDS,
   DENSITIES,
   ITEM_PRESETS,
   LIGHTING_OPTIONS,
@@ -28,6 +29,7 @@ import {
   type CollageRequestInput,
   type CollageType,
   type Composition,
+  type Background,
   type Density,
   type LightingOption,
   type Orientation,
@@ -35,6 +37,7 @@ import {
   type Quality,
   type StylingOption,
 } from "@/app/lib/collage";
+import { SUNBURST_MODEL } from "@/app/lib/sunburst";
 import { ApiResponseError, readApiResponse } from "@/app/lib/api-client";
 import {
   DIRECT_REQUEST_REFERENCE_BUDGET,
@@ -126,6 +129,7 @@ type SavedDraft = {
   collageType: CollageType;
   orientation: Orientation;
   quality: Quality;
+  background?: Background;
   outputResolution?: OutputResolution;
   composition?: Composition;
   density?: Density;
@@ -156,6 +160,11 @@ type GenerateResponse = {
   diagnostics?: GenerationDiagnostics;
   diagnosticComplete?: boolean;
   isolationResults?: Array<{ referenceCount: number; outcome: "succeeded" | "failed"; requestId?: string; error?: string }>;
+  model?: string;
+  quality?: string;
+  background?: Background;
+  outputFormat?: string;
+  costUsd?: number | null;
 };
 
 type GenerationJob = {
@@ -169,6 +178,11 @@ type GenerationJob = {
   libraryVisible: boolean;
   title: string;
   estimatedUsd: number | null;
+  costUsd: number | null;
+  model: string | null;
+  quality: string | null;
+  background: string | null;
+  outputFormat: string | null;
   usage: Record<string, unknown> | null;
   error: string | null;
   createdAt: number;
@@ -198,6 +212,8 @@ type GenerationDiagnostics = {
   model: string;
   transport: string;
   quality: string;
+  background?: string;
+  outputFormat?: string;
   referenceCount: number;
   totalReferenceBytes: number;
   largestReferenceBytes: number;
@@ -482,6 +498,7 @@ export default function Home() {
   const [collageType, setCollageType] = useState<CollageType>("bathroom_fixture_collage");
   const [orientation, setOrientation] = useState<Orientation>("default");
   const [quality, setQuality] = useState<Quality>("high");
+  const [background, setBackground] = useState<Background>("opaque");
   const [outputResolution, setOutputResolution] = useState<OutputResolution>("studio");
   const [composition, setComposition] = useState<Composition>("editorial");
   const [density, setDensity] = useState<Density>("balanced");
@@ -604,6 +621,7 @@ export default function Home() {
     collageType,
     orientation,
     quality,
+    background,
     outputResolution,
     composition,
     density,
@@ -933,6 +951,7 @@ export default function Home() {
       collageType,
       orientation,
       quality,
+      background,
       outputResolution,
       composition,
       density,
@@ -1000,7 +1019,8 @@ export default function Home() {
     setItems(nextItems);
     setCollageType(draft.collageType);
     setOrientation(draft.orientation);
-    setQuality(draft.quality);
+    setQuality(draft.quality ?? "high");
+    setBackground(draft.background ?? "opaque");
     setOutputResolution(draft.outputResolution ?? "studio");
     setComposition(draft.composition ?? "editorial");
     setDensity(draft.density ?? "balanced");
@@ -1057,6 +1077,7 @@ export default function Home() {
       collageType,
       orientation,
       quality,
+      background,
       outputResolution,
       composition,
       density,
@@ -1162,6 +1183,7 @@ export default function Home() {
     setOverallProgress(0);
     setReferenceProgress({});
     let transportFilesForReport: File[] | undefined;
+    const finalQuality: Quality = quality === "xhigh" || quality === "max" ? quality : "high";
     try {
       const layoutFile = await dataUrlFile(result.dataUrl, "approved-draft.png");
 
@@ -1176,7 +1198,7 @@ export default function Home() {
         const economyPayload: CollageRequestInput = {
           ...makePayload(false, fileIds),
           orientation: finalFormat,
-          quality: "high",
+          quality: finalQuality,
           outputResolution: "final",
           layoutReference: true,
           // Image 1 here is the approved draft, never the board's uploaded
@@ -1192,8 +1214,8 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
           body: JSON.stringify({ payload: economyPayload }),
-        }).then((value) => readApiResponse<{ ok: boolean; error?: string; jobId: string; status: string; estimatedUsd: number }>(value));
-        setPanelText(`Final render queued in Economy. Estimated generation cost: $${queued.estimatedUsd.toFixed(2)} plus reference input. It will remain in History for 6 months.`);
+        }).then((value) => readApiResponse<{ ok: boolean; error?: string; jobId: string; status: string; estimatedUsd: number | null }>(value));
+        setPanelText(`Final render queued in Economy (${queued.status || "pending"}). Generation cost will be shown after completion when usage is available. It will remain in History for 6 months.`);
         await refreshJobs();
         return;
       }
@@ -1206,7 +1228,7 @@ export default function Home() {
       const payload: CollageRequestInput = {
         ...makePayload(false),
         orientation: finalFormat,
-        quality: "high",
+        quality: finalQuality,
         outputResolution: "final",
         layoutReference: true,
         // As in the economy branch: Image 1 is the approved draft here.
@@ -1265,7 +1287,15 @@ export default function Home() {
       // Only assert the max resolution when the server did not fall back; a
       // notice means it downgraded, so show that instead of a false size.
       const finalSizeLabel = finalSizeFor(finalFormat, collageType);
-      setPanelText(`Final ${finalFormat} render complete${response.notice ? "" : ` at ${finalSizeLabel}`}. Full-quality product references were used.${response.notice ? `\n\n${response.notice}` : ""}`);
+      const costMessage = typeof response.costUsd === "number" && Number.isFinite(response.costUsd)
+        ? `Usage cost: $${response.costUsd.toFixed(4)} based on completed usage.`
+        : "Generation cost unavailable because completed usage was not returned.";
+      setPanelText([
+        `Final ${finalFormat} render complete${response.notice ? "" : ` at ${finalSizeLabel}`}. Full-quality product references were used.`,
+        costMessage,
+        response.notice,
+      ].filter(Boolean).join("\n\n"));
+      await refreshJobs();
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         setPanelText("Final rendering cancelled. Your draft and references are unchanged.");
@@ -1284,9 +1314,11 @@ export default function Home() {
           const sent = transportFilesForReport
             ?? items.flatMap((item) => item.references.map((reference) => reference.file));
           setDiagnostics({
-            model: "gpt-image-2",
+            model: SUNBURST_MODEL,
             transport: "multipart",
-            quality: "high",
+            quality: finalQuality,
+            background,
+            outputFormat: "png",
             referenceCount: sent.length,
             totalReferenceBytes: sent.reduce((sum, file) => sum + file.size, 0),
             largestReferenceBytes: Math.max(...sent.map((file) => file.size), 0),
@@ -1444,9 +1476,11 @@ export default function Home() {
         } else {
           const payload = error instanceof ApiResponseError ? error.payload : {};
           setDiagnostics({
-            model: "gpt-image-2",
+            model: SUNBURST_MODEL,
             transport: "multipart",
             quality: diagnosticMode ? "low" : quality,
+            background,
+            outputFormat: "png",
             referenceCount: transportFilesForReport?.length
               ?? (diagnosticMode ? Math.min(diagnosticCount, totalReferences) : totalReferences),
             totalReferenceBytes: transportFilesForReport?.reduce((sum, file) => sum + file.size, 0) ?? totalReferenceBytes,
@@ -1558,6 +1592,17 @@ export default function Home() {
                 value={quality}
                 onChange={(next) => setQuality(next as Quality)}
                 options={QUALITIES.map((option) => ({ value: option, label: labelFor(option) }))}
+              />
+            </label>
+            <label>
+              <span>Background</span>
+              <DropdownSelect
+                value={background}
+                onChange={(next) => setBackground(next as Background)}
+                options={SUNBURST_BACKGROUNDS.map((option) => ({
+                  value: option,
+                  label: option === "transparent" ? "Transparent" : "Solid white",
+                }))}
               />
             </label>
           </div>
@@ -1984,13 +2029,13 @@ export default function Home() {
                   })}
                 </div>
                 <div className="final-actions">
-                  <button type="button" className="final-now-button" onClick={() => void finalizeDraft("immediate")} disabled={isWorking} title="Starts the maximum-quality final render immediately.">
+                  <button type="button" className="final-now-button" onClick={() => void finalizeDraft("immediate")} disabled={isWorking} title="Starts the selected-quality final render immediately; usage-based cost is shown after completion.">
                     Final Render Now
-                    <small>{finalFormat === "square" ? "Est. $0.21" : "Est. $0.17"} + references</small>
+                    <small>Usage-based cost shown after completion + references</small>
                   </button>
-                  <button type="button" className="economy-button" onClick={() => void finalizeDraft("economy")} disabled={isWorking} title="Queues the same maximum-quality final request for approximately half the generation cost.">
+                  <button type="button" className="economy-button" onClick={() => void finalizeDraft("economy")} disabled={isWorking} title="Queues the same selected-quality final request for up to 24 hours; usage-based cost is shown after completion.">
                     Economy Final
-                    <small>{finalFormat === "square" ? "Est. $0.11" : "Est. $0.08"} + references / up to 24h</small>
+                    <small>Usage-based cost shown after completion + references / up to 24h</small>
                   </button>
                 </div>
               </section>
@@ -2045,9 +2090,18 @@ export default function Home() {
                       </div>
                       <span className={`job-status ${job.status}`}>{job.status.replaceAll("_", " ")}</span>
                       {job.status === "completed" && (
-                        <a href={`/api/economy/output/${job.id}`} download={job.filename}>Open PNG</a>
+                        <a href={`/api/economy/output/${job.id}`} download={job.filename}>Open {(job.outputFormat || "png").toUpperCase()}</a>
                       )}
-                      {job.estimatedUsd !== null && <small>Est. ${job.estimatedUsd.toFixed(2)} + reference input</small>}
+                      <small>
+                        {typeof job.costUsd === "number" && Number.isFinite(job.costUsd)
+                          ? `Cost $${job.costUsd.toFixed(4)} from completed usage`
+                          : TERMINAL_JOB_STATUSES.has(job.status)
+                            ? "Generation cost unavailable"
+                            : "Generation cost available after completion"}
+                        {job.model ? ` · ${job.model}` : ""}
+                        {job.quality ? ` · ${job.quality}` : ""}
+                        {job.background ? ` · ${job.background}` : ""}
+                      </small>
                       {job.error && <p>{job.error}</p>}
                     </article>
                   ))}

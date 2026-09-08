@@ -219,9 +219,16 @@ export function removeSlot(board, slotId) {
 // True when a rendered candidate no longer reflects the board's current
 // selections — its slots changed more recently than it was rendered, so the
 // existing PNG is out of date even though it "succeeded."
-export function isStaleCandidate(board, candidate) {
+export function isStaleCandidate(board, candidate, renderOptions) {
   const staleSince = boardOverriddenAt(board);
-  return Boolean(candidate?.completedAt && staleSince && staleSince > candidate.completedAt);
+  if (Boolean(candidate?.completedAt && staleSince && staleSince > candidate.completedAt)) return true;
+  // Render options are part of the candidate's source-of-truth metadata. Do
+  // not relabel historical candidates that predate this field unless the
+  // caller has an explicit current option set to compare against.
+  if (renderOptions && candidate && (candidate.quality !== undefined || candidate.background !== undefined || board?.renderOptions)) {
+    if (candidate.quality !== renderOptions.quality || candidate.background !== renderOptions.background) return true;
+  }
+  return false;
 }
 
 // Restores the pre-override values if this slot was ever changed; a no-op on

@@ -1,6 +1,7 @@
 import { smallestValidEditSize } from "../../../lib/image-edit.ts";
 import type { CostEstimateInput, ImportParamRule, NodeManifest, WorkbenchParams } from "../types";
-import { estimateGenerationCost, GENERATION_QUALITIES } from "./generation.ts";
+import { estimateSunburstCost, GENERATION_BACKGROUNDS, GENERATION_FORMATS, GENERATION_QUALITIES } from "./generation.ts";
+import { SUNBURST_MODEL } from "../../../lib/sunburst.ts";
 
 // Valid gpt-image-2 target sizes for upscaling, clamped to a 3840x2160
 // ceiling (all divisible by 16, aspect within 1:3-3:1, total pixels within
@@ -16,6 +17,9 @@ export const UPSCALE_LONG_RUN_THRESHOLD = 2048;
 export const UPSCALER_PARAM_RULES = {
   size: { type: "enum", optional: true, values: UPSCALE_SIZES },
   quality: { type: "enum", optional: true, values: GENERATION_QUALITIES },
+  model: { type: "enum", optional: true, values: [SUNBURST_MODEL] },
+  background: { type: "enum", optional: true, values: GENERATION_BACKGROUNDS },
+  outputFormat: { type: "enum", optional: true, values: GENERATION_FORMATS },
 } satisfies Record<string, ImportParamRule>;
 
 // N-10: each menu option's own SMALL, aspect-preserving draft counterpart --
@@ -73,7 +77,9 @@ export function resolveUpscaleSize(requested: string | undefined): string {
 }
 
 function estimateUpscalerCost({ params, inputImages }: CostEstimateInput): number | null {
-  return estimateGenerationCost({ params: { ...params, size: resolveUpscaleSize(params.size) }, inputImages });
+  void params;
+  void inputImages;
+  return estimateSunburstCost({ params, inputImages });
 }
 
 function upscalerStableParams(params: WorkbenchParams): Partial<WorkbenchParams> {
@@ -115,7 +121,7 @@ export const upscalerManifest: NodeManifest = {
     outputs: [{ id: "image", kind: "image", label: "Image" }],
     paid: true,
   },
-  defaultParams: { size: DEFAULT_UPSCALE_SIZE, quality: "high" },
+  defaultParams: { model: SUNBURST_MODEL, size: DEFAULT_UPSCALE_SIZE, quality: "high", background: "opaque", outputFormat: "png" },
   importSchema: {
     paramKeys: { ...UPSCALER_PARAM_RULES },
     sourceBlobKeys: [],

@@ -5,7 +5,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEv
 import { createPortal } from "react-dom";
 import { readApiResponse } from "@/app/lib/api-client";
 import { getBlob, putBlob } from "../blob-cache";
-import { recordUsageCalibration } from "../cost";
 import { activeRunOf } from "../signature";
 import { useWorkbenchStore } from "../store";
 import { useModalDismiss } from "../useModalDismiss";
@@ -207,6 +206,19 @@ export function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) =>
     canvas.toBlob((value) => (value ? resolve(value) : reject(new Error("Could not build the mask."))), "image/png"),
   );
+}
+
+function outputMimeType(format: "png" | "jpeg" | "webp"): "image/png" | "image/jpeg" | "image/webp" {
+  return format === "jpeg" ? "image/jpeg" : format === "webp" ? "image/webp" : "image/png";
+}
+
+export function canvasToImageBlob(canvas: HTMLCanvasElement, format: "png" | "jpeg" | "webp"): Promise<Blob> {
+  const mimeType = outputMimeType(format);
+  return new Promise((resolve, reject) => canvas.toBlob(
+    (value) => (value ? resolve(value) : reject(new Error(`Could not encode ${format.toUpperCase()} output.`))),
+    mimeType,
+    format === "jpeg" || format === "webp" ? 0.92 : undefined,
+  ));
 }
 
 // ---------------------------------------------------------------------------
@@ -690,7 +702,7 @@ export const Component = memo(function MaskedEditNode({ id, data }: WorkbenchNod
 // inside the mask edge, and everything outside stays bit-identical (the
 // blurred blend layer is clipped by the hard mask, so no edited pixel leaks
 // past the drawn boundary).
-async function compositeShapesEdit(originalUrl: string, editedUrl: string, shapes: MaskShape[]): Promise<Blob> {
+async function compositeShapesEdit(originalUrl: string, editedUrl: string, shapes: MaskShape[], outputFormat: "png" | "jpeg" | "webp" = "png"): Promise<Blob> {
   const [original, edited] = await Promise.all([loadInputImage(originalUrl), loadInputImage(editedUrl)]);
   const width = original.naturalWidth;
   const height = original.naturalHeight;
@@ -722,9 +734,15 @@ async function compositeShapesEdit(originalUrl: string, editedUrl: string, shape
   out.height = height;
   const outContext = out.getContext("2d");
   if (!outContext) throw new Error("This browser cannot merge the masked edit.");
+  if (outputFormat === "jpeg") {
+    // JPEG has no alpha and this is an explicit white-flattening conversion.
+    // PNG/WebP remain the protected-pixel choices for transparent output.
+    outContext.fillStyle = "#ffffff";
+    outContext.fillRect(0, 0, out.width, out.height);
+  }
   outContext.drawImage(original, 0, 0);
   outContext.drawImage(editedLayer, 0, 0);
-  return canvasToBlob(out);
+  return outputFormat === "png" ? canvasToBlob(out) : canvasToImageBlob(out, outputFormat);
 }
 
 // Composite each returned candidate and cache the results. Shared by all
@@ -737,6 +755,9 @@ async function compositedOutputs(
   mimeType: string,
   originalUrl: string,
   shapes: MaskShape[],
+  outputFormat: "png" | "jpeg" | "webp",
+  background: "opaque" | "transparent",
+  model: string,
 ): Promise<NodeOutputValue[]> {
   const images: NodeOutputValue[] = [];
   for (let index = 0; index < base64Images.length; index += 1) {
@@ -744,8 +765,16 @@ async function compositedOutputs(
     const bytes = decodeBase64Image(base64Images[index]);
     const editedUrl = URL.createObjectURL(new Blob([bytes], { type: mimeType || "image/png" }));
     try {
-      const compositedBlob = await compositeShapesEdit(originalUrl, editedUrl, shapes);
-      images.push({ kind: "image", url: putBlob(cacheKey, compositedBlob), cacheKey });
+      const compositedBlob = await compositeShapesEdit(originalUrl, editedUrl, shapes, outputFormat);
+      images.push({
+        kind: "image",
+        url: putBlob(cacheKey, compositedBlob),
+        cacheKey,
+        mimeType: compositedBlob.type as "image/png" | "image/jpeg" | "image/webp",
+        outputFormat,
+        background,
+        model,
+      });
     } finally {
       URL.revokeObjectURL(editedUrl);
     }
@@ -804,7 +833,18 @@ async function executeInpaintEngine(
     .then((value) => readApiResponse<{ ok: boolean; images: string[]; mimeType: string }>(value));
 
   const runId = ctx.createRunId();
-  const images = await compositedOutputs(ctx, runId, response.images, response.mimeType, originalUrl, shapes);
+  const outputFormat = ctx.params.outputFormat === "webp" ? "webp" : "png";
+  const images = await compositedOutputs(
+    ctx,
+    runId,
+    response.images,
+    response.mimeType,
+    originalUrl,
+    shapes,
+    outputFormat,
+    ctx.params.background === "transparent" ? "transparent" : "opaque",
+    ctx.params.model || "gpt-image-2.5-sunburst",
+  );
   ctx.applyRun({ runId, signature: ctx.signature, at: Date.now(), values: [images] });
 }
 
@@ -837,6 +877,9 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
   if (payload.prompt.length > 32_000) {
     throw new Error("The prompt plus reference guidance exceeds the 32,000 character limit.");
   }
+  if (payload.background === "transparent" && payload.outputFormat === "jpeg") {
+    throw new Error("Transparent output requires PNG or WebP; choose a compatible format before generating.");
+  }
 
   const shapes = shapesFromParams(ctx.params);
   if (!shapes) throw new Error("Draw a mask first.");
@@ -857,9 +900,10 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
 
   const form = new FormData();
   form.append("payload", JSON.stringify(payload));
-  form.append("image[]", baseFile, "input.png");
+  form.append("image[]", baseFile, baseFile.name);
   if (referenceValue?.kind === "image") {
-    form.append("image[]", await blobFromImageValue(referenceValue), "reference.png");
+    const referenceFile = await blobFromImageValue(referenceValue);
+    form.append("image[]", referenceFile, referenceFile.name);
   }
   form.append("mask", maskFile, "mask.png");
 
@@ -868,7 +912,7 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
     .then((value) => readApiResponse<{ ok: boolean; images: string[]; mimeType: string; usage?: Record<string, unknown> }>(value));
 
   const runId = ctx.createRunId();
-  const images = await compositedOutputs(ctx, runId, response.images, response.mimeType, baseValue.url, shapes);
+  const outputFormat = payload.outputFormat === "webp" ? "webp" : payload.outputFormat === "jpeg" ? "jpeg" : "png";
+  const images = await compositedOutputs(ctx, runId, response.images, response.mimeType, baseValue.url, shapes, outputFormat, payload.background, payload.model);
   ctx.applyRun({ runId, signature: ctx.signature, at: Date.now(), values: [images], usage: response.usage });
-  recordUsageCalibration(payload.size, payload.quality, response.usage, 1);
 }

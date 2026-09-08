@@ -106,10 +106,25 @@ def build_generation_prompt(request: CollageRequest) -> str:
             "- Never place a supporting view on the canvas as its own element: no duplicates, mirrored twins, insets, exploded parts, or spare swatches.",
         ]
 
+    type_prompt = TYPE_PROMPTS[request.collage_type]
+    universal_rules = UNIVERSAL_STYLE_RULES
+    if request.resolved_background() == "transparent":
+        # Change only background instructions; product, reference, finish,
+        # geometry, and layout guidance remains byte-for-byte unchanged.
+        type_prompt = (
+            type_prompt.replace("clean white surface", "a transparent background")
+            .replace("pure white background", "a transparent background")
+            .replace("clean white background", "a transparent background")
+        )
+        universal_rules = universal_rules.replace(
+            "- Seamless pure white background (#FFFFFF).",
+            "- Transparent background with preserved alpha and no white matte.",
+        )
+
     prompt_parts = [
         "Create one finished high-end interior design material collage board.",
-        TYPE_PROMPTS[request.collage_type],
-        UNIVERSAL_STYLE_RULES,
+        type_prompt,
+        universal_rules,
         *([METAL_FINISH_RULES] if _mentions_metal_finish(request) else []),
         "Reference image mapping. The image model can see these actual uploaded image files; use them directly as visual references:",
         "\n".join(labels),

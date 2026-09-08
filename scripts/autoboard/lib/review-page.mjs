@@ -67,6 +67,10 @@ export function renderReviewPage() {
   .render-panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 0.8rem; position: sticky; top: 7rem; }
   .render-panel h3 { margin: 0 0 0.5rem; font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
   .render-controls { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-bottom: 0.5rem; }
+  .render-options { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; margin: 0.5rem 0; }
+  .render-options label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.68rem; color: var(--muted); }
+  .render-options select { min-width: 0; font-size: 0.72rem; padding: 0.25rem; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--ink); }
+  .render-options-summary { font-size: 0.68rem; color: var(--muted); margin: 0.2rem 0 0.5rem; }
   .variant-toggle button { padding: 0.25rem 0.55rem; }
   .variant-toggle button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
   .render-controls input[type="number"] { width: 3.2rem; font-size: 0.75rem; padding: 0.25rem; border: 1px solid var(--line); border-radius: 4px; }
@@ -82,6 +86,7 @@ export function renderReviewPage() {
   .thumb .thumb-actions { display: flex; gap: 0.2rem; padding: 0.2rem; background: #fff; }
   .thumb .thumb-actions button, .thumb .thumb-actions a { font-size: 0.62rem; padding: 0.1rem 0.3rem; flex: 1; text-align: center; text-decoration: none; color: var(--ink); border: 1px solid var(--line); border-radius: 4px; background: #f5f5f2; }
   .thumb .thumb-actions button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .thumb .thumb-meta { display: block; padding: 0.2rem 0.3rem 0; font-size: 0.6rem; color: var(--muted); line-height: 1.2; }
   details.earlier summary { font-size: 0.72rem; color: var(--muted); cursor: pointer; margin-top: 0.4rem; }
   .render-panel textarea.instruction { width: 100%; margin-top: 0.6rem; font-size: 0.75rem; padding: 0.35rem; border: 1px solid var(--line); border-radius: 4px; resize: vertical; min-height: 2.4em; font-family: inherit; }
   .render-actions { display: flex; gap: 0.4rem; margin-top: 0.5rem; }
@@ -117,14 +122,49 @@ let plan = null;
 let activeBoardId = null;
 let activeSlotId = null;
 
-let renderStatus = { accessError: null, baseUrl: "", queue: [], renders: {}, costs: { draft: 0, confirm: 0, final: 0 }, selectionHashes: {} };
+let renderStatus = { accessError: null, baseUrl: "", queue: [], renders: {}, costs: { draft: null, confirm: null, final: null }, selectionHashes: {} };
 let lastRenderJson = "";
 const panelPrefs = {}; // boardId -> { variant, count }
 let lightboxList = [];
 let lightboxIndex = 0;
 
-function money(kind, count) {
-  return "~$" + (renderStatus.costs[kind] * (count || 1)).toFixed(2);
+function money() { return "cost after completion"; }
+
+const QUALITY_OPTIONS = ["", "low", "medium", "high", "xhigh", "max", "auto"];
+const QUALITY_LABELS = { "": "Stage default", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", auto: "Auto" };
+
+function optionValue(board, name) {
+  return board.renderOptions && board.renderOptions[name] ? board.renderOptions[name] : "";
+}
+
+function selectedRenderOptions(boardId) {
+  const board = plan.boards.find((entry) => entry.id === boardId);
+  return {
+    quality: board ? (optionValue(board, "quality") || null) : null,
+    background: board ? (optionValue(board, "background") || "opaque") : "opaque",
+  };
+}
+
+function effectiveQuality(board, kind) {
+  const saved = optionValue(board, "quality");
+  const requested = saved || (kind === "draft" ? "low" : kind === "confirm" ? "medium" : "high");
+  return kind === "final" && ["low", "medium", "auto"].includes(requested) ? "high" : requested;
+}
+
+function optionSummary(board) {
+  const quality = optionValue(board, "quality");
+  const background = optionValue(board, "background") || "opaque";
+  const finalQuality = effectiveQuality(board, "final");
+  return "Saved options: " + (quality ? QUALITY_LABELS[quality] : "stage defaults (low / medium / high)") + " · " + (background === "transparent" ? "Transparent" : "Solid white") + " · Final " + QUALITY_LABELS[finalQuality];
+}
+
+function renderEntryMeta(entry) {
+  const details = [];
+  if (entry.quality) details.push("quality " + entry.quality);
+  if (entry.background) details.push(entry.background === "transparent" ? "transparent" : "solid white");
+  if (typeof entry.costUsd === "number" && Number.isFinite(entry.costUsd)) details.push("cost $" + entry.costUsd.toFixed(4));
+  else details.push("cost unavailable");
+  return details.join(" · ");
 }
 
 function prefsFor(boardId) {
@@ -148,11 +188,11 @@ function statusLine(boardId) {
   const job = activeJob(boardId);
   if (job && job.state === "queued") {
     const ahead = renderStatus.queue.filter((entry) => (entry.state === "running" || entry.state === "queued") && entry.createdAt < job.createdAt).length;
-    return { text: "queued (" + ahead + " ahead)", error: false };
+    return { text: "queued (" + ahead + " ahead) · cost available after completion", error: false };
   }
   if (job && job.state === "running") {
     const seconds = Math.max(0, Math.round((Date.now() - new Date(job.startedAt).getTime()) / 1000));
-    return { text: "rendering " + job.kind + (job.progress ? " " + job.progress : "") + " \\u00b7 " + seconds + "s", error: false };
+    return { text: "rendering " + job.kind + (job.progress ? " " + job.progress : "") + " \\u00b7 " + seconds + "s · cost available after completion", error: false };
   }
   if (renderStatus.accessError) return { text: "Access session expired \\u2014 run: cloudflared access login " + renderStatus.baseUrl + " \\u2014 then click again", error: true };
   const last = boardJobs(boardId).slice(-1)[0];
@@ -163,10 +203,21 @@ function statusLine(boardId) {
       const wait = Math.ceil((new Date(last.finishedAt).getTime() + last.error.retryAfterMs - Date.now()) / 1000);
       if (wait > 0) text += " (retry after " + wait + "s)";
     }
-    return { text: text, error: true };
+    return { text: text + " · cost unavailable", error: true };
   }
-  if (last.state === "cancelled") return { text: "cancelled" + (last.progress ? " after " + last.progress : ""), error: false };
-  if (last.state === "done") return { text: "done " + new Date(last.finishedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), error: false };
+  if (last.state === "cancelled") return { text: "cancelled" + (last.progress ? " after " + last.progress : "") + " · cost unavailable", error: false };
+  if (last.state === "done") {
+    const record = renderStatus.renders[boardId] || emptyRenders();
+    // The arrays are grouped by stage, not globally chronological. Select
+    // the list for the job that just completed so a prior draft cannot mask
+    // the actual Confirm/Final usage cost.
+    const completedList = last.kind === "final" ? record.finals : last.kind === "confirm" ? record.confirmed : record.drafts;
+    const completed = completedList.at(-1);
+    const cost = typeof completed?.costUsd === "number" && Number.isFinite(completed.costUsd)
+      ? "actual cost $" + completed.costUsd.toFixed(4)
+      : "cost unavailable";
+    return { text: "done " + new Date(last.finishedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) + " · " + cost, error: false };
+  }
   return { text: "", error: false };
 }
 
@@ -174,7 +225,7 @@ function renderThumb(board, entry, kind) {
   const record = renderStatus.renders[board.id] || emptyRenders();
   const hasNotes = Boolean(entry.instruction) || Object.keys(entry.itemNotes || {}).length > 0;
   const img = el("img", { src: entry.url, alt: entry.id, "data-action": "lightbox", "data-board": board.id, "data-kind": kind, "data-id": entry.id });
-  const children = [img, el("span", { className: "badge", text: entry.variant + (kind === "draft" ? " " + entry.index : "") + (hasNotes ? " \\ud83d\\udcac" : "") })];
+  const children = [img, el("span", { className: "badge", text: entry.variant + (kind === "draft" ? " " + entry.index : "") + (hasNotes ? " \\ud83d\\udcac" : "") }), el("small", { className: "thumb-meta", text: renderEntryMeta(entry) })];
   if (entry.stale) children.push(el("span", { className: "stale", text: "stale" }));
   const actions = el("div", { className: "thumb-actions" });
   if (kind === "draft") {
@@ -233,10 +284,23 @@ function renderPanel(board) {
     el("button", { className: prefs.variant === key ? "active" : "", "data-action": "variant", "data-board": board.id, "data-variant": key, title: VARIANT_LABELS[key], text: key })));
   const count = el("input", { type: "number", min: "1", max: "10", value: String(prefs.count), "data-action": "count", "data-board": board.id, title: "How many drafts of this variant" });
   // Renders as a button element with the attribute data-action="draft", picked up by the click-delegation handler below.
-  const draftButton = el("button", { "data-action": "draft", "data-board": board.id, text: "Draft \\u00d7" + prefs.count + " \\u00b7 " + money("draft", prefs.count) });
+  const draftButton = el("button", { "data-action": "draft", "data-board": board.id, text: "Draft \\u00d7" + prefs.count + " \\u00b7 " + money() });
   const controls = el("div", { className: "render-controls" }, [toggle, count, draftButton]);
   if (job) controls.appendChild(el("button", { "data-action": "cancel", "data-board": board.id, "data-job": job.jobId, text: "\\u23f9 cancel" }));
   panel.appendChild(controls);
+
+  const savedQuality = optionValue(board, "quality");
+  const qualitySelect = el("select", { "data-action": "render-option", "data-option": "quality", "data-board": board.id, title: "Quality used by the next render; Final keeps the high minimum" });
+  QUALITY_OPTIONS.forEach((option) => qualitySelect.appendChild(el("option", { value: option, text: QUALITY_LABELS[option] })));
+  qualitySelect.value = savedQuality;
+  const backgroundSelect = el("select", { "data-action": "render-option", "data-option": "background", "data-board": board.id, title: "Background used by the next render" });
+  [["opaque", "Solid white"], ["transparent", "Transparent"]].forEach(([value, text]) => backgroundSelect.appendChild(el("option", { value: value, text: text })));
+  backgroundSelect.value = optionValue(board, "background") || "opaque";
+  panel.appendChild(el("div", { className: "render-options" }, [
+    el("label", { text: "Quality" }, [qualitySelect]),
+    el("label", { text: "Background" }, [backgroundSelect]),
+  ]));
+  panel.appendChild(el("div", { className: "render-options-summary", text: optionSummary(board) }));
 
   const line = statusLine(board.id);
   panel.appendChild(el("div", { className: "render-status" + (line.error ? " error" : ""), text: line.text }));
@@ -251,14 +315,14 @@ function renderPanel(board) {
   const picked = record.drafts.find((entry) => entry.id === record.pickedDraftId) || null;
   const approved = record.confirmed.find((entry) => entry.id === record.approvedConfirmedId) || null;
   const source = approved || picked;
-  const confirmButton = el("button", { "data-action": "confirm", "data-board": board.id, text: "Confirm \\u25b6 medium \\u00b7 " + money("confirm", 1) });
+  const confirmButton = el("button", { "data-action": "confirm", "data-board": board.id, text: "Confirm \\u25b6 " + QUALITY_LABELS[effectiveQuality(board, "confirm")] + " \\u00b7 " + money() });
   if (!picked) { confirmButton.disabled = true; confirmButton.title = "Pick a draft first"; }
-  const finalButton = el("button", { "data-action": "final", "data-board": board.id, text: "Final \\u25b6 high \\u2192 Library \\u00b7 " + money("final", 1) });
+  const finalButton = el("button", { "data-action": "final", "data-board": board.id, text: "Final \\u25b6 " + QUALITY_LABELS[effectiveQuality(board, "final")] + " \\u2192 Library \\u00b7 " + money() });
   // Staleness does not disable Final — it only strengthens the confirm
   // dialog's wording (see the click handler below), which sends force:true.
   // Only a genuinely missing source (nothing picked/approved) hard-blocks it.
   if (!source) { finalButton.disabled = true; finalButton.title = "Pick a draft or approve a confirmed render first"; }
-  else if (source.selectionHash !== hash) { finalButton.title = "The picked render is stale: the board's selection changed since it was rendered. You can still finalize it, but the final will not reflect your latest changes."; }
+  else if (source.stale || source.selectionHash !== hash) { finalButton.title = "The picked render is stale: the board's selection or render options changed since it was rendered. You can still finalize it, but the final will not reflect your latest settings."; }
   panel.appendChild(el("div", { className: "render-actions" }, [confirmButton, finalButton]));
 
   panel.appendChild(renderStrip(board, record.confirmed, "confirm", "Confirmed"));
@@ -904,23 +968,26 @@ document.addEventListener("click", async (event) => {
     if (action === "variant") { prefsFor(boardId).variant = node.getAttribute("data-variant"); refreshPanel(boardId); }
     else if (action === "draft") {
       const prefs = prefsFor(boardId);
-      const json = await postJson("/api/render", { boardId: boardId, kind: "draft", variant: prefs.variant, count: prefs.count });
+      const json = await postJson("/api/render", { boardId: boardId, kind: "draft", variant: prefs.variant, count: prefs.count, ...selectedRenderOptions(boardId) });
       showStatus(json.accessError ? json.accessError : "Queued " + prefs.count + " draft(s) of " + prefs.variant, Boolean(json.accessError));
       await pollOnce();
     }
-    else if (action === "confirm") { await postJson("/api/render", { boardId: boardId, kind: "confirm" }); showStatus("Queued confirm render"); await pollOnce(); }
+    else if (action === "confirm") { await postJson("/api/render", { boardId: boardId, kind: "confirm", ...selectedRenderOptions(boardId) }); showStatus("Queued confirm render"); await pollOnce(); }
     else if (action === "final") {
+      const board = plan.boards.find((entry) => entry.id === boardId);
       const record = renderStatus.renders[boardId] || emptyRenders();
       const source = record.approvedConfirmedId ? "confirmed " + record.approvedConfirmedId : "draft " + record.pickedDraftId;
       const sourceRecord = record.approvedConfirmedId
         ? record.confirmed.find((entry) => entry.id === record.approvedConfirmedId)
         : record.drafts.find((entry) => entry.id === record.pickedDraftId);
-      const stale = Boolean(sourceRecord) && sourceRecord.selectionHash !== renderStatus.selectionHashes[boardId];
+      const stale = Boolean(sourceRecord) && (Boolean(sourceRecord.stale) || sourceRecord.selectionHash !== renderStatus.selectionHashes[boardId]);
+      const finalQuality = board ? QUALITY_LABELS[effectiveQuality(board, "final")] : "High";
+      const background = board && optionValue(board, "background") === "transparent" ? "transparent background" : "solid white background";
       const message = stale
-        ? "This picked render is stale - the board's selection changed since it was rendered, so the final will not reflect your latest changes. Render final anyway at high quality, " + money("final", 1) + ", from " + source + "? It will appear in the site Library."
-        : "Render final at high quality, " + money("final", 1) + ", from " + source + "? It will appear in the site Library.";
+        ? "This picked render is stale - the board's selection or render options changed since it was rendered, so the final will not reflect your latest settings. Render final at " + finalQuality.toLowerCase() + " with " + background + ", " + money("final", 1) + ", from " + source + "? It will appear in the site Library."
+        : "Render final at " + finalQuality.toLowerCase() + " with " + background + ", " + money("final", 1) + ", from " + source + "? It will appear in the site Library.";
       if (!window.confirm(message)) return;
-      await postJson("/api/render", { boardId: boardId, kind: "final", force: stale });
+      await postJson("/api/render", { boardId: boardId, kind: "final", force: stale, ...selectedRenderOptions(boardId) });
       showStatus("Queued final render");
       await pollOnce();
     }
@@ -933,12 +1000,34 @@ document.addEventListener("click", async (event) => {
   }
 });
 
-document.addEventListener("change", (event) => {
+document.addEventListener("change", async (event) => {
   const node = event.target.closest("[data-action]");
-  if (!node || node.getAttribute("data-action") !== "count") return;
+  if (!node) return;
+  const action = node.getAttribute("data-action");
   const boardId = node.getAttribute("data-board");
-  prefsFor(boardId).count = Math.max(1, Math.min(10, Number(node.value) || 1));
-  refreshPanel(boardId);
+  if (action === "count") {
+    prefsFor(boardId).count = Math.max(1, Math.min(10, Number(node.value) || 1));
+    refreshPanel(boardId);
+    return;
+  }
+  if (action !== "render-option") return;
+  const board = plan.boards.find((entry) => entry.id === boardId);
+  if (!board) return;
+  try {
+    const quality = document.querySelector('[data-action="render-option"][data-option="quality"][data-board="' + CSS.escape(boardId) + '"]');
+    const background = document.querySelector('[data-action="render-option"][data-option="background"][data-board="' + CSS.escape(boardId) + '"]');
+    const json = await postJson("/api/render-options", {
+      boardId,
+      quality: quality && quality.value ? quality.value : null,
+      background: background && background.value ? background.value : "opaque",
+    });
+    board.renderOptions = json.renderOptions;
+    showStatus("Saved " + optionSummary(board).replace("Saved options: ", ""));
+    refreshPanel(boardId);
+  } catch (error) {
+    showStatus(error.message, true);
+    refreshPanel(boardId);
+  }
 });
 
 document.addEventListener("focusout", async (event) => {

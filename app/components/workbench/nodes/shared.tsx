@@ -18,7 +18,7 @@ import { useShallow } from "zustand/react/shallow";
 import { readApiResponse } from "@/app/lib/api-client";
 import { optimizeReferencesForTransport } from "@/app/lib/image-transport";
 import { ensureThumbnail, getBlob, getBlobUrl, putBlob } from "../blob-cache";
-import { confirmHighCost, formatUsd, recordUsageCalibration } from "../cost";
+import { confirmHighCost, formatUsd } from "../cost";
 import { cancelExecution, estimateStaleCost, retryFrom, runNodes } from "../executor";
 import { MAX_IMAGE_BYTES } from "../export-import";
 import { activeRunOf, signatureFor, type SignatureContext } from "../signature";
@@ -40,6 +40,8 @@ import {
   buildGenerationPayload,
   decodeBase64Image,
   GENERATION_QUALITIES,
+  GENERATION_BACKGROUNDS,
+  GENERATION_FORMATS,
   GENERATION_SIZES,
   imageCacheKeysFromValue,
 } from "./generation";
@@ -297,7 +299,7 @@ export function RunFooter({ id, data, inputImages }: { id: string; data: Workben
         title={disabledReason}
         onClick={runNow}
       >
-        Run{cacheHit ? "" : estimate !== null ? ` · ~${formatUsd(estimate)}` : ""}
+        Run{cacheHit ? "" : estimate !== null ? ` · ~${formatUsd(estimate)}` : paidMap[data.kind] ? " · usage-based" : ""}
       </button>
       {cacheHit && <span className={styles.cacheBadge} title="This node's output is already up to date — running again will not re-bill it.">Cached — no charge</span>}
       {disabledReason && <span className={styles.disabledReason}>{disabledReason}</span>}
@@ -540,6 +542,9 @@ export function useConnectedImageCount(id: string, portIds: string[]) {
 
 export function GenerationSettings({ id, data }: { id: string; data: WorkbenchNodeData }) {
   const updateParams = useWorkbenchStore((state) => state.updateParams);
+  const background = data.params.background ?? "opaque";
+  const requestedFormat = data.params.outputFormat ?? "png";
+  const outputFormat = background === "transparent" && requestedFormat === "jpeg" ? "png" : requestedFormat;
   return (
     <>
       <label className={styles.field}>
@@ -550,8 +555,27 @@ export function GenerationSettings({ id, data }: { id: string; data: WorkbenchNo
       </label>
       <label className={styles.field}>
         <span>Quality</span>
-        <select className="nodrag" value={data.params.quality} onChange={(event) => updateParams(id, { quality: event.target.value as "low" | "medium" | "high" })}>
+        <select className="nodrag" value={data.params.quality ?? "medium"} onChange={(event) => updateParams(id, { quality: event.target.value as WorkbenchParams["quality"] })}>
           {GENERATION_QUALITIES.map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+      </label>
+      <label className={styles.field}>
+        <span>Background</span>
+        <select className="nodrag" value={background} onChange={(event) => {
+          const next = event.target.value as WorkbenchParams["background"];
+          updateParams(id, { background: next, ...(next === "transparent" && outputFormat === "jpeg" ? { outputFormat: "png" } : {}) });
+        }}>
+          {GENERATION_BACKGROUNDS.map((option) => <option key={option} value={option}>{option === "opaque" ? "Opaque (white)" : "Transparent"}</option>)}
+        </select>
+      </label>
+      <label className={styles.field}>
+        <span>Output format</span>
+        <select className="nodrag" value={outputFormat} onChange={(event) => updateParams(id, { outputFormat: event.target.value as WorkbenchParams["outputFormat"] })}>
+          {GENERATION_FORMATS.map((option) => (
+            <option key={option} value={option} disabled={background === "transparent" && option === "jpeg"}>
+              {option.toUpperCase()}{background === "transparent" && option === "jpeg" ? " (not available with transparency)" : ""}
+            </option>
+          ))}
         </select>
       </label>
     </>
@@ -566,7 +590,8 @@ export function GenerationSettings({ id, data }: { id: string; data: WorkbenchNo
 export function fileFromCacheKey(cacheKey: string): File {
   const blob = getBlob(cacheKey);
   if (!blob) throw new Error("An input image is no longer cached. Re-run its node.");
-  return new File([blob], "input.png", { type: blob.type || "image/png" });
+  const extension = blob.type === "image/jpeg" ? "jpg" : blob.type === "image/webp" ? "webp" : "png";
+  return new File([blob], `input.${extension}`, { type: blob.type || "image/png" });
 }
 
 export async function blobFromImageValue(value: NodeOutputValue): Promise<File> {
@@ -611,8 +636,9 @@ export async function executeGeneration(ctx: ExecuteContext, options: { requireB
   const images: NodeOutputValue[] = response.images.map((base64, index) => {
     const cacheKey = `${ctx.nodeId}:${runId}:${index}`;
     const bytes = decodeBase64Image(base64);
-    const cachedUrl = putBlob(cacheKey, new Blob([bytes], { type: response.mimeType || "image/png" }));
-    return { kind: "image", url: cachedUrl, cacheKey };
+    const mimeType = response.mimeType || (payload.outputFormat === "jpeg" ? "image/jpeg" : payload.outputFormat === "webp" ? "image/webp" : "image/png");
+    const cachedUrl = putBlob(cacheKey, new Blob([bytes], { type: mimeType }));
+    return { kind: "image", url: cachedUrl, cacheKey, mimeType: mimeType as "image/png" | "image/jpeg" | "image/webp", outputFormat: payload.outputFormat, background: payload.background, model: payload.model };
   });
   ctx.applyRun({ runId, signature: ctx.signature, at: Date.now(), values: [images], usage: response.usage });
 
@@ -621,5 +647,6 @@ export async function executeGeneration(ctx: ExecuteContext, options: { requireB
   // seed for this (size, quality) bucket. A run with no input images or no
   // usage detail from the upstream API is a no-op inside
   // recordImageTokenCalibration.
-  recordUsageCalibration(payload.size, payload.quality, response.usage, files.length);
+  // Sunburst exposes authoritative usage for completed calls. The legacy
+  // token estimator/calibration must never learn from or price this model.
 }

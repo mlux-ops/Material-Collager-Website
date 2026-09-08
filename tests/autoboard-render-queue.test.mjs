@@ -41,7 +41,7 @@ test("a failure records the error fields and the queue moves on", async () => {
   const a = queue.enqueue({ boardId: "a", kind: "draft", variant: "A", count: 1 });
   const b = queue.enqueue({ boardId: "b", kind: "draft", variant: "A", count: 1 });
   await tick();
-  resolvers.get(a.jobId).reject(Object.assign(new Error("Busy"), { status: 429, retryAfterMs: 120000, code: "rate_limited" }));
+  resolvers.get(a.jobId).reject(Object.assign(new Error("Busy"), { status: 429, retryAfterMs: 120000, code: "rate_limited", diagnostics: { attempts: [{ stage: "upstream", outcome: "ambiguous" }] } }));
   await tick(); await tick();
   const [ja, jb] = queue.snapshot();
   assert.equal(ja.state, "failed");
@@ -49,6 +49,7 @@ test("a failure records the error fields and the queue moves on", async () => {
   assert.equal(ja.error.status, 429);
   assert.equal(ja.error.code, "rate_limited");
   assert.equal(ja.error.retryAfterMs, 120000);
+  assert.deepEqual(ja.error.diagnostics, { attempts: [{ stage: "upstream", outcome: "ambiguous" }] });
   assert.equal(jb.state, "running");
   resolvers.get(b.jobId).resolve();
   await queue.idle;
@@ -83,5 +84,20 @@ test("enqueue threads force through to the job execute() receives and to snapsho
   assert.deepEqual(seen, [true, false]);
   assert.equal(queue.snapshot().find((job) => job.jobId === a.jobId).force, true);
   assert.equal(queue.snapshot().find((job) => job.jobId === b.jobId).force, false);
+  await queue.idle;
+});
+
+test("enqueue deduplicates an identical queued render and returns its original job", async () => {
+  const { execute, started, resolvers } = controllable();
+  const queue = new RenderQueue({ execute });
+  const key = JSON.stringify({ boardId: "a", kind: "draft", variant: "A", count: 1, quality: "high", background: "opaque" });
+  const first = queue.enqueue({ boardId: "a", kind: "draft", variant: "A", count: 1, dedupeKey: key });
+  const duplicate = queue.enqueue({ boardId: "a", kind: "draft", variant: "A", count: 1, dedupeKey: key });
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(duplicate.jobId, first.jobId);
+  assert.equal(queue.snapshot().length, 1);
+  await tick();
+  assert.deepEqual(started, [first.jobId]);
+  resolvers.get(first.jobId).resolve();
   await queue.idle;
 });

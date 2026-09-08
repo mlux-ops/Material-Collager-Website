@@ -3,11 +3,10 @@
 import { memo } from "react";
 import { readApiResponse } from "@/app/lib/api-client";
 import { putBlob } from "../blob-cache";
-import { recordUsageCalibration } from "../cost";
 import { useWorkbenchStore } from "../store";
 import styles from "../workbench.module.css";
-import type { ExecuteContext, NodeOutputValue } from "../types";
-import { GENERATION_QUALITIES, decodeBase64Image } from "./generation";
+import type { ExecuteContext, NodeOutputValue, WorkbenchParams } from "../types";
+import { GENERATION_BACKGROUNDS, GENERATION_FORMATS, GENERATION_QUALITIES, decodeBase64Image } from "./generation";
 import { resolveUpscaleSize, UPSCALE_LONG_RUN_THRESHOLD, UPSCALE_SIZES } from "./upscaler.manifest";
 import { blobFromImageValue, NodeShell, OutputPreview, RunFooter, useConnectedImageCount, type WorkbenchNodeProps } from "./shared";
 
@@ -31,6 +30,8 @@ export const Component = memo(function UpscalerNode({ id, data }: WorkbenchNodeP
   // its `value` must still match whatever the CURRENT resolved size is).
   const size = resolveUpscaleSize(data.params.size);
   const isLongRun = targetLongestEdge(size) >= UPSCALE_LONG_RUN_THRESHOLD;
+  const background = data.params.background ?? "opaque";
+  const outputFormat = background === "transparent" && data.params.outputFormat === "jpeg" ? "png" : data.params.outputFormat ?? "png";
 
   return (
     <NodeShell data={data} footer={<RunFooter id={id} data={data} inputImages={inputImages} />}>
@@ -47,9 +48,24 @@ export const Component = memo(function UpscalerNode({ id, data }: WorkbenchNodeP
         <select
           className="nodrag"
           value={data.params.quality ?? "high"}
-          onChange={(event) => updateParams(id, { quality: event.target.value as "low" | "medium" | "high" })}
+          onChange={(event) => updateParams(id, { quality: event.target.value as WorkbenchParams["quality"] })}
         >
           {GENERATION_QUALITIES.map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+      </label>
+      <label className={styles.field}>
+        <span>Background</span>
+        <select className="nodrag" value={background} onChange={(event) => {
+          const next = event.target.value as WorkbenchParams["background"];
+          updateParams(id, { background: next, ...(next === "transparent" && outputFormat === "jpeg" ? { outputFormat: "png" } : {}) });
+        }}>
+          {GENERATION_BACKGROUNDS.map((option) => <option key={option} value={option}>{option === "opaque" ? "Opaque (white)" : "Transparent"}</option>)}
+        </select>
+      </label>
+      <label className={styles.field}>
+        <span>Output format</span>
+        <select className="nodrag" value={outputFormat} onChange={(event) => updateParams(id, { outputFormat: event.target.value as WorkbenchParams["outputFormat"] })}>
+          {GENERATION_FORMATS.map((option) => <option key={option} value={option} disabled={background === "transparent" && option === "jpeg"}>{option.toUpperCase()}</option>)}
         </select>
       </label>
       {isLongRun && (
@@ -79,9 +95,12 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
   // what gets estimated, signed, and submitted always agree.
   const size = resolveUpscaleSize(ctx.params.size);
   const quality = ctx.params.quality || "high";
+  const background = ctx.params.background || "opaque";
+  const outputFormat = ctx.params.outputFormat === "jpeg" || ctx.params.outputFormat === "webp" ? ctx.params.outputFormat : "png";
+  if (background === "transparent" && outputFormat === "jpeg") throw new Error("Transparent output requires PNG or WebP; choose a compatible format before generating.");
 
   const form = new FormData();
-  form.append("payload", JSON.stringify({ prompt: UPSCALE_PROMPT, size, quality, n: 1 }));
+  form.append("payload", JSON.stringify({ prompt: UPSCALE_PROMPT, size, quality, n: 1, model: ctx.params.model, background, outputFormat }));
   form.append("image[]", file, "input.png");
 
   ctx.setProgress(`Upscaling to ${size}… long runs may take several minutes.`);
@@ -92,9 +111,9 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
   const images: NodeOutputValue[] = response.images.map((base64, index) => {
     const cacheKey = `${ctx.nodeId}:${runId}:${index}`;
     const bytes = decodeBase64Image(base64);
-    const cachedUrl = putBlob(cacheKey, new Blob([bytes], { type: response.mimeType || "image/png" }));
-    return { kind: "image", url: cachedUrl, cacheKey };
+    const mimeType = response.mimeType || (outputFormat === "jpeg" ? "image/jpeg" : outputFormat === "webp" ? "image/webp" : "image/png");
+    const cachedUrl = putBlob(cacheKey, new Blob([bytes], { type: mimeType }));
+    return { kind: "image", url: cachedUrl, cacheKey, mimeType: mimeType as "image/png" | "image/jpeg" | "image/webp", outputFormat, background, model: String(ctx.params.model ?? "gpt-image-2.5-sunburst") };
   });
   ctx.applyRun({ runId, signature: ctx.signature, at: Date.now(), values: [images], usage: response.usage });
-  recordUsageCalibration(size, quality, response.usage, 1);
 }

@@ -1,5 +1,6 @@
 import type { ImportParamRule, NodeManifest } from "../types";
-import { estimateGenerationCost, GENERATION_QUALITIES, GENERATION_SIZES, generationDraftOverride } from "./generation.ts";
+import { estimateSunburstCost, GENERATION_BACKGROUNDS, GENERATION_FORMATS, GENERATION_QUALITIES, GENERATION_SIZES, generationDraftOverride } from "./generation.ts";
+import { SUNBURST_MODEL } from "../../../lib/sunburst.ts";
 
 // Backend engines: "gpt-image" posts to /api/workbench/edit (gpt-image-2,
 // mask is guidance, paid per image); "workers-ai" and "flux-fill" post to
@@ -60,6 +61,9 @@ export const MASKED_EDIT_PARAM_RULES = {
   engine: { type: "enum", optional: true, values: MASKED_EDIT_ENGINES },
   size: { type: "enum", optional: true, values: GENERATION_SIZES },
   quality: { type: "enum", optional: true, values: GENERATION_QUALITIES },
+  model: { type: "enum", optional: true, values: [SUNBURST_MODEL] },
+  background: { type: "enum", optional: true, values: GENERATION_BACKGROUNDS },
+  outputFormat: { type: "enum", optional: true, values: GENERATION_FORMATS },
   referenceInstruction: { type: "string", optional: true, maxLength: 4000 },
   fluxGuidance: { type: "number", optional: true, min: FLUX_FILL_GUIDANCE_MIN, max: FLUX_FILL_GUIDANCE_MAX },
   fluxSeed: { type: "number", optional: true, min: 0, max: FLUX_FILL_SEED_MAX, integer: true },
@@ -99,9 +103,12 @@ export const maskedEditManifest: NodeManifest = {
   },
   defaultParams: {
     engine: "gpt-image",
+    model: SUNBURST_MODEL,
     size: "1536x1024",
     quality: "medium",
     candidates: 1,
+    background: "opaque",
+    outputFormat: "png",
     maskCacheKey: "",
     referenceInstruction: "",
     fluxGuidance: FLUX_FILL_GUIDANCE_DEFAULT,
@@ -112,11 +119,12 @@ export const maskedEditManifest: NodeManifest = {
   },
   // Workers AI inpainting runs on the free tier: $0, and shown as such in the
   // workflow cost estimate rather than hidden (null would mean "unknown").
-  // FLUX Fill is flat-priced per image; gpt-image-2 uses the token estimator.
+  // FLUX Fill is flat-priced per image; Workers AI is free; Sunburst usage is
+  // only known after a completed provider response.
   estimateCost: (input) => {
     if (input.params.engine === "workers-ai") return 0;
     if (input.params.engine === "flux-fill") return FLUX_FILL_USD_PER_IMAGE;
-    return estimateGenerationCost(input);
+    return estimateSunburstCost(input);
   },
   paid: true,
   // Draft mode's cheaper size/quality only applies to the gpt-image engine —

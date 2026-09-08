@@ -23,6 +23,15 @@ export class RenderQueue {
   }
 
   enqueue(fields) {
+    const duplicate = fields.dedupeKey
+      ? this.#jobs.find((entry) => (entry.state === "queued" || entry.state === "running") && entry.dedupeKey === fields.dedupeKey)
+      : null;
+    if (duplicate) {
+      const position = this.#jobs
+        .filter((entry) => (entry.state === "queued" || entry.state === "running") && entry.createdAt <= duplicate.createdAt)
+        .length;
+      return { jobId: duplicate.jobId, position, duplicate: true };
+    }
     const job = {
       jobId: `q-${randomUUID().slice(0, 8)}`,
       boardId: fields.boardId,
@@ -31,6 +40,8 @@ export class RenderQueue {
       count: fields.count ?? null,
       instructionSnapshot: fields.instructionSnapshot ?? "",
       selectionHash: fields.selectionHash ?? null,
+      renderOptionsSnapshot: fields.renderOptionsSnapshot ?? null,
+      dedupeKey: fields.dedupeKey ?? null,
       // Only meaningful for kind:"final" — overrides the staleness gate when
       // the user explicitly acknowledged rendering from an outdated source.
       force: Boolean(fields.force),
@@ -44,7 +55,7 @@ export class RenderQueue {
     this.#jobs.push(job);
     const position = this.#jobs.filter((entry) => entry.state === "queued" || entry.state === "running").length;
     queueMicrotask(() => this.#kick());
-    return { jobId: job.jobId, position };
+    return { jobId: job.jobId, position, duplicate: false };
   }
 
   cancel(jobId) {
@@ -86,7 +97,13 @@ export class RenderQueue {
         job.state = "cancelled";
       } else {
         job.state = "failed";
-        job.error = { message: error?.message ?? String(error), status: error?.status, code: error?.code, retryAfterMs: error?.retryAfterMs };
+        job.error = {
+          message: error?.message ?? String(error),
+          status: error?.status,
+          code: error?.code,
+          retryAfterMs: error?.retryAfterMs,
+          diagnostics: error?.diagnostics,
+        };
       }
     } finally {
       job.finishedAt = new Date().toISOString();

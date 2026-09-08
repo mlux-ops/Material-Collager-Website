@@ -12,7 +12,7 @@ import { addSlot, applySelection, buildRoomIndex, CUSTOM_ID_PREFIX, libraryOptio
 import { makeDiskImageResolver } from "./match.mjs";
 import { readNoteOverrides } from "./notes.mjs";
 import { resolveAccessHeaders } from "./access.mjs";
-import { COST_PER_IMAGE, approveConfirmed, ensureRenders, pickDraft, renderSource, runRenderJob, selectionHash } from "./render.mjs";
+import { COST_PER_IMAGE, SUNBURST_BACKGROUND_OPTIONS, SUNBURST_QUALITY_OPTIONS, approveConfirmed, ensureRenders, pickDraft, renderRecordIsStale, renderSource, resolveRenderOptions, runRenderJob, savedRenderOptions, selectionHash } from "./render.mjs";
 import { RenderQueue } from "./render-queue.mjs";
 import { indexTileCodes, resolveTileCode } from "./tiles.mjs";
 import { loadLibraryRows } from "./source.mjs";
@@ -40,7 +40,7 @@ const IMAGE_MIME = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image
 // not in this list; they predate this feature and are out of scope here.
 const RENDER_WORKFLOW_ENDPOINTS = new Set([
   "/api/instruction", "/api/item-note", "/api/pick-draft",
-  "/api/approve-confirmed", "/api/render", "/api/render-cancel",
+  "/api/approve-confirmed", "/api/render-options", "/api/render", "/api/render-cancel",
 ]);
 
 function readBody(request) {
@@ -170,8 +170,8 @@ export async function startReviewServer({
     // force:true (from the panel's stronger confirm dialog) is the user
     // explicitly acknowledging the staleness and choosing to finalize the
     // outdated source anyway — never applies to draft/confirm, only final.
-    if (kind === "final" && !force && source.record.selectionHash !== selectionHash(board, record.instruction)) {
-      throw Object.assign(new Error("The picked render is stale — the selection changed since it was rendered. Draft again first."), { status: 409 });
+    if (kind === "final" && !force && renderRecordIsStale(board, source.record, source.kind, record.instruction)) {
+      throw Object.assign(new Error("The picked render is stale — the selection or render options changed since it was rendered. Draft again first."), { status: 409 });
     }
     return board;
   }
@@ -183,8 +183,12 @@ export async function startReviewServer({
       const record = ensureRenders(results, board.id);
       const currentHash = selectionHash(board, record.instruction);
       selectionHashes[board.id] = currentHash;
-      const decorate = (entry) => ({ ...entry, stale: entry.selectionHash !== currentHash, url: `/render-image?path=${encodeURIComponent(entry.path)}` });
-      renders[board.id] = { ...record, drafts: record.drafts.map(decorate), confirmed: record.confirmed.map(decorate), finals: record.finals.map(decorate) };
+      const decorate = (entry, kind) => ({
+        ...entry,
+        stale: entry.selectionHash !== currentHash || renderRecordIsStale(board, entry, kind, record.instruction),
+        url: `/render-image?path=${encodeURIComponent(entry.path)}`,
+      });
+      renders[board.id] = { ...record, drafts: record.drafts.map((entry) => decorate(entry, "draft")), confirmed: record.confirmed.map((entry) => decorate(entry, "confirm")), finals: record.finals.map((entry) => decorate(entry, "final")) };
     }
     return { accessError: access.error, baseUrl, queue: queue.snapshot(), renders, costs: COST_PER_IMAGE, selectionHashes };
   }
@@ -216,6 +220,7 @@ export async function startReviewServer({
       items: board.items.map(serializeItem),
       heroItemId: board.heroItemId ?? null,
       defaultHeroItemId: heroFor(board.collageType, board.items.map((item) => item.slotId)),
+      renderOptions: board.renderOptions ? savedRenderOptions(board) : null,
     };
   }
 
@@ -231,7 +236,7 @@ export async function startReviewServer({
     try {
       const url = new URL(request.url, "http://127.0.0.1");
 
-      // These 6 endpoints run the render workflow (the last one spends real
+      // These 7 endpoints run the render workflow (the render endpoint spends real
       // money) and the client never sets Content-Type, so a plain cross-origin
       // fetch()/form POST from any other page open in the user's browser could
       // otherwise hit them while this local server is running. Requiring JSON
@@ -250,6 +255,14 @@ export async function startReviewServer({
       if (request.method === "GET" && url.pathname === "/") {
         response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         response.end(renderReviewPage());
+        return;
+      }
+
+      // Browsers request this automatically; a quiet empty response keeps
+      // local Review QA free of a misleading 404 console error.
+      if (request.method === "GET" && url.pathname === "/favicon.ico") {
+        response.writeHead(204);
+        response.end();
         return;
       }
 
@@ -506,6 +519,32 @@ export async function startReviewServer({
         return;
       }
 
+      if (request.method === "POST" && url.pathname === "/api/render-options") {
+        const body = JSON.parse(await readBody(request));
+        const { boardId, quality, background } = body;
+        const board = findBoard(boardId);
+        if (quality !== null && quality !== undefined && !SUNBURST_QUALITY_OPTIONS.includes(quality)) {
+          throw Object.assign(new Error(`Quality must be one of: ${SUNBURST_QUALITY_OPTIONS.join(", ")}.`), { status: 400 });
+        }
+        if (background !== null && background !== undefined && !SUNBURST_BACKGROUND_OPTIONS.includes(background)) {
+          throw Object.assign(new Error(`Background must be one of: ${SUNBURST_BACKGROUND_OPTIONS.join(", ")}.`), { status: 400 });
+        }
+        const next = { ...(board.renderOptions ?? {}) };
+        if (Object.prototype.hasOwnProperty.call(body, "quality")) {
+          if (quality) next.quality = quality;
+          else delete next.quality;
+        }
+        if (Object.prototype.hasOwnProperty.call(body, "background")) {
+          if (background) next.background = background;
+          else delete next.background;
+        }
+        if (Object.keys(next).length) board.renderOptions = next;
+        else delete board.renderOptions;
+        await persistPlan();
+        sendJson(response, 200, { renderOptions: board.renderOptions ? savedRenderOptions(board) : null });
+        return;
+      }
+
       if (request.method === "POST" && url.pathname === "/api/pick-draft") {
         const { boardId, draftId } = JSON.parse(await readBody(request));
         const board = findBoard(boardId);
@@ -526,16 +565,37 @@ export async function startReviewServer({
 
       if (request.method === "POST" && url.pathname === "/api/render") {
         const body = JSON.parse(await readBody(request));
+        if (body.quality !== null && body.quality !== undefined && !SUNBURST_QUALITY_OPTIONS.includes(body.quality)) {
+          throw Object.assign(new Error(`Quality must be one of: ${SUNBURST_QUALITY_OPTIONS.join(", ")}.`), { status: 400 });
+        }
+        if (body.background !== null && body.background !== undefined && !SUNBURST_BACKGROUND_OPTIONS.includes(body.background)) {
+          throw Object.assign(new Error(`Background must be one of: ${SUNBURST_BACKGROUND_OPTIONS.join(", ")}.`), { status: 400 });
+        }
         const board = validateRenderRequest(body);
         if (access.error) await refreshAccess();
         const record = ensureRenders(results, board.id);
-        const { jobId, position } = queue.enqueue({
+        const options = resolveRenderOptions(board, body.kind, { quality: body.quality, background: body.background });
+        const source = body.kind === "draft" ? null : renderSource(results, board.id, body.kind);
+        const sourceIdentity = source ? { kind: source.kind, id: source.record.id } : null;
+        const dedupeKey = JSON.stringify({
+          boardId: board.id,
+          kind: body.kind,
+          variant: body.variant ?? null,
+          count: body.kind === "draft" ? Number(body.count) : null,
+          instruction: record.instruction,
+          selectionHash: selectionHash(board, record.instruction),
+          options,
+          source: sourceIdentity,
+          force: body.kind === "final" ? Boolean(body.force) : false,
+        });
+        const { jobId, position, duplicate } = queue.enqueue({
           boardId: board.id, kind: body.kind, variant: body.variant ?? null,
           count: body.kind === "draft" ? Number(body.count) : null,
           instructionSnapshot: record.instruction, selectionHash: selectionHash(board, record.instruction),
+          renderOptionsSnapshot: options, dedupeKey,
           force: Boolean(body.force),
         });
-        sendJson(response, 200, { jobId, position, accessError: access.error });
+        sendJson(response, 200, { jobId, position, duplicate, accessError: access.error });
         return;
       }
 

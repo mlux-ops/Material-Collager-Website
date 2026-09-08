@@ -20,7 +20,9 @@ COLLAGE_TYPES = {
 }
 
 ORIENTATIONS = {"landscape", "portrait", "square"}
-QUALITIES = {"low", "medium", "high", "auto"}
+SUNBURST_MODEL = "gpt-image-2.5-sunburst"
+QUALITIES = {"low", "medium", "high", "xhigh", "max", "auto"}
+BACKGROUNDS = {"opaque", "transparent"}
 OUTPUT_FORMATS = {"png", "jpeg", "webp"}
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 
@@ -145,42 +147,25 @@ class CollageRequest:
     quality: str = "high"
     output_path: Path | None = None
     output_format: str = "png"
+    background: str = "opaque"
     auto_retry: int = 0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CollageRequest":
         collage_type = _nonempty_string(data.get("collage_type"), "collage_type")
-        if collage_type not in COLLAGE_TYPES:
-            raise ValidationError(
-                f"Unsupported collage_type `{collage_type}`. "
-                f"Use one of: {', '.join(sorted(COLLAGE_TYPES))}."
-            )
-
-        raw_items = data.get("items")
-        if not isinstance(raw_items, list) or not raw_items:
-            raise ValidationError("Request must include at least one item.")
 
         orientation = data.get("orientation")
         if orientation is not None:
             orientation = _nonempty_string(orientation, "orientation")
-            if orientation not in ORIENTATIONS:
-                raise ValidationError(
-                    f"Unsupported orientation `{orientation}`. "
-                    f"Use one of: {', '.join(sorted(ORIENTATIONS))}."
-                )
 
         quality = _optional_string(data.get("quality"), "quality") or "high"
-        if quality not in QUALITIES:
-            raise ValidationError(
-                f"Unsupported quality `{quality}`. Use one of: {', '.join(sorted(QUALITIES))}."
-            )
-
         output_format = _optional_string(data.get("output_format"), "output_format") or "png"
-        if output_format not in OUTPUT_FORMATS:
-            raise ValidationError(
-                f"Unsupported output_format `{output_format}`. "
-                f"Use one of: {', '.join(sorted(OUTPUT_FORMATS))}."
-            )
+        background = _optional_string(data.get("background"), "background") or "opaque"
+        _validate_request_contract(collage_type, orientation, quality, output_format, background)
+
+        raw_items = data.get("items")
+        if not isinstance(raw_items, list) or not raw_items:
+            raise ValidationError("Request must include at least one item.")
 
         return cls(
             collage_type=collage_type,
@@ -189,6 +174,7 @@ class CollageRequest:
             quality=quality,
             output_path=Path(data["output_path"]) if data.get("output_path") else None,
             output_format=output_format,
+            background=background,
             auto_retry=int(data.get("auto_retry", 0)),
         )
 
@@ -202,6 +188,9 @@ class CollageRequest:
 
     def resolved_size(self) -> str:
         return DEFAULT_SIZE_BY_ORIENTATION[self.resolved_orientation()]
+
+    def resolved_background(self) -> str:
+        return self.background or "opaque"
 
     def all_image_paths(self) -> tuple[Path, ...]:
         paths: list[Path] = []
@@ -234,6 +223,16 @@ class CollageRequest:
             )
 
     def validate(self, *, check_paths: bool = True, check_roles: bool = False) -> None:
+        # Keep the pre-spend contract in this method as well as from_dict:
+        # callers such as the interactive wizard can construct a request
+        # directly and must not bypass model/format/background validation.
+        _validate_request_contract(
+            self.collage_type,
+            self.orientation,
+            self.quality,
+            self.output_format,
+            self.background,
+        )
         if not self.items:
             raise ValidationError("Request must include at least one item.")
         for item in self.items:
@@ -257,4 +256,40 @@ def _optional_string(value: Any, field_name: str) -> str | None:
     if value is None:
         return None
     return _nonempty_string(value, field_name)
+
+
+def _validate_request_contract(
+    collage_type: str,
+    orientation: str | None,
+    quality: str,
+    output_format: str,
+    background: str,
+) -> None:
+    """Validate model-facing options for both parsed and direct requests."""
+
+    if collage_type not in COLLAGE_TYPES:
+        raise ValidationError(
+            f"Unsupported collage_type `{collage_type}`. "
+            f"Use one of: {', '.join(sorted(COLLAGE_TYPES))}."
+        )
+    if orientation is not None and orientation not in ORIENTATIONS:
+        raise ValidationError(
+            f"Unsupported orientation `{orientation}`. "
+            f"Use one of: {', '.join(sorted(ORIENTATIONS))}."
+        )
+    if quality not in QUALITIES:
+        raise ValidationError(
+            f"Unsupported quality `{quality}`. Use one of: {', '.join(sorted(QUALITIES))}."
+        )
+    if output_format not in OUTPUT_FORMATS:
+        raise ValidationError(
+            f"Unsupported output_format `{output_format}`. "
+            f"Use one of: {', '.join(sorted(OUTPUT_FORMATS))}."
+        )
+    if background not in BACKGROUNDS:
+        raise ValidationError(
+            f"Unsupported background `{background}`. Use one of: {', '.join(sorted(BACKGROUNDS))}."
+        )
+    if background == "transparent" and output_format == "jpeg":
+        raise ValidationError("Transparent output requires PNG or WebP; choose a compatible format before generating.")
 

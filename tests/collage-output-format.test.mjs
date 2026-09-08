@@ -31,6 +31,19 @@ test("validateCollageRequest rejects an unsupported output format", () => {
   assert.throws(() => validateCollageRequest(request({ outputFormat: "gif" })), /supported output format/);
 });
 
+test("transparent output accepts PNG and WebP but rejects JPEG before generation", () => {
+  assert.doesNotThrow(() => validateCollageRequest(request({ background: "transparent", outputFormat: "png" })));
+  assert.doesNotThrow(() => validateCollageRequest(request({ background: "transparent", outputFormat: "webp" })));
+  assert.throws(
+    () => validateCollageRequest(request({ background: "transparent", outputFormat: "jpeg" })),
+    /Transparent output requires PNG or WebP/,
+  );
+});
+
+test("missing background resolves to opaque for old drafts", () => {
+  assert.doesNotThrow(() => validateCollageRequest(request({ background: undefined })));
+});
+
 test("validateCollageRequest accepts a valid output compression and rejects out-of-range or non-integer values", () => {
   assert.doesNotThrow(() => validateCollageRequest(request({ outputFormat: "jpeg", outputCompression: 0 })));
   assert.doesNotThrow(() => validateCollageRequest(request({ outputFormat: "jpeg", outputCompression: 100 })));

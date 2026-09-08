@@ -3,6 +3,7 @@ import {
   activeItems,
   buildGenerationPrompt,
   buildSummary,
+  resolvedBackground,
   resolvedOutputFormat,
   resolvedQuality,
   resolvedSize,
@@ -30,6 +31,7 @@ import {
   type PreparedReference,
 } from "@/app/lib/image-edit";
 import { persistGenerationOutput, type RenderKind } from "@/app/lib/generation-jobs";
+import { calculateSunburstUsageCost, SUNBURST_MODEL } from "@/app/lib/sunburst";
 
 export const runtime = "edge";
 
@@ -46,12 +48,19 @@ export async function POST(request: Request) {
     const incoming = await request.formData();
     const payloadText = incoming.get("payload");
     if (typeof payloadText !== "string") throw new Error("Missing generation payload.");
-    const payload = JSON.parse(payloadText) as CollageRequestInput;
+    const rawPayload = JSON.parse(payloadText) as CollageRequestInput;
+    // Missing fields are valid for drafts written before the Sunburst
+    // migration. Resolve them before validation so those drafts remain opaque
+    // and high-quality by default.
+    const payload: CollageRequestInput = {
+      ...rawPayload,
+      quality: rawPayload.quality ?? "high",
+      background: rawPayload.background ?? "opaque",
+    };
     validateCollageRequest(payload);
-    // Finals always render at high quality (see resolvedQuality). The payload
-    // is normalized in place so the upstream request, the persisted job and
-    // the diagnostics all agree — and the caller is told when their requested
-    // tier was upgraded instead of having the change happen silently.
+    // Final quality is normalized in place so the upstream request, the
+    // persisted job and diagnostics all agree. Explicit xhigh/max survive the
+    // Final minimum-quality guard.
     const requestedQuality = payload.quality;
     payload.quality = resolvedQuality(payload);
     const qualityNotice = requestedQuality !== payload.quality
@@ -81,9 +90,11 @@ export async function POST(request: Request) {
     validateImagePrompt(prompt);
     const attempts: AttemptDiagnostic[] = [];
     diagnostics = {
-      model: "gpt-image-2",
+      model: SUNBURST_MODEL,
       transport: "multipart",
       quality: payload.quality,
+      background: resolvedBackground(payload),
+      outputFormat: resolvedOutputFormat(payload),
       referenceCount: expectedReferences,
       totalReferenceBytes: 0,
       largestReferenceBytes: 0,
@@ -124,12 +135,12 @@ export async function POST(request: Request) {
     const outputFormat = resolvedOutputFormat(payload);
 
     const imageRequest: ImageEditRequest = {
-      model: "gpt-image-2",
+      model: SUNBURST_MODEL,
       prompt,
       references: preparedReferences,
       size: requestedSize,
       quality: payload.quality,
-      background: "opaque",
+      background: resolvedBackground(payload),
       output_format: outputFormat,
       ...(payload.outputCompression !== undefined && outputFormat !== "png"
         ? { output_compression: payload.outputCompression }
@@ -144,7 +155,9 @@ export async function POST(request: Request) {
         try {
           const testResult = await createImageEdit(apiKey, {
             ...imageRequest,
-            prompt: "Create a simple clean material reference board using every supplied image.",
+            prompt: resolvedBackground(payload) === "transparent"
+              ? "Create a simple clean material reference board using every supplied image on a transparent background with preserved alpha."
+              : "Create a simple clean material reference board using every supplied image.",
             references: preparedReferences.slice(0, count),
             size: "1024x1024",
             quality: "low",
@@ -184,6 +197,7 @@ export async function POST(request: Request) {
     if (!imageBase64) {
       throw new Error("OpenAI did not return image data.");
     }
+    const costUsd = calculateSunburstUsageCost(imageJson.usage);
 
     const renderKind: RenderKind = payload.renderKind
       ?? (payload.outputResolution === "final" ? "final" : "studio");
@@ -196,6 +210,10 @@ export async function POST(request: Request) {
         format: requestedSize,
         prompt,
         payload: payload as unknown as Record<string, unknown>,
+        model: SUNBURST_MODEL,
+        quality: payload.quality,
+        background: resolvedBackground(payload),
+        outputFormat,
         usage: imageJson.usage,
         qa: null,
         renderKind,
@@ -213,6 +231,11 @@ export async function POST(request: Request) {
       mimeType: OUTPUT_MIME_TYPES[outputFormat],
       filename: safeOutputFilename(payload.outputFilename, outputFormat),
       usage: imageJson.usage,
+      model: SUNBURST_MODEL,
+      quality: payload.quality,
+      background: resolvedBackground(payload),
+      outputFormat,
+      costUsd,
       jobId: stored?.id,
       libraryVisible: stored?.libraryVisible ?? false,
       renderKind,

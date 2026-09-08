@@ -1,5 +1,6 @@
 import type { NodeManifest } from "../types";
-import { estimateGenerationCost, GENERATION_PARAM_RULES, generationDraftOverride } from "./generation.ts";
+import { estimateSunburstCost, GENERATION_PARAM_RULES, generationDraftOverride } from "./generation.ts";
+import { SUNBURST_MODEL } from "../../../lib/sunburst.ts";
 
 // The execute wrapper lives in imageGenerate.tsx (blob-cache object URLs and
 // reference transport are DOM work); it composes generation.ts's pure
@@ -17,12 +18,12 @@ export const imageGenerateManifest: NodeManifest = {
     outputs: [{ id: "image", kind: "image", label: "Image" }],
     paid: true,
   },
-  defaultParams: { size: "1536x1024", quality: "medium", candidates: 1 },
+  defaultParams: { model: SUNBURST_MODEL, size: "1536x1024", quality: "medium", candidates: 1, background: "opaque", outputFormat: "png" },
   importSchema: {
     paramKeys: { ...GENERATION_PARAM_RULES },
     sourceBlobKeys: [],
   },
-  estimateCost: estimateGenerationCost,
+  estimateCost: estimateSunburstCost,
   paid: true,
   draftOverride: generationDraftOverride,
 };

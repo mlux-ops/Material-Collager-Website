@@ -498,7 +498,7 @@ function CanvasInner({
     const withOutgoing = new Set(edges.map((edge) => edge.source));
     return nodes.filter((node) => !withOutgoing.has(node.id) && node.data.kind !== "note").map((node) => node.id);
   }, [nodes, edges]);
-  const { totalUsd, staleCount } = useMemo(
+  const { totalUsd, staleCount, costUnknown } = useMemo(
     () => estimateStaleCost(terminalIds),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [terminalIds, nodes, edges, draft],
@@ -680,7 +680,7 @@ function CanvasInner({
                 confirmHighCost still gates an expensive run. */}
             {compact
               ? `Run${staleCount > 0 ? ` · ${staleCount}` : ""}`
-              : `Run workflow${staleCount > 0 ? ` · ${staleCount} to run${totalUsd !== null ? ` · ~${formatUsd(totalUsd)}` : ""}` : nodes.length ? " · up to date" : ""}`}
+              : `Run workflow${staleCount > 0 ? ` · ${staleCount} to run${costUnknown ? " · usage-based cost" : totalUsd !== null ? ` · ~${formatUsd(totalUsd)}` : ""}` : nodes.length ? " · up to date" : ""}`}
           </button>
           {compact && selectedEdges.length > 0 && (
             <button

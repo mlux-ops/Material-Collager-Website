@@ -1,3 +1,12 @@
+import {
+  SUNBURST_BACKGROUNDS,
+  SUNBURST_QUALITIES,
+  type SunburstBackground,
+  type SunburstQuality,
+} from "./sunburst.ts";
+
+export { SUNBURST_BACKGROUNDS, SUNBURST_MODEL, SUNBURST_QUALITIES } from "./sunburst.ts";
+
 export const COLLAGE_TYPES = [
   "kitchen_material_palette",
   "appliance_collage",
@@ -5,7 +14,7 @@ export const COLLAGE_TYPES = [
   "bathroom_tile_collage",
 ] as const;
 
-export const QUALITIES = ["low", "medium", "high", "auto"] as const;
+export const QUALITIES = SUNBURST_QUALITIES;
 export const ORIENTATIONS = ["default", "landscape", "portrait", "square"] as const;
 export const OUTPUT_RESOLUTIONS = ["standard", "studio", "final"] as const;
 export const COMPOSITIONS = ["editorial", "structured", "catalog"] as const;
@@ -18,7 +27,8 @@ export const MAX_REFERENCE_IMAGES = 16;
 export const MAX_REFERENCE_FILE_BYTES = 50 * 1024 * 1024;
 
 export type CollageType = (typeof COLLAGE_TYPES)[number];
-export type Quality = (typeof QUALITIES)[number];
+export type Quality = SunburstQuality;
+export type Background = SunburstBackground;
 export type Orientation = (typeof ORIENTATIONS)[number];
 export type OutputResolution = (typeof OUTPUT_RESOLUTIONS)[number];
 export type Composition = (typeof COMPOSITIONS)[number];
@@ -69,6 +79,9 @@ export type CollageRequestInput = {
   outputFormat?: OutputFormat;
   // Only meaningful for jpeg/webp; OpenAI accepts 0-100 and ignores it for png.
   outputCompression?: number;
+  // Solid white is the default for backwards compatibility. Transparent
+  // output is only selected explicitly and is validated against its format.
+  background?: Background;
   items: CollageItemInput[];
 };
 
@@ -181,6 +194,12 @@ export function validateCollageRequest(request: CollageRequestInput) {
   if (request.outputFormat !== undefined && !OUTPUT_FORMATS.includes(request.outputFormat)) {
     throw new Error("Choose a supported output format.");
   }
+  if (request.background !== undefined && !SUNBURST_BACKGROUNDS.includes(request.background)) {
+    throw new Error("Choose a supported background.");
+  }
+  if (resolvedBackground(request) === "transparent" && resolvedOutputFormat(request) === "jpeg") {
+    throw new Error("Transparent output requires PNG or WebP; choose a compatible format before generating.");
+  }
   if (request.outputCompression !== undefined) {
     if (!Number.isInteger(request.outputCompression) || request.outputCompression < 0 || request.outputCompression > 100) {
       throw new Error("Output compression must be a whole number between 0 and 100.");
@@ -277,13 +296,19 @@ export function resolvedOutputFormat(request: CollageRequestInput): OutputFormat
   return request.outputFormat ?? "png";
 }
 
+export function resolvedBackground(request: CollageRequestInput): Background {
+  return request.background ?? "opaque";
+}
+
 // Finals always render at high quality regardless of the requested tier, so a
 // draft-tier setting left over in a client (or a CLI flag) can never quietly
 // produce a degraded deliverable. Callers compare the result against the
 // requested quality to tell the user when the upgrade happened.
 export function resolvedQuality(request: CollageRequestInput): Quality {
-  if (isFinalRender(request)) return "high";
-  return request.quality;
+  const quality = request.quality ?? "high";
+  // Final is never allowed below high, but explicit xhigh/max remain intact.
+  if (isFinalRender(request) && (quality === "low" || quality === "medium" || quality === "auto")) return "high";
+  return quality;
 }
 
 export function resolvedSize(request: CollageRequestInput) {
@@ -417,7 +442,9 @@ export function buildGenerationPrompt(request: CollageRequestInput) {
     request.layoutReference && !layoutMaster
       ? "Keep the approved draft camera and lighting direction."
       : "True overhead camera with corrected perspective; no room scene.",
-    "Seamless pure white background (#FFFFFF), clean cutout edges, realistic thickness, contact shadows, reflections, and surface texture. No CGI gloss, warped fixtures, gray cast, vignette, or border.",
+    resolvedBackground(request) === "transparent"
+      ? "Transparent background with preserved alpha and no white matte, clean cutout edges, realistic thickness, contact shadows, reflections, and surface texture. No CGI gloss, warped fixtures, gray cast, vignette, or border."
+      : "Seamless pure white background (#FFFFFF), clean cutout edges, realistic thickness, contact shadows, reflections, and surface texture. No CGI gloss, warped fixtures, gray cast, vignette, or border.",
     "No added text, labels, annotations, logos, watermarks, people, hands, packaging, or unmapped products. Only the selected styling props are allowed.",
     "OUTPUT",
     `Orientation: ${resolvedOrientation(request)}. Canvas: ${resolvedSize(request)}. Deliver one complete collage, not a contact sheet. Before finishing, check item count, finish, geometry, visibility, and requested placement against the reference map.`,
@@ -436,7 +463,8 @@ export function buildSummary(request: CollageRequestInput) {
       ? "Spacing: from the uploaded layout master"
       : `Spacing: ${labelFor(resolvedDensity(request))}`,
     `Styling: ${labelFor(resolvedStyling(request))}`,
-    `Quality: ${labelFor(request.quality)}`,
+    `Quality: ${labelFor(resolvedQuality(request))}`,
+    `Background: ${labelFor(resolvedBackground(request))}`,
     `References: ${totalReferenceCount(request)}/${MAX_REFERENCE_IMAGES}`,
     "Items:",
   ];

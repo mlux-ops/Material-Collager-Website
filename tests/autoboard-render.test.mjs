@@ -12,6 +12,7 @@ import {
   buildConfirmPayload,
   buildDraftPayload,
   buildFinalPayload,
+  candidateIsStaleForFinalize,
   ensureRenders,
   estimateCost,
   formatCost,
@@ -20,12 +21,17 @@ import {
   postGeneration,
   recordConfirmed,
   recordDraft,
+  renderOptionsHash,
+  renderRecordIsStale,
+  resolveRenderOptions,
+  savedRenderOptions,
   renderSource,
   runRenderJob,
   saveRenderImage,
   selectionHash,
 } from "../scripts/autoboard/lib/render.mjs";
 import { DEFAULT_VARIANTS } from "../scripts/autoboard/lib/variants.mjs";
+import { uploadFileToOpenAI } from "../scripts/autoboard/lib/openai-upload.mjs";
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
 const A = DEFAULT_VARIANTS[0];
@@ -62,12 +68,64 @@ function scratchRun() {
   return { runDir, plan, results: { candidates: {}, finals: {} } };
 }
 
-test("estimateCost and formatCost use the constant table and label approximations", () => {
-  assert.equal(estimateCost("draft", 3), 0.048);
-  assert.equal(estimateCost("confirm"), 0.04);
-  assert.equal(estimateCost("final"), 0.19);
-  assert.equal(formatCost(0.048), "~$0.05");
+test("pre-render costs stay unavailable until usage completes", () => {
+  assert.equal(estimateCost("draft", 3), null);
+  assert.equal(estimateCost("confirm"), null);
+  assert.equal(estimateCost("final"), null);
+  assert.equal(formatCost(null), "cost unavailable until completion");
   assert.throws(() => estimateCost("bogus"), /Unknown render kind/);
+});
+
+test("render options use explicit CLI/UI values before saved board values and stage defaults", () => {
+  const oldPlan = board();
+  assert.deepEqual(savedRenderOptions(oldPlan), { quality: undefined, background: "opaque" });
+  assert.deepEqual(resolveRenderOptions(oldPlan, "draft"), { quality: "low", background: "opaque" });
+  assert.deepEqual(resolveRenderOptions(oldPlan, "confirm"), { quality: "medium", background: "opaque" });
+  assert.deepEqual(resolveRenderOptions(oldPlan, "final"), { quality: "high", background: "opaque" });
+  const saved = board({ renderOptions: { quality: "medium", background: "transparent" } });
+  assert.deepEqual(resolveRenderOptions(saved, "draft"), { quality: "medium", background: "transparent" });
+  assert.deepEqual(resolveRenderOptions(saved, "final"), { quality: "high", background: "transparent" });
+  assert.deepEqual(resolveRenderOptions(saved, "final", { quality: "xhigh", background: "opaque" }), { quality: "xhigh", background: "opaque" });
+  assert.deepEqual(resolveRenderOptions(saved, "final", { quality: "max" }), { quality: "max", background: "transparent" });
+});
+
+test("option changes stale new records while historical records stay unchanged", () => {
+  const oldPlan = board();
+  const historical = { selectionHash: selectionHash(oldPlan), instruction: "", quality: undefined, background: undefined };
+  assert.equal(renderRecordIsStale(oldPlan, historical, "draft"), false);
+  const changed = board({ renderOptions: { quality: "xhigh", background: "transparent" } });
+  assert.equal(renderRecordIsStale(changed, historical, "draft"), true);
+  const fresh = { ...historical, quality: "xhigh", background: "transparent", renderOptionsHash: renderOptionsHash({ quality: "xhigh", background: "transparent" }) };
+  assert.equal(renderRecordIsStale(changed, fresh, "draft"), false);
+});
+
+test("immediate and Batch finalize gates reject changed saved options, honor matching CLI overrides, and preserve old plans", () => {
+  const saved = board({ renderOptions: { quality: "xhigh", background: "transparent" } });
+  const staleCandidate = {
+    status: "ok",
+    selectionHash: selectionHash(saved),
+    quality: "low",
+    background: "opaque",
+  };
+  // Both direct finalize paths call this shared gate before consuming a
+  // candidate; a saved-option change must force a fresh draft.
+  assert.equal(candidateIsStaleForFinalize(saved, staleCandidate), true);
+  // An explicit CLI selection is the effective option set and can match the
+  // reviewed candidate even when the board's saved defaults differ.
+  assert.equal(candidateIsStaleForFinalize(saved, staleCandidate, { quality: "low", background: "opaque" }), false);
+  const confirmed = {
+    ...staleCandidate,
+    confirmedAt: "2026-09-08T00:00:00Z",
+    draftQuality: "xhigh",
+    draftBackground: "transparent",
+    quality: "medium",
+    background: "transparent",
+  };
+  assert.equal(candidateIsStaleForFinalize(saved, confirmed), false);
+  // A pre-migration plan with no saved options remains compatible; its
+  // historical candidate has no new settings to compare.
+  const oldPlan = board();
+  assert.equal(candidateIsStaleForFinalize(oldPlan, { status: "ok", selectionHash: selectionHash(oldPlan) }), false);
 });
 
 test("selectionHash is stable for the same selection and changes with images, notes or instruction", () => {
@@ -105,6 +163,7 @@ test("boardForRender joins an existing item note and the instruction on the hero
 test("buildDraftPayload renders low/standard studio drafts with reference files in item order", () => {
   const { payload, files } = buildDraftPayload(board(), A, { apiKey: "k", instruction: "airy" });
   assert.equal(payload.quality, "low");
+  assert.equal(payload.background, "opaque");
   assert.equal(payload.outputResolution, "standard");
   assert.equal(payload.renderKind, "studio");
   assert.equal(payload.layoutReference, undefined);
@@ -117,6 +176,7 @@ test("buildDraftPayload renders low/standard studio drafts with reference files 
 test("buildConfirmPayload is medium quality with the source draft first as the approved-draft layout reference", () => {
   const { payload, files } = buildConfirmPayload(board(), A, "E:/run/boards/b/drafts/d-0001.png", {});
   assert.equal(payload.quality, "medium");
+  assert.equal(payload.background, "opaque");
   assert.equal(payload.outputResolution, "standard");
   assert.equal(payload.renderKind, "studio");
   assert.equal(payload.layoutReference, true);
@@ -128,6 +188,7 @@ test("buildConfirmPayload is medium quality with the source draft first as the a
 test("buildFinalPayload is high/final with the source render as layout reference", () => {
   const { payload, files } = buildFinalPayload(board(), A, "E:/run/boards/b/confirmed/c-0001.png", {});
   assert.equal(payload.quality, "high");
+  assert.equal(payload.background, "opaque");
   assert.equal(payload.outputResolution, "final");
   assert.equal(payload.renderKind, "final");
   assert.equal(payload.layoutReference, true);
@@ -164,6 +225,28 @@ test("postGeneration turns an Access 302/403 into AccessError and surfaces Worke
 test("postGeneration honours an AbortSignal", async (t) => {
   t.mock.method(globalThis, "fetch", async (_url, init) => { init.signal.throwIfAborted(); return Response.json({ ok: true }); });
   await assert.rejects(postGeneration("https://w.example", {}, [], { signal: AbortSignal.abort() }), (error) => error.name === "AbortError");
+});
+
+test("Batch reference uploads preserve structured failure diagnostics without retrying", async (t) => {
+  const { runDir } = scratchRun();
+  const filePath = path.join(runDir, "lib", "faucet.png");
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    calls++;
+    return Response.json({
+      ok: false,
+      error: "Busy",
+      code: "rate_limited",
+      retryAfterMs: 120000,
+      diagnostics: { attempts: [{ stage: "upload", outcome: "ambiguous" }] },
+    }, { status: 429 });
+  });
+  await assert.rejects(
+    uploadFileToOpenAI("https://w.example", {}, filePath, "test-key"),
+    (error) => error.status === 429 && error.code === "rate_limited" && error.retryAfterMs === 120000 && error.diagnostics.attempts.length === 1,
+  );
+  assert.equal(calls, 1);
+  rmSync(runDir, { recursive: true, force: true });
 });
 
 test("ensureRenders creates the per-board record once and nextRenderId zero-pads per kind", () => {
@@ -264,6 +347,70 @@ test("runRenderJob renders N drafts sequentially, reporting progress and recordi
   assert.equal(results.renders[boardId].drafts.length, 2);
   assert.equal(results.renders[boardId].drafts[1].instruction, "airy");
   assert.equal(persisted, 2);
+  rmSync(runDir, { recursive: true, force: true });
+});
+
+test("runRenderJob carries selected quality/background and completed usage metadata", async (t) => {
+  const { runDir, plan, results } = scratchRun();
+  const boardId = plan.boards[0].id;
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    const payload = JSON.parse(init.body.get("payload"));
+    assert.equal(payload.quality, "xhigh");
+    assert.equal(payload.background, "transparent");
+    return Response.json({
+      ok: true,
+      imageBase64: PNG.toString("base64"),
+      mimeType: "image/png",
+      model: "gpt-image-2.5-sunburst",
+      usage: { input_tokens: 1000, input_tokens_details: { image_tokens: 200, text_tokens: 800 }, output_tokens: 300 },
+      jobId: "job-options",
+    });
+  });
+  await runRenderJob({
+    jobId: "q-options", boardId, kind: "draft", variant: "A", count: 1,
+    renderOptionsSnapshot: { quality: "xhigh", background: "transparent" },
+  }, {
+    plan, results, runDir, baseUrl: "https://w.example", accessHeaders: {}, apiKey: undefined,
+    signal: new AbortController().signal, onProgress: () => {}, persist: async () => {},
+  });
+  const record = results.renders[boardId].drafts[0];
+  assert.equal(record.model, "gpt-image-2.5-sunburst");
+  assert.equal(record.quality, "xhigh");
+  assert.equal(record.background, "transparent");
+  assert.equal(record.outputFormat, "png");
+  assert.deepEqual(record.usage.input_tokens_details, { image_tokens: 200, text_tokens: 800 });
+  assert.equal(typeof record.costUsd, "number");
+  rmSync(runDir, { recursive: true, force: true });
+});
+
+test("draft then confirm preserves source draft options for immediate and Batch finalize gates", async (t) => {
+  const { runDir, plan, results } = scratchRun();
+  const boardId = plan.boards[0].id;
+  const currentBoard = plan.boards[0];
+  currentBoard.renderOptions = { background: "transparent" };
+  let requestCount = 0;
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    const payload = JSON.parse(init.body.get("payload"));
+    requestCount++;
+    assert.equal(payload.background, "transparent");
+    assert.equal(payload.quality, requestCount === 1 ? "low" : "medium");
+    return Response.json({ ok: true, imageBase64: PNG.toString("base64"), mimeType: "image/png", jobId: `job-stage-${requestCount}` });
+  });
+  const ctx = {
+    plan, results, runDir, baseUrl: "https://w.example", accessHeaders: {}, apiKey: undefined,
+    signal: new AbortController().signal, onProgress: () => {}, persist: async () => {},
+  };
+  await runRenderJob({ jobId: "q-draft", boardId, kind: "draft", variant: "A", count: 1 }, ctx);
+  pickDraft(results, runDir, boardId, "d-0001");
+  await runRenderJob({ jobId: "q-confirm", boardId, kind: "confirm" }, ctx);
+  const candidate = results.candidates[`${boardId}--A`];
+  assert.equal(candidate.quality, "medium");
+  assert.equal(candidate.background, "transparent");
+  assert.equal(candidate.draftQuality, "low");
+  assert.equal(candidate.draftBackground, "transparent");
+  for (const mode of ["finalize", "batch-finalize"]) {
+    assert.equal(candidateIsStaleForFinalize(currentBoard, candidate), false, `${mode} should accept the reviewed source`);
+  }
   rmSync(runDir, { recursive: true, force: true });
 });
 

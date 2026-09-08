@@ -5,6 +5,21 @@ from material_collager.prompts import build_generation_prompt
 
 
 class PromptTests(unittest.TestCase):
+    def test_transparent_prompt_changes_background_wording_but_keeps_reference_guidance(self):
+        request = CollageRequest.from_dict({
+            "collage_type": "bathroom_fixture_collage",
+            "background": "transparent",
+            "items": [
+                {"id": "faucet", "role": "vanity faucet", "image_paths": ["faucet.png"]},
+                {"id": "tile", "role": "wall tile", "image_paths": ["tile.png"]},
+            ],
+        })
+        prompt = build_generation_prompt(request)
+        self.assertIn("Transparent background with preserved alpha and no white matte", prompt)
+        self.assertNotIn("Seamless pure white background (#FFFFFF)", prompt)
+        self.assertIn("Preserve each referenced item's exact visible material", prompt)
+        self.assertIn("exactly 2 referenced objects", prompt)
+
     def test_single_reference_omits_unused_views_and_unrelated_finish_glossary(self):
         request = CollageRequest.from_dict({
             "collage_type": "bathroom_fixture_collage",

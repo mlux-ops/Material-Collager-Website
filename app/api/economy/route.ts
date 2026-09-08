@@ -1,7 +1,8 @@
-import { activeItems, buildGenerationPrompt, resolvedSize, validateCollageRequest, type CollageRequestInput } from "@/app/lib/collage";
+import { activeItems, buildGenerationPrompt, resolvedBackground, resolvedOutputFormat, resolvedQuality, resolvedSize, validateCollageRequest, type CollageRequestInput } from "@/app/lib/collage";
 import { cleanupExpiredJobs, ensureJobStorage, publicJob, RETENTION_MS, runtimeStorage, type JobRow } from "@/app/lib/generation-jobs";
 import { errorResponse, readOpenAIResponse, resolveOpenAIKey } from "@/app/lib/openai-server";
 import { validateImagePrompt } from "@/app/lib/image-edit";
+import { SUNBURST_MODEL, calculateSunburstUsageCost } from "@/app/lib/sunburst";
 
 export const runtime = "edge";
 
@@ -22,11 +23,13 @@ export async function POST(request: Request) {
     const payload: CollageRequestInput = {
       ...body.payload,
       apiKey: "",
-      quality: "high",
+      quality: body.payload.quality ?? "high",
+      background: body.payload.background ?? "opaque",
       outputResolution: "final",
       renderKind: "final",
     };
     validateCollageRequest(payload);
+    payload.quality = resolvedQuality(payload);
     const referenceIds = activeItems(payload).flatMap((item) => item.imageFileIds ?? []);
     const allImageIds = payload.layoutReferenceFileId
       ? [payload.layoutReferenceFileId, ...referenceIds]
@@ -39,14 +42,15 @@ export async function POST(request: Request) {
     const prompt = buildGenerationPrompt(payload);
     validateImagePrompt(prompt);
     const jobId = crypto.randomUUID();
-    const batch = await submitEconomyBatch(apiKey, jobId, prompt, allImageIds, resolvedSize(payload));
+    const batch = await submitEconomyBatch(apiKey, jobId, prompt, allImageIds, resolvedSize(payload), payload.quality, resolvedBackground(payload));
 
     const now = Date.now();
     const DB = await ensureJobStorage();
     await DB.prepare(`INSERT INTO generation_jobs
       (id, mode, status, openai_batch_id, output_key, filename, format, prompt, payload_json, reference_ids_json,
-       render_kind, collage_type, library_visible, title, estimated_usd, usage_json, qa_json, error, created_at, updated_at, expires_at)
-      VALUES (?, 'economy', ?, ?, NULL, ?, ?, ?, ?, ?, 'final', ?, 1, ?, ?, NULL, NULL, NULL, ?, ?, ?)`)
+       render_kind, collage_type, library_visible, title, estimated_usd, usage_json, qa_json, error,
+       model, quality, background, output_format, cost_usd, created_at, updated_at, expires_at)
+      VALUES (?, 'economy', ?, ?, NULL, ?, ?, ?, ?, ?, 'final', ?, 1, ?, NULL, NULL, NULL, NULL, ?, ?, ?, ?, NULL, ?, ?, ?)`)
       .bind(
         jobId,
         batch.status || "validating",
@@ -54,16 +58,23 @@ export async function POST(request: Request) {
         finalFilename(payload.outputFilename),
         resolvedSize(payload),
         prompt,
-        JSON.stringify(payload),
+        JSON.stringify({
+          ...payload,
+          model: SUNBURST_MODEL,
+          outputFormat: resolvedOutputFormat(payload),
+        }),
         JSON.stringify(referenceIds),
         payload.collageType,
         displayTitle(payload.outputFilename, payload.collageType),
-        baseEstimate(payload) / 2,
+        SUNBURST_MODEL,
+        payload.quality,
+        resolvedBackground(payload),
+        resolvedOutputFormat(payload),
         now,
         now,
         now + RETENTION_MS,
       ).run();
-    return Response.json({ ok: true, jobId, status: batch.status, estimatedUsd: baseEstimate(payload) / 2 });
+    return Response.json({ ok: true, jobId, status: batch.status, estimatedUsd: null });
   } catch (error) {
     return errorResponse(error);
   }
@@ -85,18 +96,26 @@ export async function GET() {
   }
 }
 
-async function submitEconomyBatch(apiKey: string, jobId: string, prompt: string, imageFileIds: string[], size: string) {
+async function submitEconomyBatch(
+  apiKey: string,
+  jobId: string,
+  prompt: string,
+  imageFileIds: string[],
+  size: string,
+  quality: string,
+  background: string,
+) {
   const requestLine = JSON.stringify({
     custom_id: jobId,
     method: "POST",
     url: "/v1/images/edits",
     body: {
-      model: "gpt-image-2",
+      model: SUNBURST_MODEL,
       prompt,
       images: imageFileIds.map((fileId) => ({ file_id: fileId })),
       size,
-      quality: "high",
-      background: "opaque",
+      quality,
+      background,
       output_format: "png",
     },
   });
@@ -189,18 +208,15 @@ async function refreshJob(row: JobRow) {
     // Accuracy review is disabled here (see /api/generate for why): it added
     // an extra vision+reasoning call after every batch finished, with no way
     // to cancel it, and could stall a job that had otherwise completed.
-    await DB.prepare("UPDATE generation_jobs SET status = 'completed', output_key = ?, usage_json = ?, qa_json = ?, updated_at = ? WHERE id = ?")
-      .bind(outputKey, JSON.stringify(result.response?.body?.usage ?? {}), null, Date.now(), row.id).run();
+    const usage = result.response?.body?.usage;
+    await DB.prepare("UPDATE generation_jobs SET status = 'completed', output_key = ?, usage_json = ?, cost_usd = ?, qa_json = ?, updated_at = ? WHERE id = ?")
+      .bind(outputKey, JSON.stringify(usage ?? {}), calculateSunburstUsageCost(usage, "batch"), null, Date.now(), row.id).run();
   } catch {
     // Leave the row in 'finalizing'; the stale-claim window retries it, bounded
     // by the finalize_attempts cap above, so a transient failure recovers while
     // a permanent one eventually surfaces as a failed history item.
     return;
   }
-}
-
-function baseEstimate(payload: CollageRequestInput) {
-  return payload.orientation === "square" ? 0.211 : 0.165;
 }
 
 function finalFilename(value?: string) {

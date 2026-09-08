@@ -9,21 +9,120 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { validateCollageRequest } from "../../../app/lib/collage.ts";
+import { calculateSunburstUsageCost, SUNBURST_MODEL } from "../../../app/lib/sunburst.ts";
 import { AccessError, accessLoginHint, isAccessRejection } from "./access.mjs";
+import { isStaleCandidate } from "./review-core.mjs";
 import { prepareReferenceForUpload } from "./transport.mjs";
 import { boardPayload, boardReferenceFiles, modelNotes, orderedBoardItems } from "./variants.mjs";
 
-// Approximate USD per image. Constants, labelled "~$" in the UI.
-export const COST_PER_IMAGE = { draft: 0.016, confirm: 0.04, final: 0.19 };
+// Sunburst usage is returned by the Worker after a request completes. Do not
+// invent a pre-render estimate: the reference count, cache allocation, and
+// output tokens are not known until the response arrives.
+export const COST_PER_IMAGE = Object.freeze({ draft: null, confirm: null, final: null });
 
 export function estimateCost(kind, count = 1) {
-  const unit = COST_PER_IMAGE[kind];
-  if (unit === undefined) throw new Error(`Unknown render kind "${kind}".`);
-  return Math.round(unit * count * 1000) / 1000;
+  if (!(kind in COST_PER_IMAGE)) throw new Error(`Unknown render kind "${kind}".`);
+  void count;
+  return null;
 }
 
 export function formatCost(amount) {
-  return `~$${amount.toFixed(2)}`;
+  void amount;
+  return "cost unavailable until completion";
+}
+
+export const SUNBURST_QUALITY_OPTIONS = ["low", "medium", "high", "xhigh", "max", "auto"];
+export const SUNBURST_BACKGROUND_OPTIONS = ["opaque", "transparent"];
+const DEFAULT_STAGE_QUALITY = { draft: "low", confirm: "medium", final: "high" };
+
+function validQuality(value) {
+  return typeof value === "string" && SUNBURST_QUALITY_OPTIONS.includes(value) ? value : undefined;
+}
+
+function validBackground(value) {
+  return typeof value === "string" && SUNBURST_BACKGROUND_OPTIONS.includes(value) ? value : undefined;
+}
+
+// Saved options are intentionally sparse. A plan written before the options
+// UI has no renderOptions field and therefore remains opaque, with the stage's
+// historical quality default. Reading this helper never mutates that plan.
+export function savedRenderOptions(board) {
+  const saved = board?.renderOptions && typeof board.renderOptions === "object" ? board.renderOptions : {};
+  return {
+    quality: validQuality(saved.quality),
+    background: validBackground(saved.background) ?? "opaque",
+  };
+}
+
+// Explicit command/panel overrides win over a saved board option, which wins
+// over the established draft/confirm/final default. Finals retain the Task 1
+// minimum of high: low, medium, and auto are upgraded while xhigh/max remain
+// explicit choices.
+export function resolveRenderOptions(board, kind, overrides = {}) {
+  const saved = savedRenderOptions(board);
+  const stageDefault = DEFAULT_STAGE_QUALITY[kind];
+  if (!stageDefault) throw new Error(`Unknown render kind "${kind}".`);
+  const requestedQuality = validQuality(overrides.quality) ?? saved.quality ?? stageDefault;
+  const quality = kind === "final" && ["low", "medium", "auto"].includes(requestedQuality)
+    ? "high"
+    : requestedQuality;
+  return {
+    quality,
+    background: validBackground(overrides.background) ?? saved.background,
+  };
+}
+
+export function renderOptionsHash(options) {
+  return createHash("sha1").update(JSON.stringify({ quality: options.quality, background: options.background })).digest("hex");
+}
+
+function actualCost(json) {
+  if (typeof json?.costUsd === "number" && Number.isFinite(json.costUsd) && json.costUsd >= 0) return json.costUsd;
+  return calculateSunburstUsageCost(json?.usage);
+}
+
+export function recordMetadata(payload, json) {
+  const options = { quality: payload.quality, background: payload.background ?? "opaque" };
+  return {
+    model: json?.model ?? SUNBURST_MODEL,
+    quality: options.quality,
+    background: options.background,
+    outputFormat: json?.outputFormat ?? "png",
+    usage: json?.usage ?? null,
+    costUsd: actualCost(json),
+    renderOptionsHash: renderOptionsHash(options),
+  };
+}
+
+export function renderRecordIsStale(board, record, kind, instruction = "") {
+  if (!record) return true;
+  if (record.selectionHash !== selectionHash(board, instruction)) return true;
+  // Historical records predate renderOptionsHash. Keep them unchanged and
+  // compatible while marking them stale as soon as a board explicitly gains
+  // saved options.
+  if (record.renderOptionsHash || board?.renderOptions) {
+    const current = resolveRenderOptions(board, kind);
+    if (record.renderOptionsHash !== renderOptionsHash(current)) return true;
+  }
+  return false;
+}
+
+// Direct CLI finalize and batch-finalize share the same review gate. When a
+// plan has saved render options (or the operator supplies an explicit CLI
+// override), compare the candidate's effective draft settings before either
+// path consumes its source. Plans and candidates predating render metadata
+// remain compatible when no option selection is in force.
+export function candidateIsStaleForFinalize(board, candidate, overrides = {}) {
+  if (!candidate) return true;
+  const hasExplicitOptionSelection = overrides.quality !== undefined || overrides.background !== undefined;
+  if (!board?.renderOptions && !hasExplicitOptionSelection) return false;
+  const draftRenderOptions = resolveRenderOptions(board, "draft", overrides);
+  const draftCandidate = {
+    ...candidate,
+    quality: candidate.draftQuality ?? (candidate.confirmedAt ? undefined : candidate.quality),
+    background: candidate.draftBackground ?? (candidate.confirmedAt ? undefined : candidate.background),
+  };
+  return isStaleCandidate(board, draftCandidate, draftRenderOptions);
 }
 
 // Hash of everything the model actually sees for this board: which images
@@ -63,22 +162,22 @@ function finish(payload, files) {
   return { payload, files };
 }
 
-export function buildDraftPayload(board, variant, { apiKey, instruction, quality = "low", outputResolution = "standard" } = {}) {
+export function buildDraftPayload(board, variant, { apiKey, instruction, quality = "low", background = "opaque", outputResolution = "standard" } = {}) {
   const prepared = boardForRender(board, instruction);
-  return finish(boardPayload(prepared, variant, { quality, outputResolution, renderKind: "studio", apiKey }), boardReferenceFiles(prepared));
+  return finish(boardPayload(prepared, variant, { quality, background, outputResolution, renderKind: "studio", apiKey }), boardReferenceFiles(prepared));
 }
 
 // The source render must be the FIRST multipart image; product references
 // follow in item order (see app/api/generate/route.ts).
-export function buildConfirmPayload(board, variant, sourcePath, { apiKey, instruction, quality = "medium", outputResolution = "standard" } = {}) {
+export function buildConfirmPayload(board, variant, sourcePath, { apiKey, instruction, quality = "medium", background = "opaque", outputResolution = "standard" } = {}) {
   const prepared = boardForRender(board, instruction);
-  const payload = boardPayload(prepared, variant, { quality, outputResolution, renderKind: "studio", layoutReference: true, apiKey });
+  const payload = boardPayload(prepared, variant, { quality, background, outputResolution, renderKind: "studio", layoutReference: true, apiKey });
   return finish(payload, [{ path: sourcePath, name: "approved-draft.png" }, ...boardReferenceFiles(prepared)]);
 }
 
-export function buildFinalPayload(board, variant, sourcePath, { apiKey, instruction, quality = "high" } = {}) {
+export function buildFinalPayload(board, variant, sourcePath, { apiKey, instruction, quality = "high", background = "opaque" } = {}) {
   const prepared = boardForRender(board, instruction);
-  const payload = boardPayload(prepared, variant, { quality, outputResolution: "final", renderKind: "final", layoutReference: true, apiKey });
+  const payload = boardPayload(prepared, variant, { quality, background, outputResolution: "final", renderKind: "final", layoutReference: true, apiKey });
   return finish(payload, [{ path: sourcePath, name: "approved-draft.png" }, ...boardReferenceFiles(prepared)]);
 }
 
@@ -222,6 +321,15 @@ export function pickDraft(results, runDir, boardId, draftId, { appliedNotes } = 
     completedAt: draft.createdAt,
     durationMs: draft.durationMs,
     pickedDraftId: draftId,
+    model: draft.model ?? null,
+    quality: draft.quality ?? null,
+    background: draft.background ?? "opaque",
+    draftQuality: draft.quality ?? null,
+    draftBackground: draft.background ?? "opaque",
+    outputFormat: draft.outputFormat ?? draft.mimeType?.replace(/^image\//, "") ?? "png",
+    usage: draft.usage ?? null,
+    costUsd: draft.costUsd ?? null,
+    renderOptionsHash: draft.renderOptionsHash ?? null,
   };
   return draft;
 }
@@ -262,6 +370,10 @@ export async function runRenderJob(job, ctx) {
   const board = plan.boards.find((entry) => entry.id === job.boardId);
   if (!board) throw Object.assign(new Error(`Unknown board "${job.boardId}".`), { status: 404 });
   const instruction = job.instructionSnapshot ?? ensureRenders(results, board.id).instruction ?? "";
+  const renderOptions = job.renderOptionsSnapshot ?? resolveRenderOptions(board, job.kind, {
+    quality: job.qualityOverride,
+    background: job.backgroundOverride,
+  });
   const itemNotes = itemNotesOf(board);
   const post = (payload, files) => postGeneration(ctx.baseUrl, payload, files, { accessHeaders: ctx.accessHeaders, signal: ctx.signal });
   // Recorded on the finished render so it reflects the board state actually
@@ -278,14 +390,14 @@ export async function runRenderJob(job, ctx) {
     const variant = plan.variants.find((entry) => entry.key === job.variant);
     if (!variant) throw Object.assign(new Error(`Unknown variant "${job.variant}".`), { status: 400 });
     const count = Math.max(1, Math.min(10, Number(job.count) || 1));
-    const { payload, files } = buildDraftPayload(board, variant, { apiKey: ctx.apiKey, instruction });
+    const { payload, files } = buildDraftPayload(board, variant, { apiKey: ctx.apiKey, instruction, ...renderOptions });
     for (let index = 1; index <= count; index++) {
       ctx.signal?.throwIfAborted();
       const startedAt = Date.now();
       const json = await post(payload, files);
       const id = nextRenderId(ensureRenders(results, board.id), "d");
       const rel = await saveRenderImage(runDir, board.id, "draft", id, json.imageBase64);
-      recordDraft(results, board.id, { id, variant: variant.key, index, path: rel, jobId: json.jobId ?? null, durationMs: Date.now() - startedAt, ...common });
+      recordDraft(results, board.id, { id, variant: variant.key, index, path: rel, jobId: json.jobId ?? null, durationMs: Date.now() - startedAt, ...common, ...recordMetadata(payload, json) });
       await ctx.persist();
       ctx.onProgress(`${index}/${count}`);
     }
@@ -301,34 +413,41 @@ export async function runRenderJob(job, ctx) {
   }
   // job.force is the user explicitly acknowledging staleness (via the
   // panel's stronger confirm dialog) and choosing to finalize anyway.
-  if (job.kind === "final" && !job.force && source.record.selectionHash !== executedSelectionHash) {
-    throw Object.assign(new Error("The picked render is stale — the board's selection changed since it was rendered. Draft again first."), { status: 409 });
+  if (job.kind === "final" && !job.force && renderRecordIsStale(board, source.record, source.kind, instruction)) {
+    throw Object.assign(new Error("The picked render is stale — the board's selection or render options changed since it was rendered. Draft again first."), { status: 409 });
   }
   const variant = plan.variants.find((entry) => entry.key === source.record.variant);
   const sourcePath = path.join(runDir, source.record.path);
   const startedAt = Date.now();
 
   if (job.kind === "confirm") {
-    const { payload, files } = buildConfirmPayload(board, variant, sourcePath, { apiKey: ctx.apiKey, instruction });
+    const { payload, files } = buildConfirmPayload(board, variant, sourcePath, { apiKey: ctx.apiKey, instruction, ...renderOptions });
     const json = await post(payload, files);
     const id = nextRenderId(ensureRenders(results, board.id), "c");
     const rel = await saveRenderImage(runDir, board.id, "confirm", id, json.imageBase64);
-    recordConfirmed(results, board.id, { id, variant: variant.key, fromDraftId: source.record.id, path: rel, jobId: json.jobId ?? null, durationMs: Date.now() - startedAt, ...common });
+    recordConfirmed(results, board.id, { id, variant: variant.key, fromDraftId: source.record.id, path: rel, jobId: json.jobId ?? null, durationMs: Date.now() - startedAt, ...common, ...recordMetadata(payload, json) });
     const candidate = results.candidates?.[`${board.id}--${variant.key}`];
-    if (candidate) Object.assign(candidate, { confirmedAt: new Date().toISOString(), quality: "medium" });
+    const sourceDraftQuality = candidate?.draftQuality ?? candidate?.quality ?? source.record.quality;
+    const sourceDraftBackground = candidate?.draftBackground ?? candidate?.background ?? source.record.background ?? "opaque";
+    if (candidate) Object.assign(candidate, {
+      confirmedAt: new Date().toISOString(),
+      draftQuality: sourceDraftQuality,
+      draftBackground: sourceDraftBackground,
+      ...recordMetadata(payload, json),
+    });
     await ctx.persist();
     ctx.onProgress("1/1");
     return;
   }
 
   if (job.kind === "final") {
-    const { payload, files } = buildFinalPayload(board, variant, sourcePath, { apiKey: ctx.apiKey, instruction });
+    const { payload, files } = buildFinalPayload(board, variant, sourcePath, { apiKey: ctx.apiKey, instruction, ...renderOptions });
     const json = await post(payload, files);
     const id = nextRenderId(ensureRenders(results, board.id), "f");
     const rel = await saveRenderImage(runDir, board.id, "final", id, json.imageBase64);
-    recordFinal(results, board.id, { id, variant: variant.key, fromRenderId: source.record.id, path: rel, jobId: json.jobId ?? null, libraryJobId: json.jobId ?? null, libraryVisible: json.libraryVisible ?? false, durationMs: Date.now() - startedAt, ...common });
+    recordFinal(results, board.id, { id, variant: variant.key, fromRenderId: source.record.id, path: rel, jobId: json.jobId ?? null, libraryJobId: json.jobId ?? null, libraryVisible: json.libraryVisible ?? false, durationMs: Date.now() - startedAt, ...common, ...recordMetadata(payload, json) });
     results.finals ??= {};
-    results.finals[`${board.id}--${variant.key}`] = { jobId: json.jobId ?? null, savedPath: path.join(runDir, rel), libraryVisible: json.libraryVisible ?? false, notice: json.notice ?? null, appliedNoteSlotIds: Object.keys(itemNotes), completedAt: new Date().toISOString() };
+    results.finals[`${board.id}--${variant.key}`] = { jobId: json.jobId ?? null, savedPath: path.join(runDir, rel), libraryVisible: json.libraryVisible ?? false, notice: json.notice ?? null, appliedNoteSlotIds: Object.keys(itemNotes), completedAt: new Date().toISOString(), ...recordMetadata(payload, json) };
     await ctx.persist();
     ctx.onProgress("1/1");
     return;
