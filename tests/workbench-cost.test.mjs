@@ -351,16 +351,30 @@ test("Collage Board's draft override lowers its own cost estimate via the smalle
 // so this asserts the identical (kind, params) -> effective-params ->
 // estimate pipeline it delegates to, for the exact scenario N-7 named: an
 // Upscaler at its most expensive size.
-test("N-7: the per-node display's draft-effective composition (draftOverrideMap + estimateCostMap, exactly as RunFooter applies them) estimates cheaper in draft mode than the non-draft price for the same node", () => {
+test("N-7: the draft-effective composition RunFooter applies still reduces the work a node does", () => {
+  // Sunburst publishes no output-token formula, so estimateCostMap now returns
+  // null (unknown until the run reports usage) rather than a modelled dollar
+  // figure. The behaviour N-7 actually guards is unchanged and still worth
+  // pinning: draft mode must produce genuinely cheaper effective params, not
+  // silently reuse the non-draft ones.
   const kind = "upscaler";
   const params = { size: "3840x2160", quality: "high" };
-  const nonDraftEstimate = estimateCostMap[kind]({ params, inputImages: 1 });
   const draftParams = draftOverrideMap[kind](params);
-  const draftEstimate = estimateCostMap[kind]({ params: draftParams, inputImages: 1 });
+
+  const pixels = (size) => {
+    const [w, h] = size.split("x").map(Number);
+    return w * h;
+  };
   assert.ok(
-    nonDraftEstimate !== null && draftEstimate !== null && draftEstimate < nonDraftEstimate,
-    "RunFooter's per-node price must reflect draft mode's real (lower) cost, not the non-draft price",
+    pixels(draftParams.size) < pixels(params.size),
+    "draft mode must shrink the rendered size, which is what makes it cheaper",
   );
+  assert.equal(draftParams.quality, "low", "draft mode must drop to the cheapest quality tier");
+
+  // And the estimate stays honestly unavailable for both, rather than one of
+  // them quietly reporting a modelled number.
+  assert.equal(estimateCostMap[kind]({ params, inputImages: 1 }), null);
+  assert.equal(estimateCostMap[kind]({ params: draftParams, inputImages: 1 }), null);
 });
 
 // issue-7/AC10: the Upscaler's own estimateCost must resolve an out-of-menu
@@ -389,13 +403,19 @@ test("Upscaler's estimateCost resolves an out-of-menu size to the nearest valid 
 // unconditionally re-snapped the override's already-small computed size back
 // up to it -- draft mode cost ~2.4x more than intended. The draft estimate
 // must now beat even the smallest full menu option, not merely match it.
-test("N-10: the Upscaler's draft override estimates cheaper than the smallest full menu option (the draft-computed size must not be re-snapped back up to a full menu size)", () => {
+test("N-10: the Upscaler's draft override keeps its computed size instead of re-snapping up to the smallest full menu option", () => {
+  // Before the fix this collapsed back to 1536x1024 (the smallest FULL menu
+  // option), making draft mode cost ~2.4x more than intended. With estimates
+  // now unavailable under Sunburst, assert the size itself rather than a
+  // dollar comparison -- the size is what the regression was actually about.
   const draftEffective = draftOverrideMap.upscaler({ size: "3840x2160", quality: "high" });
-  const draftEstimate = estimateCostMap.upscaler({ params: draftEffective, inputImages: 1 });
-  const smallestMenuEstimate = estimateCostMap.upscaler({ params: { size: "1536x1024", quality: "low" }, inputImages: 1 });
+  const pixels = (size) => {
+    const [w, h] = size.split("x").map(Number);
+    return w * h;
+  };
   assert.ok(
-    draftEstimate < smallestMenuEstimate,
-    "the Upscaler's draft estimate must beat even the smallest full menu option, not collapse to it",
+    pixels(draftEffective.size) < pixels("1536x1024"),
+    "the Upscaler's draft size must beat even the smallest full menu option, not collapse to it",
   );
 });
 

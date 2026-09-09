@@ -48,17 +48,6 @@ export const SUNBURST_SUPPORTS_INPUT_FIDELITY = false as const;
 export const SUNBURST_QUALITIES = ["low", "medium", "high", "xhigh", "max", "auto"] as const;
 export type SunburstQuality = (typeof SUNBURST_QUALITIES)[number];
 
-// Workbench remains on the legacy gpt-image-2 model until Task 3. Keep its
-// pre-migration quality contract separate from the broader Sunburst contract.
-export const LEGACY_IMAGE_QUALITIES = ["low", "medium", "high", "auto"] as const;
-export type LegacyImageQuality = (typeof LEGACY_IMAGE_QUALITIES)[number];
-
-export function resolveLegacyImageQuality(value: unknown): LegacyImageQuality {
-  return typeof value === "string" && LEGACY_IMAGE_QUALITIES.includes(value as LegacyImageQuality)
-    ? value as LegacyImageQuality
-    : "medium";
-}
-
 // The Generator intentionally offers an explicit opaque or transparent choice.
 // OpenAI's automatic background mode is not exposed as a third UI state, which
 // keeps old drafts deterministic and makes the white default unambiguous.
