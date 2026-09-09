@@ -1,4 +1,5 @@
 import type { Edge } from "@xyflow/react";
+import { recordRunOutputTokens } from "./cost.ts";
 import { imageCacheKeysFromValue } from "./nodes/generation";
 import { executeMap, isExecutable } from "./nodes/index";
 import { alwaysExecuteMap, draftOverrideMap, estimateCostMap, outputValuesFor, paidMap } from "./nodes/manifests";
@@ -116,15 +117,25 @@ async function executeNode(context: GraphContext, nodeId: string, signature: str
   const execute = executeMap[node.data.kind];
   if (!execute) return;
   const override = draft ? draftOverrideMap[node.data.kind] : undefined;
+  const params = override ? override(node.data.params) : node.data.params;
   const ctx: ExecuteContext = {
     nodeId,
     node,
-    params: override ? override(node.data.params) : node.data.params,
+    params,
     signature,
     signal: context.signal,
     inputs: (portId) => inputValues(context, nodeId, portId),
     createRunId,
-    applyRun: (run) => useWorkbenchStore.getState().applyRun(nodeId, run),
+    // Single choke point for learning what a render actually cost in output
+    // tokens: every image node reports its usage through applyRun, so
+    // recording here covers all of them (and any node added later) instead of
+    // relying on each execute() remembering to call it. Non-image nodes carry
+    // no size and are ignored. Draft mode's overridden params are the ones
+    // used, which is correct -- they are what was rendered.
+    applyRun: (run) => {
+      recordRunOutputTokens(params, run.usage);
+      useWorkbenchStore.getState().applyRun(nodeId, run);
+    },
     setProgress: (message) => useWorkbenchStore.getState().setStatus(nodeId, "running", undefined, message),
     // Reference Finder only (AC5): parks the node awaiting a candidate pick
     // instead of applying a run, carrying the original run request's target

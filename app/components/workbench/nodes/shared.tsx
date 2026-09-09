@@ -18,7 +18,7 @@ import { useShallow } from "zustand/react/shallow";
 import { readApiResponse } from "@/app/lib/api-client";
 import { optimizeReferencesForTransport } from "@/app/lib/image-transport";
 import { ensureThumbnail, getBlob, getBlobUrl, putBlob } from "../blob-cache";
-import { confirmHighCost, formatUsd } from "../cost";
+import { confirmHighCost, formatOutputUsd } from "../cost";
 import { cancelExecution, estimateStaleCost, retryFrom, runNodes } from "../executor";
 import { MAX_IMAGE_BYTES } from "../export-import";
 import { activeRunOf, signatureFor, type SignatureContext } from "../signature";
@@ -296,10 +296,13 @@ export function RunFooter({ id, data, inputImages }: { id: string; data: Workben
         type="button"
         className={`nodrag ${styles.runButton}`}
         disabled={running || Boolean(disabledReason)}
-        title={disabledReason}
+        title={disabledReason
+          || (estimate !== null
+            ? `Output-token cost only, learned from a previous run at this size and quality. Input images are billed on top and are not known until the run finishes.`
+            : undefined)}
         onClick={runNow}
       >
-        Run{cacheHit ? "" : estimate !== null ? ` · ~${formatUsd(estimate)}` : paidMap[data.kind] ? " · usage-based" : ""}
+        Run{cacheHit ? "" : estimate !== null ? ` · output ~${formatOutputUsd(estimate)}` : paidMap[data.kind] ? " · usage-based" : ""}
       </button>
       {cacheHit && <span className={styles.cacheBadge} title="This node's output is already up to date — running again will not re-bill it.">Cached — no charge</span>}
       {disabledReason && <span className={styles.disabledReason}>{disabledReason}</span>}
