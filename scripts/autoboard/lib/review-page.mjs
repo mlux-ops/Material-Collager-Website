@@ -65,7 +65,11 @@ export function renderReviewPage() {
   @media (max-width: 1000px) { .board-grid { grid-template-columns: 1fr; } }
   .slot-card textarea.note { width: 100%; margin-top: 0.4rem; font-size: 0.72rem; padding: 0.3rem; border: 1px solid var(--line); border-radius: 4px; resize: vertical; min-height: 2.2em; font-family: inherit; }
   .render-panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 0.8rem; position: sticky; top: 7rem; }
-  .render-panel h3 { margin: 0 0 0.5rem; font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+  .render-panel h3 { margin: 0; font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+  .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem; }
+  .reset-drafts { font-size: 0.66rem; padding: 0.2rem 0.45rem; color: var(--danger); border-color: var(--danger); background: #fff; }
+  .reset-drafts:hover { background: #fbeee9; }
+  .reset-drafts[disabled] { opacity: 0.4; cursor: not-allowed; }
   .render-controls { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-bottom: 0.5rem; }
   .render-options { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; margin: 0.5rem 0; }
   .render-options label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.68rem; color: var(--muted); }
@@ -87,6 +91,9 @@ export function renderReviewPage() {
   .thumb .thumb-actions button, .thumb .thumb-actions a { font-size: 0.62rem; padding: 0.1rem 0.3rem; flex: 1; text-align: center; text-decoration: none; color: var(--ink); border: 1px solid var(--line); border-radius: 4px; background: #f5f5f2; }
   .thumb .thumb-actions button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
   .thumb .thumb-meta { display: block; padding: 0.2rem 0.3rem 0; font-size: 0.6rem; color: var(--muted); line-height: 1.2; }
+  .thumb .thumb-remove { position: absolute; top: 3px; right: 3px; width: 1.15rem; height: 1.15rem; line-height: 1rem; padding: 0; border: none; border-radius: 50%; background: rgba(0,0,0,0.6); color: #fff; font-size: 0.78rem; opacity: 0; transition: opacity 0.15s; z-index: 1; }
+  .thumb:hover .thumb-remove { opacity: 1; }
+  .thumb .thumb-remove:hover { background: var(--danger); }
   details.earlier summary { font-size: 0.72rem; color: var(--muted); cursor: pointer; margin-top: 0.4rem; }
   .render-panel textarea.instruction { width: 100%; margin-top: 0.6rem; font-size: 0.75rem; padding: 0.35rem; border: 1px solid var(--line); border-radius: 4px; resize: vertical; min-height: 2.4em; font-family: inherit; }
   .render-actions { display: flex; gap: 0.4rem; margin-top: 0.5rem; }
@@ -122,13 +129,25 @@ let plan = null;
 let activeBoardId = null;
 let activeSlotId = null;
 
-let renderStatus = { accessError: null, baseUrl: "", queue: [], renders: {}, costs: { draft: null, confirm: null, final: null }, selectionHashes: {} };
+let renderStatus = { accessError: null, baseUrl: "", queue: [], renders: {}, costs: { draft: null, confirm: null, final: null }, outputCosts: {}, selectionHashes: {} };
 let lastRenderJson = "";
 const panelPrefs = {}; // boardId -> { variant, count }
 let lightboxList = [];
 let lightboxIndex = 0;
 
 function money() { return "cost after completion"; }
+
+// Output-token cost only, and labelled as such. Image input dominates a
+// board's bill and cannot be known before the render, so this must never read
+// as the total. Null until this (size, quality) has actually been rendered
+// once -- the table learns from completed renders rather than modelling them.
+function outputMoney(boardId, kind, count) {
+  const usd = (renderStatus.outputCosts || {})[boardId]?.[kind];
+  if (typeof usd !== "number" || !isFinite(usd)) return money();
+  const total = usd * (count || 1);
+  const shown = total < 0.01 ? total.toFixed(4) : total.toFixed(2);
+  return "output ~$" + shown + " + input";
+}
 
 const QUALITY_OPTIONS = ["", "low", "medium", "high", "xhigh", "max", "auto"];
 const QUALITY_LABELS = { "": "Stage default", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", auto: "Auto" };
@@ -239,6 +258,7 @@ function renderThumb(board, entry, kind) {
   }
   const thumb = el("div", { className: "thumb" + (kind === "draft" && record.pickedDraftId === entry.id ? " picked" : ""), title: entry.instruction || "" }, children);
   thumb.appendChild(actions);
+  thumb.appendChild(el("button", { className: "thumb-remove", "data-action": "remove-render", "data-board": board.id, "data-kind": kind, "data-id": entry.id, title: "Remove this render", text: "\\u00d7" }));
   return thumb;
 }
 
@@ -278,13 +298,20 @@ function renderPanel(board) {
   const prefs = prefsFor(board.id);
   const job = activeJob(board.id);
   const panel = el("div", { className: "render-panel", "data-board": board.id });
-  panel.appendChild(el("h3", { text: "Render" }));
+  const removableCount = record.drafts.length + record.confirmed.length;
+  const resetButton = el("button", { className: "reset-drafts", "data-action": "reset-drafts", "data-board": board.id, text: "Reset drafts" });
+  resetButton.title = removableCount
+    ? "Remove all " + removableCount + " draft/confirmed render(s) for this board. Final renders are kept."
+    : "No drafts or confirmed renders to remove";
+  if (!removableCount) resetButton.disabled = true;
+  panel.appendChild(el("div", { className: "panel-header" }, [el("h3", { text: "Render" }), resetButton]));
 
   const toggle = el("span", { className: "variant-toggle" }, ["A", "B", "C"].map((key) =>
     el("button", { className: prefs.variant === key ? "active" : "", "data-action": "variant", "data-board": board.id, "data-variant": key, title: VARIANT_LABELS[key], text: key })));
   const count = el("input", { type: "number", min: "1", max: "10", value: String(prefs.count), "data-action": "count", "data-board": board.id, title: "How many drafts of this variant" });
   // Renders as a button element with the attribute data-action="draft", picked up by the click-delegation handler below.
-  const draftButton = el("button", { "data-action": "draft", "data-board": board.id, text: "Draft \\u00d7" + prefs.count + " \\u00b7 " + money() });
+  const draftButton = el("button", { "data-action": "draft", "data-board": board.id, text: "Draft \\u00d7" + prefs.count + " \\u00b7 " + outputMoney(board.id, "draft", prefs.count) });
+  draftButton.title = "Output-token cost only, learned from completed renders at this size and quality. Reference-image input is extra and is not known until the render finishes.";
   const controls = el("div", { className: "render-controls" }, [toggle, count, draftButton]);
   if (job) controls.appendChild(el("button", { "data-action": "cancel", "data-board": board.id, "data-job": job.jobId, text: "\\u23f9 cancel" }));
   panel.appendChild(controls);
@@ -315,9 +342,9 @@ function renderPanel(board) {
   const picked = record.drafts.find((entry) => entry.id === record.pickedDraftId) || null;
   const approved = record.confirmed.find((entry) => entry.id === record.approvedConfirmedId) || null;
   const source = approved || picked;
-  const confirmButton = el("button", { "data-action": "confirm", "data-board": board.id, text: "Confirm \\u25b6 " + QUALITY_LABELS[effectiveQuality(board, "confirm")] + " \\u00b7 " + money() });
+  const confirmButton = el("button", { "data-action": "confirm", "data-board": board.id, text: "Confirm \\u25b6 " + QUALITY_LABELS[effectiveQuality(board, "confirm")] + " \\u00b7 " + outputMoney(board.id, "confirm", 1) });
   if (!picked) { confirmButton.disabled = true; confirmButton.title = "Pick a draft first"; }
-  const finalButton = el("button", { "data-action": "final", "data-board": board.id, text: "Final \\u25b6 " + QUALITY_LABELS[effectiveQuality(board, "final")] + " \\u2192 Library \\u00b7 " + money() });
+  const finalButton = el("button", { "data-action": "final", "data-board": board.id, text: "Final \\u25b6 " + QUALITY_LABELS[effectiveQuality(board, "final")] + " \\u2192 Library \\u00b7 " + outputMoney(board.id, "final", 1) });
   // Staleness does not disable Final — it only strengthens the confirm
   // dialog's wording (see the click handler below), which sends force:true.
   // Only a genuinely missing source (nothing picked/approved) hard-blocks it.
@@ -984,8 +1011,8 @@ document.addEventListener("click", async (event) => {
       const finalQuality = board ? QUALITY_LABELS[effectiveQuality(board, "final")] : "High";
       const background = board && optionValue(board, "background") === "transparent" ? "transparent background" : "solid white background";
       const message = stale
-        ? "This picked render is stale - the board's selection or render options changed since it was rendered, so the final will not reflect your latest settings. Render final at " + finalQuality.toLowerCase() + " with " + background + ", " + money("final", 1) + ", from " + source + "? It will appear in the site Library."
-        : "Render final at " + finalQuality.toLowerCase() + " with " + background + ", " + money("final", 1) + ", from " + source + "? It will appear in the site Library.";
+        ? "This picked render is stale - the board's selection or render options changed since it was rendered, so the final will not reflect your latest settings. Render final at " + finalQuality.toLowerCase() + " with " + background + ", " + outputMoney(boardId, "final", 1) + ", from " + source + "? It will appear in the site Library."
+        : "Render final at " + finalQuality.toLowerCase() + " with " + background + ", " + outputMoney(boardId, "final", 1) + ", from " + source + "? It will appear in the site Library.";
       if (!window.confirm(message)) return;
       await postJson("/api/render", { boardId: boardId, kind: "final", force: stale, ...selectedRenderOptions(boardId) });
       showStatus("Queued final render");
@@ -995,6 +1022,28 @@ document.addEventListener("click", async (event) => {
     else if (action === "pick-draft") { await postJson("/api/pick-draft", { boardId: boardId, draftId: node.getAttribute("data-id") }); await pollOnce(); }
     else if (action === "approve") { const id = node.getAttribute("data-id"); await postJson("/api/approve-confirmed", { boardId: boardId, confirmedId: id || null }); await pollOnce(); }
     else if (action === "lightbox") { openLightbox(boardId, node.getAttribute("data-kind"), node.getAttribute("data-id")); }
+    else if (action === "remove-render") {
+      const kind = node.getAttribute("data-kind");
+      const id = node.getAttribute("data-id");
+      const label = kind === "draft" ? "draft" : kind === "confirm" ? "confirmed render" : "final render";
+      const message = kind === "final"
+        ? "This final already appears in the site Library and will stay there either way. Remove " + id + " from this review board?"
+        : "Remove " + label + " " + id + "? This can't be undone.";
+      if (!window.confirm(message)) return;
+      await postJson("/api/render-remove", { boardId: boardId, kind: kind, id: id });
+      showStatus("Removed " + label + " " + id);
+      await pollOnce();
+    }
+    else if (action === "reset-drafts") {
+      const record = renderStatus.renders[boardId] || emptyRenders();
+      const total = record.drafts.length + record.confirmed.length;
+      if (!total) return;
+      const message = "Remove all " + record.drafts.length + " draft(s) and " + record.confirmed.length + " confirmed render(s) for this board? This can't be undone. Final renders are kept.";
+      if (!window.confirm(message)) return;
+      await postJson("/api/render-reset", { boardId: boardId });
+      showStatus("Reset drafts for " + boardId);
+      await pollOnce();
+    }
   } catch (error) {
     showStatus(error.message, true);
   }
