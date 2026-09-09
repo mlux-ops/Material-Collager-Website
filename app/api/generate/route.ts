@@ -155,12 +155,8 @@ export async function POST(request: Request) {
       ...(payload.outputCompression !== undefined && outputFormat !== "png"
         ? { output_compression: payload.outputCompression }
         : {}),
-      // Opt-in measurement path. Absent unless a caller explicitly asked, so
-      // the default request is unchanged from what shipped.
-      ...(payload.inputFidelity ? { input_fidelity: payload.inputFidelity } : {}),
     };
     diagnostics.transport = resolveTransport(imageRequest);
-    if (payload.inputFidelity) diagnostics.inputFidelity = payload.inputFidelity;
     if (diagnosticMode) {
       const counts = [requestedDiagnosticCount];
       const isolationResults: Array<{ referenceCount: number; outcome: "succeeded" | "failed"; requestId?: string; error?: string }> = [];

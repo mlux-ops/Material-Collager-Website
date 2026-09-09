@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveRenderOptions } from "../scripts/autoboard/lib/render.mjs";
 import {
   calculateSunburstUsageCost,
   isSunburstModel,
@@ -9,7 +8,7 @@ import {
   LEGACY_IMAGE_QUALITIES,
   resolveLegacyImageQuality,
   resolveWireModel,
-  SUNBURST_DEFAULT_INPUT_FIDELITY,
+  SUNBURST_SUPPORTS_INPUT_FIDELITY,
   SUNBURST_MODEL,
   SUNBURST_MODEL_SNAPSHOT,
   SUNBURST_QUALITIES,
@@ -41,11 +40,10 @@ test("isSunburstModel accepts the alias and its dated snapshots but not other mo
   assert.equal(isSunburstModel("gpt-image-2.5-flare"), false);
 });
 
-test("input_fidelity stays unsent until the live probe confirms Sunburst honours it", () => {
-  // The edits schema accepts the field, but the guide documents it only for
-  // earlier GPT Image models. Until scripts/probe-input-fidelity.mjs settles
-  // it, no paid render may carry an unverified parameter.
-  assert.equal(SUNBURST_DEFAULT_INPUT_FIDELITY, undefined);
+test("Sunburst is recorded as not supporting input_fidelity", () => {
+  // Verified live: HTTP 400 invalid_input_fidelity_model from
+  // gpt-image-2.5-sunburst-2026-09-08 on 2026-09-08.
+  assert.equal(SUNBURST_SUPPORTS_INPUT_FIDELITY, false);
 });
 
 test("legacy Workbench quality contract keeps xhigh and max on their prior medium fallback", () => {
@@ -104,17 +102,4 @@ test("calculateSunburstUsageCost stays unavailable when usage is incomplete", ()
     input_tokens: 10,
     input_tokens_details: { image_tokens: 5 },
   }, "batch"), null);
-});
-
-test("render options carry input fidelity only when a command explicitly asks", () => {
-  const board = { renderOptions: { quality: "low", background: "opaque" } };
-  // Absent by default: a normal draft's payload is unchanged by the flag existing.
-  assert.equal("inputFidelity" in resolveRenderOptions(board, "draft", {}), false);
-  // Explicit flag, in the shape parseArgs produces.
-  assert.equal(resolveRenderOptions(board, "draft", { "input-fidelity": "low" }).inputFidelity, "low");
-  assert.equal(resolveRenderOptions(board, "draft", { "input-fidelity": "high" }).inputFidelity, "high");
-  // Never saved on the board, so it cannot leak into later renders.
-  assert.equal("inputFidelity" in resolveRenderOptions({ renderOptions: { inputFidelity: "low" } }, "draft", {}), false);
-  // Junk is ignored rather than forwarded to a paid render.
-  assert.equal("inputFidelity" in resolveRenderOptions(board, "draft", { "input-fidelity": "ultra" }), false);
 });

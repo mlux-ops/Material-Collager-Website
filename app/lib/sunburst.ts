@@ -30,18 +30,20 @@ export function isSunburstModel(model: string): boolean {
 }
 
 /**
- * Fidelity to the input images on an edit request.
+ * Sunburst does not accept `input_fidelity`. Settled against the live API on
+ * 2026-09-08: `gpt-image-2.5-sunburst-2026-09-08` answers HTTP 400
+ * `invalid_input_fidelity_model` -- "The model ... does not support the
+ * 'input_fidelity' parameter." (request req_09bf853876cf4fbd82bf32d27daf0cba).
  *
- * `/v1/images/edits` accepts `input_fidelity: "high" | "low"`, but the image
- * generation guide documents the parameter only under the earlier GPT Image
- * models and states that `gpt-image-2` rejects it. Whether Sunburst honours it
- * is therefore unconfirmed by the published docs, so nothing sends it by
- * default. `scripts/probe-input-fidelity.mjs` settles it against the live API
- * for one low-quality image; flip SUNBURST_DEFAULT_INPUT_FIDELITY once it does.
+ * The `/v1/images/edits` schema lists the field without a model restriction,
+ * and the image generation guide documents it only under earlier GPT Image
+ * models, so the schema alone is misleading. gpt-image-2 rejects it too, which
+ * leaves no model this app uses that takes it. Reference fidelity is the
+ * model's own decision and is not available as a cost or quality lever.
+ *
+ * tests/image-efficiency.test.mjs pins that nothing ever puts it on the wire.
  */
-export const SUNBURST_INPUT_FIDELITIES = ["high", "low"] as const;
-export type SunburstInputFidelity = (typeof SUNBURST_INPUT_FIDELITIES)[number];
-export const SUNBURST_DEFAULT_INPUT_FIDELITY: SunburstInputFidelity | undefined = undefined;
+export const SUNBURST_SUPPORTS_INPUT_FIDELITY = false as const;
 
 export const SUNBURST_QUALITIES = ["low", "medium", "high", "xhigh", "max", "auto"] as const;
 export type SunburstQuality = (typeof SUNBURST_QUALITIES)[number];
