@@ -103,6 +103,7 @@ export function boardPayload(board, variant, options = {}) {
     layoutReference = false,
     layoutReferenceFileId,
     fileIdsBySlot,
+    inputFidelity,
     apiKey,
   } = options;
 
@@ -111,6 +112,9 @@ export function boardPayload(board, variant, options = {}) {
     orientation: "default",
     quality,
     background,
+    // Opt-in only; omitted entirely unless a caller asked for it, so a normal
+    // render's payload is byte-identical to what shipped before.
+    ...(inputFidelity ? { inputFidelity } : {}),
     outputResolution,
     composition: variant.composition,
     density: variant.density,

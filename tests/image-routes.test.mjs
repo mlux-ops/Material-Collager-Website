@@ -321,3 +321,25 @@ test("completed Economy usage is stored at the documented Batch half-price", asy
   assert.ok(costUpdate);
   assert.equal(costUpdate.args[2], 0.0255);
 });
+
+test("input fidelity reaches the upstream edit only when the payload asks for it", async (t) => {
+  let submitted;
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    submitted = init.body;
+    return Response.json({ data: [{ b64_json: "AA==" }], usage: { total_tokens: 1 } });
+  });
+  await POST(request({ inputFidelity: "low" }));
+  assert.equal(submitted.get("input_fidelity"), "low");
+
+  await POST(request());
+  assert.equal(submitted.has("input_fidelity"), false);
+});
+
+test("an unsupported input fidelity is rejected before anything is spent", async (t) => {
+  let called = false;
+  t.mock.method(globalThis, "fetch", async () => { called = true; return Response.json({}); });
+  const response = await POST(request({ inputFidelity: "ultra" }));
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /input fidelity/i);
+  assert.equal(called, false);
+});

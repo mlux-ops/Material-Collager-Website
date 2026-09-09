@@ -1,11 +1,13 @@
 import {
   SUNBURST_BACKGROUNDS,
+  SUNBURST_INPUT_FIDELITIES,
   SUNBURST_QUALITIES,
   type SunburstBackground,
+  type SunburstInputFidelity,
   type SunburstQuality,
 } from "./sunburst.ts";
 
-export { SUNBURST_BACKGROUNDS, SUNBURST_MODEL, SUNBURST_QUALITIES } from "./sunburst.ts";
+export { SUNBURST_BACKGROUNDS, SUNBURST_INPUT_FIDELITIES, SUNBURST_MODEL, SUNBURST_QUALITIES } from "./sunburst.ts";
 
 export const COLLAGE_TYPES = [
   "kitchen_material_palette",
@@ -82,6 +84,12 @@ export type CollageRequestInput = {
   // Solid white is the default for backwards compatibility. Transparent
   // output is only selected explicitly and is validated against its format.
   background?: Background;
+  // Opt-in only, and absent from every default path. The edits endpoint
+  // accepts input_fidelity, but the guide documents it only for earlier GPT
+  // Image models, so whether Sunburst honours it is unverified. Setting this
+  // deliberately puts the parameter on one render to measure the answer; an
+  // unset value keeps the request byte-identical to what shipped before.
+  inputFidelity?: SunburstInputFidelity;
   items: CollageItemInput[];
 };
 
@@ -196,6 +204,9 @@ export function validateCollageRequest(request: CollageRequestInput) {
   }
   if (request.background !== undefined && !SUNBURST_BACKGROUNDS.includes(request.background)) {
     throw new Error("Choose a supported background.");
+  }
+  if (request.inputFidelity !== undefined && !SUNBURST_INPUT_FIDELITIES.includes(request.inputFidelity)) {
+    throw new Error("Choose a supported input fidelity.");
   }
   if (resolvedBackground(request) === "transparent" && resolvedOutputFormat(request) === "jpeg") {
     throw new Error("Transparent output requires PNG or WebP; choose a compatible format before generating.");
