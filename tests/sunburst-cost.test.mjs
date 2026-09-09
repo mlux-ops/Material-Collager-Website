@@ -8,7 +8,7 @@ import {
   LEGACY_IMAGE_QUALITIES,
   resolveLegacyImageQuality,
   resolveWireModel,
-  SUNBURST_DEFAULT_INPUT_FIDELITY,
+  SUNBURST_SUPPORTS_INPUT_FIDELITY,
   SUNBURST_MODEL,
   SUNBURST_MODEL_SNAPSHOT,
   SUNBURST_QUALITIES,
@@ -40,11 +40,10 @@ test("isSunburstModel accepts the alias and its dated snapshots but not other mo
   assert.equal(isSunburstModel("gpt-image-2.5-flare"), false);
 });
 
-test("input_fidelity stays unsent until the live probe confirms Sunburst honours it", () => {
-  // The edits schema accepts the field, but the guide documents it only for
-  // earlier GPT Image models. Until scripts/probe-input-fidelity.mjs settles
-  // it, no paid render may carry an unverified parameter.
-  assert.equal(SUNBURST_DEFAULT_INPUT_FIDELITY, undefined);
+test("Sunburst is recorded as not supporting input_fidelity", () => {
+  // Verified live: HTTP 400 invalid_input_fidelity_model from
+  // gpt-image-2.5-sunburst-2026-09-08 on 2026-09-08.
+  assert.equal(SUNBURST_SUPPORTS_INPUT_FIDELITY, false);
 });
 
 test("legacy Workbench quality contract keeps xhigh and max on their prior medium fallback", () => {

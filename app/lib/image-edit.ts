@@ -6,12 +6,9 @@
 import { OpenAIRequestError, combineAbortSignals, readOpenAIResponse } from "./openai-server.ts";
 import {
   LEGACY_IMAGE_MODEL,
-  SUNBURST_DEFAULT_INPUT_FIDELITY,
   SUNBURST_MODEL,
-  isSunburstModel,
   resolveWireModel,
   type SunburstBackground,
-  type SunburstInputFidelity,
   type SunburstQuality,
 } from "./sunburst.ts";
 
@@ -56,11 +53,6 @@ export type ImageEditRequest = {
   // 0-100; OpenAI applies this only to jpeg/webp and ignores it for png, so
   // createImageEdit only sends it alongside those two formats.
   output_compression?: number;
-  // How strongly the model preserves detail from the supplied references.
-  // Sent only for Sunburst and only when set — gpt-image-2 rejects the field
-  // outright, and Sunburst's support for it is not yet confirmed by the docs.
-  // See SUNBURST_DEFAULT_INPUT_FIDELITY.
-  input_fidelity?: SunburstInputFidelity;
   // Number of requested candidates (1-10). Additional candidates consume
   // output tokens; use the returned usage rather than assuming an input discount.
   n?: number;
@@ -96,7 +88,6 @@ export type GenerationDiagnostics = {
   // stored Sunburst alias resolves to its pinned dated snapshot, so a stored
   // diagnostic records which snapshot actually produced the pixels.
   wireModel?: string;
-  inputFidelity?: SunburstInputFidelity;
   transport: ImageEditTransport;
   quality: ImageQuality;
   background?: ImageBackground;
@@ -138,7 +129,7 @@ export function resolveTransport(body: ImageEditRequest): ImageEditTransport {
   return "file_id";
 }
 
-function buildEditForm(body: ImageEditRequest, wireModel: string, inputFidelity: SunburstInputFidelity | undefined) {
+function buildEditForm(body: ImageEditRequest, wireModel: string) {
   const form = new FormData();
   form.append("model", wireModel);
   form.append("prompt", body.prompt);
@@ -150,7 +141,6 @@ function buildEditForm(body: ImageEditRequest, wireModel: string, inputFidelity:
     form.append("output_compression", String(body.output_compression));
   }
   if (body.n && body.n > 1) form.append("n", String(body.n));
-  if (inputFidelity) form.append("input_fidelity", inputFidelity);
   for (const reference of body.references) {
     if (!reference.blob) {
       // resolveTransport only selects multipart when at least one reference
@@ -175,11 +165,8 @@ export async function createImageEdit(
   }
   const startedAt = Date.now();
   const wireModel = resolveWireModel(body.model);
-  // GPT Image 2 processes every image input at high fidelity automatically and
-  // rejects input_fidelity, so the field is Sunburst-only and opt-in.
-  const inputFidelity = isSunburstModel(body.model)
-    ? body.input_fidelity ?? SUNBURST_DEFAULT_INPUT_FIDELITY
-    : undefined;
+  // No input_fidelity anywhere: every model this app uses rejects it. See
+  // SUNBURST_SUPPORTS_INPUT_FIDELITY.
   // Declared outside the try so the failure diagnostics below can report what
   // was actually attempted.
   const transport: ImageEditTransport = resolveTransport(body);
@@ -211,10 +198,9 @@ export async function createImageEdit(
             ? { output_compression: body.output_compression }
             : {}),
           ...(body.n && body.n > 1 ? { n: body.n } : {}),
-          ...(inputFidelity ? { input_fidelity: inputFidelity } : {}),
           ...(body.mask?.fileId ? { mask: { file_id: body.mask.fileId } } : {}),
         })
-        : buildEditForm(body, wireModel, inputFidelity),
+        : buildEditForm(body, wireModel),
       // E1 cancellation threading: combine the caller's AbortSignal (aborted
       // when the client fetch to /api/workbench/edit is cancelled) with the
       // per-attempt timeout, so BOTH a client cancel and the timeout abort
@@ -238,7 +224,6 @@ export async function createImageEdit(
     throw new DiagnosedGenerationError(error, {
       model: body.model,
       wireModel,
-      ...(inputFidelity ? { inputFidelity } : {}),
       // A file_id request carries no bytes, so the byte counters below are 0
       // by construction. `transport` is what tells the two cases apart.
       transport,

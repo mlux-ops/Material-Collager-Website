@@ -95,28 +95,23 @@ test("Retry-After is surfaced without an automatic repeat", async (t) => {
   assert.equal(calls, 1);
 });
 
-test("input_fidelity is sent only for Sunburst, and only when the caller asks for it", async (t) => {
+test("input_fidelity never reaches the wire, because no model this app uses accepts it", async (t) => {
+  // Settled live on 2026-09-08: gpt-image-2.5-sunburst-2026-09-08 answers
+  // HTTP 400 invalid_input_fidelity_model, and gpt-image-2 rejects the field
+  // too. The /v1/images/edits schema lists it without a model restriction, so
+  // this guard exists to stop the schema tempting it back in.
   const sent = [];
   t.mock.method(globalThis, "fetch", async (_url, init) => {
     sent.push(init.body);
     return Response.json({ data: [{ b64_json: "AA==" }], usage: {} });
   });
 
-  // Sunburst, explicitly requested: the field goes on the wire.
-  await createImageEdit("k", { ...body, model: "gpt-image-2.5-sunburst", input_fidelity: "high" }, []);
-  assert.equal(sent[0].get("input_fidelity"), "high");
-  // The stored alias still resolves to the pinned snapshot on the same request.
+  await createImageEdit("k", { ...body, model: "gpt-image-2.5-sunburst", input_fidelity: "low" }, []);
+  assert.equal(sent[0].has("input_fidelity"), false);
   assert.equal(sent[0].get("model"), "gpt-image-2.5-sunburst-2026-09-08");
 
-  // Sunburst, nothing requested: unset, because the docs do not yet confirm
-  // the model honours it and an unverified parameter must not reach a paid render.
-  await createImageEdit("k", { ...body, model: "gpt-image-2.5-sunburst" }, []);
+  await createImageEdit("k", { ...body, model: "gpt-image-2" }, []);
   assert.equal(sent[1].has("input_fidelity"), false);
-
-  // gpt-image-2 rejects the field outright, so it is stripped even if asked for.
-  await createImageEdit("k", { ...body, model: "gpt-image-2", input_fidelity: "high" }, []);
-  assert.equal(sent[2].has("input_fidelity"), false);
-  assert.equal(sent[2].get("model"), "gpt-image-2");
 });
 
 test("references already uploaded to OpenAI are named by id instead of re-sent as bytes", async (t) => {

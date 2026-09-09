@@ -89,5 +89,15 @@ secret set separately (`wrangler secret put`), and locally lives in git-ignored
   than one request.
 - The `AI` binding hits Cloudflare's network even in local dev: it spends real
   free-tier neurons and needs a logged-in `wrangler` session.
+- Sunburst rejects `input_fidelity`. The `/v1/images/edits` schema lists the
+  field with no model restriction, but `gpt-image-2.5-sunburst-2026-09-08`
+  answers HTTP 400 `invalid_input_fidelity_model`, and `gpt-image-2` rejects it
+  too. Verified live 2026-09-08; do not re-add it on the strength of the schema.
+- A render's cost is dominated by reference images, not by quality. Measured on
+  a 6-reference board at quality `low`: 8,349 image input tokens ($0.067) vs 158
+  image output tokens ($0.005) — 88% of the bill, and image input does not vary
+  with the quality tier. Roughly 1,391 image input tokens per reference. The
+  Images API also reports no `cached_tokens` at all, so prompt caching does not
+  apply to `/v1/images/edits`.
 - `package.json` scripts use Bash-style globs while `README.md` documents PowerShell
   continuations. Match the shell you are actually in — this repo mixes both.
