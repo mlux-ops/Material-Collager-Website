@@ -51,7 +51,6 @@ import {
   candidateIsStaleForFinalize,
   resolveRenderOptions,
   SUNBURST_BACKGROUND_OPTIONS,
-  SUNBURST_INPUT_FIDELITY_OPTIONS,
   SUNBURST_QUALITY_OPTIONS,
 } from "./lib/render.mjs";
 
@@ -134,9 +133,6 @@ function resolveRenderFlagOptions(values) {
   }
   if (values.background !== undefined && !SUNBURST_BACKGROUND_OPTIONS.includes(values.background)) {
     throw new Error(`--background must be one of: ${SUNBURST_BACKGROUND_OPTIONS.join("|")} (got "${values.background}").`);
-  }
-  if (values["input-fidelity"] !== undefined && !SUNBURST_INPUT_FIDELITY_OPTIONS.includes(values["input-fidelity"])) {
-    throw new Error(`--input-fidelity must be one of: ${SUNBURST_INPUT_FIDELITY_OPTIONS.join("|")} (got "${values["input-fidelity"]}").`);
   }
 }
 
@@ -1243,7 +1239,6 @@ const { values, positionals } = parseArgs({
     variants: { type: "string" },
     quality: { type: "string" },
     background: { type: "string" },
-    "input-fidelity": { type: "string" },
     resolution: { type: "string" },
     format: { type: "string" },
     compression: { type: "string" },

@@ -33,7 +33,6 @@ export function formatCost(amount) {
 
 export const SUNBURST_QUALITY_OPTIONS = ["low", "medium", "high", "xhigh", "max", "auto"];
 export const SUNBURST_BACKGROUND_OPTIONS = ["opaque", "transparent"];
-export const SUNBURST_INPUT_FIDELITY_OPTIONS = ["high", "low"];
 const DEFAULT_STAGE_QUALITY = { draft: "low", confirm: "medium", final: "high" };
 
 function validQuality(value) {
@@ -42,10 +41,6 @@ function validQuality(value) {
 
 function validBackground(value) {
   return typeof value === "string" && SUNBURST_BACKGROUND_OPTIONS.includes(value) ? value : undefined;
-}
-
-function validInputFidelity(value) {
-  return typeof value === "string" && SUNBURST_INPUT_FIDELITY_OPTIONS.includes(value) ? value : undefined;
 }
 
 // Saved options are intentionally sparse. A plan written before the options
@@ -71,15 +66,9 @@ export function resolveRenderOptions(board, kind, overrides = {}) {
   const quality = kind === "final" && ["low", "medium", "auto"].includes(requestedQuality)
     ? "high"
     : requestedQuality;
-  // Never saved on the board and never defaulted: input fidelity is a
-  // per-invocation measurement flag, so it only ever comes from an explicit
-  // --input-fidelity on this command. Omitting it leaves the payload exactly
-  // as it was before the flag existed.
-  const inputFidelity = validInputFidelity(overrides["input-fidelity"] ?? overrides.inputFidelity);
   return {
     quality,
     background: validBackground(overrides.background) ?? saved.background,
-    ...(inputFidelity ? { inputFidelity } : {}),
   };
 }
 
@@ -173,22 +162,22 @@ function finish(payload, files) {
   return { payload, files };
 }
 
-export function buildDraftPayload(board, variant, { apiKey, instruction, quality = "low", background = "opaque", outputResolution = "standard", inputFidelity } = {}) {
+export function buildDraftPayload(board, variant, { apiKey, instruction, quality = "low", background = "opaque", outputResolution = "standard" } = {}) {
   const prepared = boardForRender(board, instruction);
-  return finish(boardPayload(prepared, variant, { quality, background, outputResolution, renderKind: "studio", inputFidelity, apiKey }), boardReferenceFiles(prepared));
+  return finish(boardPayload(prepared, variant, { quality, background, outputResolution, renderKind: "studio", apiKey }), boardReferenceFiles(prepared));
 }
 
 // The source render must be the FIRST multipart image; product references
 // follow in item order (see app/api/generate/route.ts).
-export function buildConfirmPayload(board, variant, sourcePath, { apiKey, instruction, quality = "medium", background = "opaque", outputResolution = "standard", inputFidelity } = {}) {
+export function buildConfirmPayload(board, variant, sourcePath, { apiKey, instruction, quality = "medium", background = "opaque", outputResolution = "standard" } = {}) {
   const prepared = boardForRender(board, instruction);
-  const payload = boardPayload(prepared, variant, { quality, background, outputResolution, renderKind: "studio", layoutReference: true, inputFidelity, apiKey });
+  const payload = boardPayload(prepared, variant, { quality, background, outputResolution, renderKind: "studio", layoutReference: true, apiKey });
   return finish(payload, [{ path: sourcePath, name: "approved-draft.png" }, ...boardReferenceFiles(prepared)]);
 }
 
-export function buildFinalPayload(board, variant, sourcePath, { apiKey, instruction, quality = "high", background = "opaque", inputFidelity } = {}) {
+export function buildFinalPayload(board, variant, sourcePath, { apiKey, instruction, quality = "high", background = "opaque" } = {}) {
   const prepared = boardForRender(board, instruction);
-  const payload = boardPayload(prepared, variant, { quality, background, outputResolution: "final", renderKind: "final", layoutReference: true, inputFidelity, apiKey });
+  const payload = boardPayload(prepared, variant, { quality, background, outputResolution: "final", renderKind: "final", layoutReference: true, apiKey });
   return finish(payload, [{ path: sourcePath, name: "approved-draft.png" }, ...boardReferenceFiles(prepared)]);
 }
 
