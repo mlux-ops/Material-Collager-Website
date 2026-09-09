@@ -5,6 +5,14 @@
 // self-calibrate it from each run's actual
 // `usage.input_tokens_details.image_tokens` (S27/AC21).
 
+import {
+  estimateOutputUsd,
+  outputTokensFromUsage,
+  recordOutputTokens,
+  type OutputTokenTable,
+} from "../../lib/output-tokens.ts";
+import { SUNBURST_MODEL } from "../../lib/sunburst.ts";
+
 const QUALITY_FACTOR: Record<string, number> = { low: 16, medium: 48, high: 96 };
 const OUTPUT_USD_PER_TOKEN = 30 / 1_000_000;
 const ESTIMATED_INPUT_USD_PER_IMAGE = 0.02;
@@ -202,6 +210,103 @@ export function estimateRunUsd(options: { size: string; quality: string; candida
   return outputUsd + inputUsd;
 }
 
+
+// ---------------------------------------------------------------------------
+// Learned output-token cost (shares app/lib/output-tokens.ts with the review
+// board). Sunburst publishes no output-token formula and the measurements do
+// not fit one, but the counts are exactly deterministic per
+// (model, size, quality) -- so the Workbench records what each completed run
+// actually reported and reuses it for the next run with the same three. A
+// combination never run has no entry and stays unknown rather than borrowing
+// a neighbour's number.
+//
+// Persisted through the same injectable adapter as the calibration record
+// above, so this path is genuinely exercised under the type-stripping test
+// runner rather than silently no-oping outside a browser.
+// ---------------------------------------------------------------------------
+
+export const OUTPUT_TOKEN_STORAGE_KEY = "mc.workbench.outputTokens.v1";
+
+function loadOutputTokenTable(): OutputTokenTable {
+  try {
+    const raw = calibrationStorage.get(OUTPUT_TOKEN_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    // Sanitize on read: a corrupted entry must not reach a price label.
+    const table: OutputTokenTable = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === "number" && Number.isFinite(value) && value > 0) table[key] = value;
+    }
+    return table;
+  } catch {
+    return {};
+  }
+}
+
+function saveOutputTokenTable(table: OutputTokenTable): void {
+  try {
+    calibrationStorage.set(OUTPUT_TOKEN_STORAGE_KEY, JSON.stringify(table));
+  } catch {
+    // A full or unavailable store costs us a learned entry, never a run.
+  }
+}
+
+/**
+ * Learn one completed run's output-token count.
+ *
+ * Called for EVERY node from the executor's applyRun, so it must ignore
+ * anything that is not a sized image render -- text and vision nodes carry no
+ * size, and a response without image output tokens teaches nothing.
+ */
+export function recordRunOutputTokens(
+  params: { model?: unknown; size?: unknown; quality?: unknown },
+  usage: unknown,
+): void {
+  const table = loadOutputTokenTable();
+  const changed = recordOutputTokens(table, {
+    model: typeof params.model === "string" ? params.model : SUNBURST_MODEL,
+    size: typeof params.size === "string" ? params.size : undefined,
+    quality: typeof params.quality === "string" ? params.quality : undefined,
+    outputTokens: outputTokensFromUsage(usage),
+  });
+  if (changed) saveOutputTokenTable(table);
+}
+
+/**
+ * Output-token cost for a planned run, or null when this combination has never
+ * been run. Output only: image input dominates and is not knowable up front,
+ * so callers must label it rather than present it as the total.
+ */
+export function estimateOutputOnlyUsd(options: {
+  model?: string;
+  size?: string;
+  quality?: string;
+  candidates?: number;
+}): number | null {
+  return estimateOutputUsd(loadOutputTokenTable(), {
+    model: options.model || SUNBURST_MODEL,
+    size: options.size,
+    quality: options.quality,
+    count: Math.max(1, Math.round(options.candidates ?? 1)),
+  });
+}
+
+export function resetOutputTokenTableForTests(): void {
+  saveOutputTokenTable({});
+}
+
+/**
+ * Prices here are dominated by sub-cent output figures (a low draft is
+ * $0.0047), which formatUsd would flatten to "<$0.01" and make every tier look
+ * identical. Show enough precision to tell them apart.
+ */
+export function formatOutputUsd(value: number): string {
+  if (!Number.isFinite(value)) return "$0.00";
+  if (value < 0.01) return `$${value.toFixed(4)}`;
+  return `$${value.toFixed(2)}`;
+}
+
 export function formatUsd(value: number): string {
   // S-10 defense in depth: loadCalibration's sanitization is the root-cause
   // fix that keeps a corrupted bucket from ever reaching here, but a
@@ -222,5 +327,7 @@ export const HIGH_COST_CONFIRM_THRESHOLD_USD = 0.4;
 export function confirmHighCost(estimateUsd: number | null): boolean {
   if (estimateUsd === null || estimateUsd < HIGH_COST_CONFIRM_THRESHOLD_USD) return true;
   if (typeof window === "undefined" || typeof window.confirm !== "function") return true;
-  return window.confirm(`This run is estimated to cost ~${formatUsd(estimateUsd)}. Continue?`);
+  // The estimate is the output-token share only, so the prompt says so rather
+  // than presenting it as the whole bill the user is agreeing to.
+  return window.confirm(`This run's output tokens alone are estimated at ~${formatOutputUsd(estimateUsd)}, plus input images. Continue?`);
 }

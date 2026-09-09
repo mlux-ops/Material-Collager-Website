@@ -26,7 +26,7 @@ import {
   readAutoSaveFinalPreference,
   writeAutoSaveFinalPreference,
 } from "./auto-save-final";
-import { confirmHighCost, formatUsd } from "./cost";
+import { confirmHighCost, formatOutputUsd } from "./cost";
 import {
   buildExportGraph,
   estimateExportSize,
@@ -680,7 +680,7 @@ function CanvasInner({
                 confirmHighCost still gates an expensive run. */}
             {compact
               ? `Run${staleCount > 0 ? ` · ${staleCount}` : ""}`
-              : `Run workflow${staleCount > 0 ? ` · ${staleCount} to run${costUnknown ? " · usage-based cost" : totalUsd !== null ? ` · ~${formatUsd(totalUsd)}` : ""}` : nodes.length ? " · up to date" : ""}`}
+              : `Run workflow${staleCount > 0 ? ` · ${staleCount} to run${costUnknown ? " · usage-based cost" : totalUsd !== null ? ` · output ~${formatOutputUsd(totalUsd)} + input` : ""}` : nodes.length ? " · up to date" : ""}`}
           </button>
           {compact && selectedEdges.length > 0 && (
             <button

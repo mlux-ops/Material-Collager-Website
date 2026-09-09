@@ -5,6 +5,7 @@
 // here touches the DOM at module scope.
 
 import { smallestValidEditSize } from "../../../lib/image-edit.ts";
+import { estimateOutputOnlyUsd } from "../cost.ts";
 import {
   SUNBURST_BACKGROUNDS,
   SUNBURST_MODEL,
@@ -133,13 +134,23 @@ export function estimateGenerationCost({ params, inputImages }: CostEstimateInpu
   });
 }
 
-// Sunburst pricing is usage-based and its image/token allocation is not
-// knowable before the provider responds. Keep the legacy estimator above for
-// historical callers, but every Sunburst-backed Workbench manifest uses this
-// explicit unknown estimate so a partial subtotal is never shown as a
-// complete pre-render price.
-export function estimateSunburstCost(_input: CostEstimateInput): number | null {
-  return null;
+/**
+ * Output-token cost for a Sunburst-backed node, learned from what runs at this
+ * exact (model, size, quality) actually reported. Null until one has run.
+ *
+ * Output only, and the UI labels it as such: image input dominates a render's
+ * bill and depends on the input images' tile coverage, which is not knowable
+ * before the provider responds. A partial subtotal must never be presented as
+ * a complete pre-render price.
+ */
+export function estimateSunburstCost({ params }: CostEstimateInput): number | null {
+  return estimateOutputOnlyUsd({
+    model: typeof params.model === "string" ? params.model : undefined,
+    size: params.size,
+    quality: params.quality,
+    // Variations names its fan-out `n`; the generation nodes call it candidates.
+    candidates: (params.candidates as number | undefined) ?? (params.n as number | undefined) ?? 1,
+  });
 }
 
 // Draft mode's cheaper variant (AC22/issue-3): lowest quality tier AND the
