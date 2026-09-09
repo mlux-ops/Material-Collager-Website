@@ -13,7 +13,14 @@ import {
   type PreparedReference,
 } from "@/app/lib/image-edit";
 import { OpenAIRequestError, errorResponse, resolveOpenAIKey } from "@/app/lib/openai-server";
-import { resolveLegacyImageQuality } from "@/app/lib/sunburst";
+import {
+  SUNBURST_BACKGROUNDS,
+  SUNBURST_MODEL,
+  SUNBURST_QUALITIES,
+  isSunburstModel,
+  resolveWireModel,
+  type SunburstBackground,
+} from "@/app/lib/sunburst";
 
 export const runtime = "edge";
 
@@ -26,7 +33,19 @@ type WorkbenchEditPayload = {
   size?: string;
   quality?: ImageQuality;
   n?: number;
+  model?: string;
+  background?: SunburstBackground;
+  outputFormat?: OutputFormat;
+  outputCompression?: number;
   apiKey?: string;
+};
+
+type OutputFormat = "png" | "jpeg" | "webp";
+const OUTPUT_FORMATS: OutputFormat[] = ["png", "jpeg", "webp"];
+const OUTPUT_MIME_TYPES: Record<OutputFormat, string> = {
+  png: "image/png",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
 };
 
 export async function POST(request: Request) {
@@ -45,9 +64,34 @@ export async function POST(request: Request) {
     const size = payload.size || "1536x1024";
     const sizeError = validateEditSize(size);
     if (sizeError) throw new Error(sizeError);
-    // Workbench remains on gpt-image-2 until Task 3. Do not let the shared
-    // Sunburst quality list expand its legacy model's accepted contract.
-    const quality: ImageQuality = resolveLegacyImageQuality(payload.quality);
+    // The Workbench runs the same model as the rest of the app, so it gets the
+    // full Sunburst contract: every quality tier including xhigh and max, an
+    // explicit background, and a chosen output format.
+    if (payload.model !== undefined && !isSunburstModel(payload.model)) {
+      throw new Error(`This node's model "${payload.model}" is no longer supported; Sunburst is the only image model.`);
+    }
+    const model = SUNBURST_MODEL;
+    if (payload.quality !== undefined && !SUNBURST_QUALITIES.includes(payload.quality)) {
+      throw new Error("Choose a supported quality.");
+    }
+    const quality: ImageQuality = payload.quality ?? "medium";
+    if (payload.background !== undefined && !SUNBURST_BACKGROUNDS.includes(payload.background)) {
+      throw new Error("Choose a supported background.");
+    }
+    const background: SunburstBackground = payload.background ?? "opaque";
+    if (payload.outputFormat !== undefined && !OUTPUT_FORMATS.includes(payload.outputFormat)) {
+      throw new Error("Choose a supported output format.");
+    }
+    const outputFormat: OutputFormat = payload.outputFormat ?? "png";
+    // Checked here as well as in image-edit so an impossible pairing is
+    // rejected before any upload work, not after.
+    if (background === "transparent" && outputFormat === "jpeg") {
+      throw new Error("Transparent output requires PNG or WebP; choose a compatible format before generating.");
+    }
+    if (payload.outputCompression !== undefined
+      && (!Number.isInteger(payload.outputCompression) || payload.outputCompression < 0 || payload.outputCompression > 100)) {
+      throw new Error("Output compression must be a whole number between 0 and 100.");
+    }
     const n = Math.max(1, Math.min(10, Math.round(Number(payload.n) || 1)));
 
     const imageFiles = incoming.getAll("image[]").filter((value): value is File => value instanceof File);
@@ -73,9 +117,12 @@ export async function POST(request: Request) {
       filename: safeReferenceFilename(file.name),
     }));
     diagnostics = {
-      model: "gpt-image-2",
+      model,
+      wireModel: resolveWireModel(model),
       transport: "multipart",
       quality,
+      background,
+      outputFormat,
       referenceCount: references.length,
       totalReferenceBytes: references.reduce((sum, reference) => sum + reference.blob.size, 0),
       largestReferenceBytes: Math.max(...references.map((reference) => reference.blob.size), 0),
@@ -88,17 +135,31 @@ export async function POST(request: Request) {
     // into the upstream OpenAI call so cancel aborts the paid request too.
     const result = references.length
       ? await createImageEdit(apiKey, {
-          model: "gpt-image-2",
+          model,
           prompt,
           references,
           mask: mask instanceof File ? { blob: mask, filename: "mask.png" } : undefined,
           size,
           quality,
-          background: "opaque",
-          output_format: "png",
+          background,
+          output_format: outputFormat,
+          ...(payload.outputCompression !== undefined && outputFormat !== "png"
+            ? { output_compression: payload.outputCompression }
+            : {}),
           n,
         }, attempts, request.signal)
-      : await createImageGeneration(apiKey, { prompt, size, quality, n }, attempts, request.signal);
+      : await createImageGeneration(apiKey, {
+          model,
+          prompt,
+          size,
+          quality,
+          background,
+          output_format: outputFormat,
+          ...(payload.outputCompression !== undefined && outputFormat !== "png"
+            ? { output_compression: payload.outputCompression }
+            : {}),
+          n,
+        }, attempts, request.signal);
 
     const images = (result.data.data ?? []).map((entry) => entry.b64_json).filter((value): value is string => Boolean(value));
     if (!images.length) throw new Error("OpenAI did not return image data.");
@@ -106,7 +167,7 @@ export async function POST(request: Request) {
     return Response.json({
       ok: true,
       images,
-      mimeType: "image/png",
+      mimeType: OUTPUT_MIME_TYPES[outputFormat],
       size,
       usage: result.data.usage,
       retryable: false,

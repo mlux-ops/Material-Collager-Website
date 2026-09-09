@@ -248,17 +248,27 @@ export async function createImageEdit(
 // JSON body instead of multipart edits.
 export async function createImageGeneration(
   apiKey: string,
-  body: { prompt: string; size: string; quality: ImageQuality; n?: number; model?: ImageModel; background?: ImageBackground },
+  body: {
+    prompt: string;
+    size: string;
+    quality: ImageQuality;
+    n?: number;
+    model?: ImageModel;
+    background?: ImageBackground;
+    output_format?: "png" | "jpeg" | "webp";
+    output_compression?: number;
+  },
   diagnostics: AttemptDiagnostic[],
   callerSignal?: AbortSignal,
 ) {
   validateImagePrompt(body.prompt);
-  // Still the legacy model, deliberately: the Workbench text-to-image path
-  // omits `model`, and its pre-migration quality contract is pinned by
-  // tests/workbench-quality-contract.test.mjs until the Workbench migration
-  // (Task 3) lands. Flipping this default is that task's call, not this one's.
+  // Callers name their model; the legacy default only covers an omitted one.
   const model = body.model ?? LEGACY_IMAGE_MODEL;
   const background = body.background ?? "opaque";
+  const outputFormat = body.output_format ?? "png";
+  if (background === "transparent" && outputFormat === "jpeg") {
+    throw new Error("Transparent output requires PNG or WebP; choose a compatible format before generating.");
+  }
   const startedAt = Date.now();
   try {
     callerSignal?.throwIfAborted();
@@ -270,7 +280,10 @@ export async function createImageGeneration(
         prompt: body.prompt,
         size: body.size,
         quality: body.quality,
-        output_format: "png",
+        output_format: outputFormat,
+        ...(body.output_compression !== undefined && outputFormat !== "png"
+          ? { output_compression: body.output_compression }
+          : {}),
         background,
         ...(body.n && body.n > 1 ? { n: body.n } : {}),
       }),

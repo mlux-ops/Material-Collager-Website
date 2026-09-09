@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import * as sunburst from "../app/lib/sunburst.ts";
+
 import {
   calculateSunburstUsageCost,
   isSunburstModel,
   LEGACY_IMAGE_MODEL,
-  LEGACY_IMAGE_QUALITIES,
-  resolveLegacyImageQuality,
   resolveWireModel,
   SUNBURST_SUPPORTS_INPUT_FIDELITY,
   SUNBURST_MODEL,
@@ -46,11 +46,12 @@ test("Sunburst is recorded as not supporting input_fidelity", () => {
   assert.equal(SUNBURST_SUPPORTS_INPUT_FIDELITY, false);
 });
 
-test("legacy Workbench quality contract keeps xhigh and max on their prior medium fallback", () => {
-  assert.deepEqual(LEGACY_IMAGE_QUALITIES, ["low", "medium", "high", "auto"]);
-  assert.equal(resolveLegacyImageQuality("high"), "high");
-  assert.equal(resolveLegacyImageQuality("xhigh"), "medium");
-  assert.equal(resolveLegacyImageQuality("max"), "medium");
+test("every surface now shares one quality contract, with no legacy downgrade left", () => {
+  // The Workbench was the last caller clamping xhigh/max down to medium. It
+  // runs Sunburst now (tests/workbench-quality-contract.test.mjs), so the
+  // legacy quality subset is gone rather than merely unused.
+  assert.equal("LEGACY_IMAGE_QUALITIES" in sunburst, false);
+  assert.equal("resolveLegacyImageQuality" in sunburst, false);
 });
 
 test("calculateSunburstUsageCost prices complete text, image, and output usage", () => {
