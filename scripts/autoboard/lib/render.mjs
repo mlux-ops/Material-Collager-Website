@@ -4,20 +4,28 @@
 // /api/generate expects, post it, save the PNG, record the result.
 
 import { createHash } from "node:crypto";
+import sharp from "sharp";
 import { copyFileSync, mkdirSync } from "node:fs";
 import { unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { validateCollageRequest } from "../../../app/lib/collage.ts";
+import { resolvedSize, validateCollageRequest } from "../../../app/lib/collage.ts";
+import {
+  estimateOutputUsd,
+  outputTokensFromUsage,
+  recordOutputTokens,
+} from "../../../app/lib/output-tokens.ts";
 import { calculateSunburstUsageCost, SUNBURST_MODEL } from "../../../app/lib/sunburst.ts";
 import { AccessError, accessLoginHint, isAccessRejection } from "./access.mjs";
 import { isStaleCandidate } from "./review-core.mjs";
 import { prepareReferenceForUpload } from "./transport.mjs";
 import { boardPayload, boardReferenceFiles, modelNotes, orderedBoardItems } from "./variants.mjs";
 
-// Sunburst usage is returned by the Worker after a request completes. Do not
-// invent a pre-render estimate: the reference count, cache allocation, and
-// output tokens are not known until the response arrives.
+// Sunburst usage is returned by the Worker after a request completes. There is
+// still no pre-render estimate of the TOTAL: image input dominates the bill and
+// depends on the reference set's tile coverage, which is not known here. Output
+// tokens, though, are exactly deterministic per (model, size, quality) and are
+// learned from completed renders -- see app/lib/output-tokens.ts.
 export const COST_PER_IMAGE = Object.freeze({ draft: null, confirm: null, final: null });
 
 export function estimateCost(kind, count = 1) {
@@ -29,6 +37,83 @@ export function estimateCost(kind, count = 1) {
 export function formatCost(amount) {
   void amount;
   return "cost unavailable until completion";
+}
+
+// The size a given stage renders at, mirroring what buildDraftPayload,
+// buildConfirmPayload and buildFinalPayload produce, so a lookup keys on the
+// same string the render will actually report.
+export function stageSize(kind) {
+  return resolvedSize({
+    orientation: "default",
+    outputResolution: kind === "final" ? "final" : "standard",
+    renderKind: kind === "final" ? "final" : "studio",
+  });
+}
+
+/**
+ * One-time repair for renders written before `size` was recorded.
+ *
+ * The saved PNG is exactly the size that was requested -- OpenAI returns the
+ * requested dimensions -- so the missing key part is recoverable from the file
+ * without spending anything. Additive and idempotent: a record that already
+ * has a size, or whose file is gone, is left alone. Returns how many records
+ * were repaired so the caller can decide whether to persist.
+ */
+export async function backfillRenderSizes(results, runDir) {
+  let repaired = 0;
+  for (const renders of Object.values(results?.renders ?? {})) {
+    for (const list of ["drafts", "confirmed", "finals"]) {
+      for (const record of renders?.[list] ?? []) {
+        if (record?.size || !record?.path) continue;
+        try {
+          const { width, height } = await sharp(path.join(runDir, record.path)).metadata();
+          if (!width || !height) continue;
+          record.size = `${width}x${height}`;
+          repaired++;
+        } catch {
+          // Deleted or unreadable render: nothing to recover, and not an error.
+        }
+      }
+    }
+  }
+  return repaired;
+}
+
+/**
+ * Build the learned output-token table from everything this run has rendered.
+ *
+ * Purely passive: records written before size was captured simply contribute
+ * nothing, and each new render adds its combination.
+ */
+export function outputTokenTableFrom(results) {
+  const table = {};
+  for (const renders of Object.values(results?.renders ?? {})) {
+    for (const list of ["drafts", "confirmed", "finals"]) {
+      for (const record of renders?.[list] ?? []) {
+        recordOutputTokens(table, {
+          model: record?.model,
+          size: record?.size,
+          quality: record?.quality,
+          outputTokens: outputTokensFromUsage(record?.usage),
+        });
+      }
+    }
+  }
+  return table;
+}
+
+/**
+ * Output-token cost for a planned stage render, or null when that combination
+ * has never been rendered. Output only -- never present it as a total.
+ */
+export function estimateStageOutputUsd(results, board, kind, count = 1) {
+  const { quality } = resolveRenderOptions(board, kind);
+  return estimateOutputUsd(outputTokenTableFrom(results), {
+    model: SUNBURST_MODEL,
+    size: stageSize(kind),
+    quality,
+    count,
+  });
 }
 
 export const SUNBURST_QUALITY_OPTIONS = ["low", "medium", "high", "xhigh", "max", "auto"];
@@ -85,6 +170,9 @@ export function recordMetadata(payload, json) {
   const options = { quality: payload.quality, background: payload.background ?? "opaque" };
   return {
     model: json?.model ?? SUNBURST_MODEL,
+    // Recorded so the learned output-token table can key on it. Derived from
+    // the payload rather than the response, which does not report a size.
+    size: resolvedSize(payload),
     quality: options.quality,
     background: options.background,
     outputFormat: json?.outputFormat ?? "png",

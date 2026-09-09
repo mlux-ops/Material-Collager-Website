@@ -12,7 +12,7 @@ import { addSlot, applySelection, buildRoomIndex, CUSTOM_ID_PREFIX, libraryOptio
 import { makeDiskImageResolver } from "./match.mjs";
 import { readNoteOverrides } from "./notes.mjs";
 import { resolveAccessHeaders } from "./access.mjs";
-import { COST_PER_IMAGE, SUNBURST_BACKGROUND_OPTIONS, SUNBURST_QUALITY_OPTIONS, approveConfirmed, ensureRenders, pickDraft, removeRender, renderRecordIsStale, renderSource, resetNonFinalRenders, resolveRenderOptions, runRenderJob, savedRenderOptions, selectionHash } from "./render.mjs";
+import { backfillRenderSizes, COST_PER_IMAGE, estimateStageOutputUsd, SUNBURST_BACKGROUND_OPTIONS, SUNBURST_QUALITY_OPTIONS, approveConfirmed, ensureRenders, pickDraft, removeRender, renderRecordIsStale, renderSource, resetNonFinalRenders, resolveRenderOptions, runRenderJob, savedRenderOptions, selectionHash } from "./render.mjs";
 import { RenderQueue } from "./render-queue.mjs";
 import { indexTileCodes, resolveTileCode } from "./tiles.mjs";
 import { loadLibraryRows } from "./source.mjs";
@@ -67,6 +67,14 @@ export async function startReviewServer({
   const resultsPath = path.join(runDir, "results.json");
   const results = existsSync(resultsPath) ? JSON.parse(await readFile(resultsPath, "utf8")) : { candidates: {}, finals: {} };
   results.renders ??= {};
+  // Renders from before `size` was recorded still hold usable observations;
+  // recover the size from the saved image so the learned output-token table
+  // starts populated instead of empty.
+  const backfilled = await backfillRenderSizes(results, runDir);
+  if (backfilled) {
+    await writeFile(resultsPath, JSON.stringify(results, null, 2), "utf8");
+    console.log(`  recovered the render size for ${backfilled} earlier render(s) so their output-token cost is known`);
+  }
   async function persistResults() {
     await writeFile(resultsPath, JSON.stringify(results, null, 2), "utf8");
   }
@@ -180,6 +188,9 @@ export async function startReviewServer({
   function renderStatus() {
     const renders = {};
     const selectionHashes = {};
+    // Output-token cost per board and stage, learned from what this run has
+    // already rendered. Null wherever that (size, quality) has never run.
+    const outputCosts = {};
     for (const board of plan.boards) {
       const record = ensureRenders(results, board.id);
       const currentHash = selectionHash(board, record.instruction);
@@ -189,9 +200,14 @@ export async function startReviewServer({
         stale: entry.selectionHash !== currentHash || renderRecordIsStale(board, entry, kind, record.instruction),
         url: `/render-image?path=${encodeURIComponent(entry.path)}`,
       });
+      outputCosts[board.id] = {
+        draft: estimateStageOutputUsd(results, board, "draft"),
+        confirm: estimateStageOutputUsd(results, board, "confirm"),
+        final: estimateStageOutputUsd(results, board, "final"),
+      };
       renders[board.id] = { ...record, drafts: record.drafts.map((entry) => decorate(entry, "draft")), confirmed: record.confirmed.map((entry) => decorate(entry, "confirm")), finals: record.finals.map((entry) => decorate(entry, "final")) };
     }
-    return { accessError: access.error, baseUrl, queue: queue.snapshot(), renders, costs: COST_PER_IMAGE, selectionHashes };
+    return { accessError: access.error, baseUrl, queue: queue.snapshot(), renders, costs: COST_PER_IMAGE, outputCosts, selectionHashes };
   }
 
   function findBoard(boardId) {

@@ -129,13 +129,25 @@ let plan = null;
 let activeBoardId = null;
 let activeSlotId = null;
 
-let renderStatus = { accessError: null, baseUrl: "", queue: [], renders: {}, costs: { draft: null, confirm: null, final: null }, selectionHashes: {} };
+let renderStatus = { accessError: null, baseUrl: "", queue: [], renders: {}, costs: { draft: null, confirm: null, final: null }, outputCosts: {}, selectionHashes: {} };
 let lastRenderJson = "";
 const panelPrefs = {}; // boardId -> { variant, count }
 let lightboxList = [];
 let lightboxIndex = 0;
 
 function money() { return "cost after completion"; }
+
+// Output-token cost only, and labelled as such. Image input dominates a
+// board's bill and cannot be known before the render, so this must never read
+// as the total. Null until this (size, quality) has actually been rendered
+// once -- the table learns from completed renders rather than modelling them.
+function outputMoney(boardId, kind, count) {
+  const usd = (renderStatus.outputCosts || {})[boardId]?.[kind];
+  if (typeof usd !== "number" || !isFinite(usd)) return money();
+  const total = usd * (count || 1);
+  const shown = total < 0.01 ? total.toFixed(4) : total.toFixed(2);
+  return "output ~$" + shown + " + input";
+}
 
 const QUALITY_OPTIONS = ["", "low", "medium", "high", "xhigh", "max", "auto"];
 const QUALITY_LABELS = { "": "Stage default", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", auto: "Auto" };
@@ -298,7 +310,8 @@ function renderPanel(board) {
     el("button", { className: prefs.variant === key ? "active" : "", "data-action": "variant", "data-board": board.id, "data-variant": key, title: VARIANT_LABELS[key], text: key })));
   const count = el("input", { type: "number", min: "1", max: "10", value: String(prefs.count), "data-action": "count", "data-board": board.id, title: "How many drafts of this variant" });
   // Renders as a button element with the attribute data-action="draft", picked up by the click-delegation handler below.
-  const draftButton = el("button", { "data-action": "draft", "data-board": board.id, text: "Draft \\u00d7" + prefs.count + " \\u00b7 " + money() });
+  const draftButton = el("button", { "data-action": "draft", "data-board": board.id, text: "Draft \\u00d7" + prefs.count + " \\u00b7 " + outputMoney(board.id, "draft", prefs.count) });
+  draftButton.title = "Output-token cost only, learned from completed renders at this size and quality. Reference-image input is extra and is not known until the render finishes.";
   const controls = el("div", { className: "render-controls" }, [toggle, count, draftButton]);
   if (job) controls.appendChild(el("button", { "data-action": "cancel", "data-board": board.id, "data-job": job.jobId, text: "\\u23f9 cancel" }));
   panel.appendChild(controls);
@@ -329,9 +342,9 @@ function renderPanel(board) {
   const picked = record.drafts.find((entry) => entry.id === record.pickedDraftId) || null;
   const approved = record.confirmed.find((entry) => entry.id === record.approvedConfirmedId) || null;
   const source = approved || picked;
-  const confirmButton = el("button", { "data-action": "confirm", "data-board": board.id, text: "Confirm \\u25b6 " + QUALITY_LABELS[effectiveQuality(board, "confirm")] + " \\u00b7 " + money() });
+  const confirmButton = el("button", { "data-action": "confirm", "data-board": board.id, text: "Confirm \\u25b6 " + QUALITY_LABELS[effectiveQuality(board, "confirm")] + " \\u00b7 " + outputMoney(board.id, "confirm", 1) });
   if (!picked) { confirmButton.disabled = true; confirmButton.title = "Pick a draft first"; }
-  const finalButton = el("button", { "data-action": "final", "data-board": board.id, text: "Final \\u25b6 " + QUALITY_LABELS[effectiveQuality(board, "final")] + " \\u2192 Library \\u00b7 " + money() });
+  const finalButton = el("button", { "data-action": "final", "data-board": board.id, text: "Final \\u25b6 " + QUALITY_LABELS[effectiveQuality(board, "final")] + " \\u2192 Library \\u00b7 " + outputMoney(board.id, "final", 1) });
   // Staleness does not disable Final — it only strengthens the confirm
   // dialog's wording (see the click handler below), which sends force:true.
   // Only a genuinely missing source (nothing picked/approved) hard-blocks it.
@@ -998,8 +1011,8 @@ document.addEventListener("click", async (event) => {
       const finalQuality = board ? QUALITY_LABELS[effectiveQuality(board, "final")] : "High";
       const background = board && optionValue(board, "background") === "transparent" ? "transparent background" : "solid white background";
       const message = stale
-        ? "This picked render is stale - the board's selection or render options changed since it was rendered, so the final will not reflect your latest settings. Render final at " + finalQuality.toLowerCase() + " with " + background + ", " + money("final", 1) + ", from " + source + "? It will appear in the site Library."
-        : "Render final at " + finalQuality.toLowerCase() + " with " + background + ", " + money("final", 1) + ", from " + source + "? It will appear in the site Library.";
+        ? "This picked render is stale - the board's selection or render options changed since it was rendered, so the final will not reflect your latest settings. Render final at " + finalQuality.toLowerCase() + " with " + background + ", " + outputMoney(boardId, "final", 1) + ", from " + source + "? It will appear in the site Library."
+        : "Render final at " + finalQuality.toLowerCase() + " with " + background + ", " + outputMoney(boardId, "final", 1) + ", from " + source + "? It will appear in the site Library.";
       if (!window.confirm(message)) return;
       await postJson("/api/render", { boardId: boardId, kind: "final", force: stale, ...selectedRenderOptions(boardId) });
       showStatus("Queued final render");
