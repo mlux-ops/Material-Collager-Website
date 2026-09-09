@@ -12,7 +12,7 @@ import { addSlot, applySelection, buildRoomIndex, CUSTOM_ID_PREFIX, libraryOptio
 import { makeDiskImageResolver } from "./match.mjs";
 import { readNoteOverrides } from "./notes.mjs";
 import { resolveAccessHeaders } from "./access.mjs";
-import { COST_PER_IMAGE, SUNBURST_BACKGROUND_OPTIONS, SUNBURST_QUALITY_OPTIONS, approveConfirmed, ensureRenders, pickDraft, renderRecordIsStale, renderSource, resolveRenderOptions, runRenderJob, savedRenderOptions, selectionHash } from "./render.mjs";
+import { COST_PER_IMAGE, SUNBURST_BACKGROUND_OPTIONS, SUNBURST_QUALITY_OPTIONS, approveConfirmed, ensureRenders, pickDraft, removeRender, renderRecordIsStale, renderSource, resetNonFinalRenders, resolveRenderOptions, runRenderJob, savedRenderOptions, selectionHash } from "./render.mjs";
 import { RenderQueue } from "./render-queue.mjs";
 import { indexTileCodes, resolveTileCode } from "./tiles.mjs";
 import { loadLibraryRows } from "./source.mjs";
@@ -41,6 +41,7 @@ const IMAGE_MIME = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image
 const RENDER_WORKFLOW_ENDPOINTS = new Set([
   "/api/instruction", "/api/item-note", "/api/pick-draft",
   "/api/approve-confirmed", "/api/render-options", "/api/render", "/api/render-cancel",
+  "/api/render-remove", "/api/render-reset",
 ]);
 
 function readBody(request) {
@@ -560,6 +561,24 @@ export async function startReviewServer({
         approveConfirmed(results, board.id, confirmedId ?? null);
         await persistResults();
         sendJson(response, 200, { approvedConfirmedId: ensureRenders(results, board.id).approvedConfirmedId });
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/render-remove") {
+        const { boardId, kind, id } = JSON.parse(await readBody(request));
+        const board = findBoard(boardId);
+        const removed = await removeRender(results, runDir, board.id, kind, id);
+        await persistResults();
+        sendJson(response, 200, { removed: removed.id });
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/render-reset") {
+        const { boardId } = JSON.parse(await readBody(request));
+        const board = findBoard(boardId);
+        const removed = await resetNonFinalRenders(results, runDir, board.id);
+        await persistResults();
+        sendJson(response, 200, { removed });
         return;
       }
 

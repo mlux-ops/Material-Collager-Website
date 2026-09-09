@@ -21,8 +21,11 @@ import {
   postGeneration,
   recordConfirmed,
   recordDraft,
+  recordFinal,
+  removeRender,
   renderOptionsHash,
   renderRecordIsStale,
+  resetNonFinalRenders,
   resolveRenderOptions,
   savedRenderOptions,
   renderSource,
@@ -298,6 +301,74 @@ test("pickDraft mirrors the draft into the legacy candidate and copies the PNG t
   assert.equal(candidate.savedPath, path.join(runDir, "boards", boardId, "A.png"));
   assert.ok(existsSync(candidate.savedPath));
   assert.throws(() => pickDraft(results, runDir, boardId, "d-9999"), (error) => error.status === 404);
+  rmSync(runDir, { recursive: true, force: true });
+});
+
+test("removeRender deletes the file and record, and unpicks/unapproves if it was the current pick or approval", async () => {
+  const { runDir, results } = scratchRun();
+  const boardId = "penthouse-bath-2-fixture";
+  const draftRel = await saveRenderImage(runDir, boardId, "draft", "d-0001", PNG.toString("base64"));
+  recordDraft(results, boardId, { variant: "A", index: 1, path: draftRel, jobId: "j1", durationMs: 1, selectionHash: "h", instruction: "", itemNotes: {} });
+  pickDraft(results, runDir, boardId, "d-0001");
+  const confirmRel = await saveRenderImage(runDir, boardId, "confirm", "c-0001", PNG.toString("base64"));
+  recordConfirmed(results, boardId, { variant: "A", fromDraftId: "d-0001", path: confirmRel, jobId: "j2", durationMs: 1, selectionHash: "h", instruction: "", itemNotes: {} });
+  approveConfirmed(results, boardId, "c-0001");
+
+  const draftPath = path.join(runDir, draftRel);
+  assert.ok(existsSync(draftPath));
+  const removedDraft = await removeRender(results, runDir, boardId, "draft", "d-0001");
+  assert.equal(removedDraft.id, "d-0001");
+  assert.equal(existsSync(draftPath), false);
+  assert.equal(results.renders[boardId].drafts.length, 0);
+  assert.equal(results.renders[boardId].pickedDraftId, null);
+  assert.equal(results.candidates[`${boardId}--A`], undefined);
+
+  const confirmPath = path.join(runDir, confirmRel);
+  await removeRender(results, runDir, boardId, "confirm", "c-0001");
+  assert.equal(existsSync(confirmPath), false);
+  assert.equal(results.renders[boardId].confirmed.length, 0);
+  assert.equal(results.renders[boardId].approvedConfirmedId, null);
+
+  await assert.rejects(removeRender(results, runDir, boardId, "draft", "d-9999"), (error) => error.status === 404);
+  await assert.rejects(removeRender(results, runDir, boardId, "bogus", "x"), (error) => error.status === 400);
+  rmSync(runDir, { recursive: true, force: true });
+});
+
+test("removeRender tolerates a render file that's already gone from disk", async () => {
+  const { runDir, results } = scratchRun();
+  const boardId = "penthouse-bath-2-fixture";
+  const rel = await saveRenderImage(runDir, boardId, "draft", "d-0001", PNG.toString("base64"));
+  recordDraft(results, boardId, { variant: "A", index: 1, path: rel, jobId: "j1", durationMs: 1, selectionHash: "h", instruction: "", itemNotes: {} });
+  rmSync(path.join(runDir, rel));
+  const removed = await removeRender(results, runDir, boardId, "draft", "d-0001");
+  assert.equal(removed.id, "d-0001");
+  rmSync(runDir, { recursive: true, force: true });
+});
+
+test("resetNonFinalRenders clears every draft and confirmed render but keeps finals, and reports counts removed", async () => {
+  const { runDir, results } = scratchRun();
+  const boardId = "penthouse-bath-2-fixture";
+  const draftRel = await saveRenderImage(runDir, boardId, "draft", "d-0001", PNG.toString("base64"));
+  recordDraft(results, boardId, { variant: "A", index: 1, path: draftRel, jobId: "j1", durationMs: 1, selectionHash: "h", instruction: "", itemNotes: {} });
+  pickDraft(results, runDir, boardId, "d-0001");
+  const confirmRel = await saveRenderImage(runDir, boardId, "confirm", "c-0001", PNG.toString("base64"));
+  recordConfirmed(results, boardId, { variant: "A", fromDraftId: "d-0001", path: confirmRel, jobId: "j2", durationMs: 1, selectionHash: "h", instruction: "", itemNotes: {} });
+  approveConfirmed(results, boardId, "c-0001");
+  const finalRel = await saveRenderImage(runDir, boardId, "final", "f-0001", PNG.toString("base64"));
+  recordFinal(results, boardId, { variant: "A", fromRenderId: "c-0001", path: finalRel, jobId: "j3", durationMs: 1, selectionHash: "h", instruction: "", itemNotes: {} });
+
+  const removed = await resetNonFinalRenders(results, runDir, boardId);
+  assert.deepEqual(removed, { drafts: 1, confirmed: 1 });
+  assert.equal(existsSync(path.join(runDir, draftRel)), false);
+  assert.equal(existsSync(path.join(runDir, confirmRel)), false);
+  assert.equal(existsSync(path.join(runDir, finalRel)), true);
+  const record = results.renders[boardId];
+  assert.deepEqual(record.drafts, []);
+  assert.deepEqual(record.confirmed, []);
+  assert.equal(record.pickedDraftId, null);
+  assert.equal(record.approvedConfirmedId, null);
+  assert.equal(record.finals.length, 1);
+  assert.equal(results.candidates[`${boardId}--A`], undefined);
   rmSync(runDir, { recursive: true, force: true });
 });
 

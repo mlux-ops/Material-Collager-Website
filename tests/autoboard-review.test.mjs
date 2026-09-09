@@ -642,6 +642,41 @@ test("pick-draft, approve-confirmed and render-image work; path escapes are refu
   } finally { await s.cleanup(); }
 });
 
+test("POST /api/render-remove deletes one render and unpicks it if it was the current pick; POST /api/render-reset clears drafts+confirmed but not finals", async () => {
+  const results = { candidates: {}, finals: {} };
+  const boardId = "penthouse-bath-2-fixture";
+  recordDraft(results, boardId, { variant: "A", index: 1, path: `boards/${boardId}/drafts/d-0001.png`, jobId: "j1", durationMs: 1, selectionHash: "h", instruction: "", itemNotes: {} });
+  recordConfirmed(results, boardId, { variant: "A", fromDraftId: "d-0001", path: `boards/${boardId}/confirmed/c-0001.png`, jobId: "j2", durationMs: 1, selectionHash: "h", instruction: "", itemNotes: {} });
+  const s = await startScratchServer({ results });
+  try {
+    mkdirSync(path.join(s.runDir, "boards", s.boardId, "drafts"), { recursive: true });
+    mkdirSync(path.join(s.runDir, "boards", s.boardId, "confirmed"), { recursive: true });
+    writeFileSync(path.join(s.runDir, "boards", s.boardId, "drafts", "d-0001.png"), PNG_BYTES);
+    writeFileSync(path.join(s.runDir, "boards", s.boardId, "confirmed", "c-0001.png"), PNG_BYTES);
+    let r = await s.post("/api/pick-draft", { boardId: s.boardId, draftId: "d-0001" });
+    assert.equal(r.status, 200);
+
+    r = await s.post("/api/render-remove", { boardId: s.boardId, kind: "draft", id: "d-0001" });
+    assert.equal(r.status, 200);
+    assert.equal(r.json.removed, "d-0001");
+    assert.equal(s.results().renders[s.boardId].drafts.length, 0);
+    assert.equal(s.results().renders[s.boardId].pickedDraftId, null);
+    assert.equal(s.results().candidates[`${s.boardId}--A`], undefined);
+    assert.equal((await s.get("/render-image?path=" + encodeURIComponent(`boards/${s.boardId}/drafts/d-0001.png`))).status, 404);
+
+    r = await s.post("/api/render-remove", { boardId: s.boardId, kind: "draft", id: "d-9999" });
+    assert.equal(r.status, 404);
+    r = await s.post("/api/render-remove", { boardId: s.boardId, kind: "bogus", id: "c-0001" });
+    assert.equal(r.status, 400);
+
+    r = await s.post("/api/render-reset", { boardId: s.boardId });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.json.removed, { drafts: 0, confirmed: 1 });
+    assert.equal(s.results().renders[s.boardId].confirmed.length, 0);
+    assert.equal((await s.get("/render-image?path=" + encodeURIComponent(`boards/${s.boardId}/confirmed/c-0001.png`))).status, 404);
+  } finally { await s.cleanup(); }
+});
+
 test("POST /api/render validates and enqueues; status exposes queue, stale flags, and unavailable costs", async () => {
   const calls = [];
   let release;

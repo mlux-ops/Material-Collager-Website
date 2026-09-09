@@ -5,7 +5,7 @@
 
 import { createHash } from "node:crypto";
 import { copyFileSync, mkdirSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { validateCollageRequest } from "../../../app/lib/collage.ts";
@@ -354,6 +354,67 @@ export function renderSource(results, boardId, kind = "final") {
   if (renders.approvedConfirmedId) return { kind: "confirm", record: findRender(renders, "confirmed", renders.approvedConfirmedId) };
   if (renders.pickedDraftId) return { kind: "draft", record: findRender(renders, "drafts", renders.pickedDraftId) };
   return null;
+}
+
+async function deleteRenderFile(runDir, relativePath) {
+  try {
+    await unlink(path.join(runDir, relativePath));
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+}
+
+// The picked draft mirrors itself into results.candidates (see pickDraft) so
+// the legacy CLI confirm/finalize commands keep working on the same file.
+// Deleting that draft must drop the mirror too, or the legacy path is left
+// pointing at a file that no longer exists.
+function dropCandidatesFor(results, boardId, draftId) {
+  if (!results.candidates) return;
+  for (const [key, candidate] of Object.entries(results.candidates)) {
+    if (key.startsWith(`${boardId}--`) && candidate.pickedDraftId === draftId) delete results.candidates[key];
+  }
+}
+
+// Removes one draft/confirmed/final render: deletes its saved image and its
+// results.json record. Unpicking/unapproving happens automatically if the
+// removed render was the board's current pick or approval.
+export async function removeRender(results, runDir, boardId, kind, id) {
+  const renders = ensureRenders(results, boardId);
+  const list = DIR_FOR_KIND[kind];
+  if (!list) throw Object.assign(new Error(`Unknown render kind "${kind}".`), { status: 400 });
+  const index = renders[list].findIndex((entry) => entry.id === id);
+  if (index === -1) throw Object.assign(new Error(`No ${list} render "${id}".`), { status: 404 });
+  const [record] = renders[list].splice(index, 1);
+  await deleteRenderFile(runDir, record.path);
+  if (kind === "draft" && renders.pickedDraftId === id) {
+    renders.pickedDraftId = null;
+    dropCandidatesFor(results, boardId, id);
+  }
+  if (kind === "confirm" && renders.approvedConfirmedId === id) {
+    renders.approvedConfirmedId = null;
+  }
+  return record;
+}
+
+// "Reset drafts" — clears every draft and confirmed render for a board
+// (never finals, which the app Library already shows) so the operator can
+// start a fresh round without re-planning the board.
+export async function resetNonFinalRenders(results, runDir, boardId) {
+  const renders = ensureRenders(results, boardId);
+  const removed = { drafts: renders.drafts.length, confirmed: renders.confirmed.length };
+  for (const record of [...renders.drafts, ...renders.confirmed]) {
+    await deleteRenderFile(runDir, record.path);
+  }
+  renders.drafts = [];
+  renders.confirmed = [];
+  renders.pickedDraftId = null;
+  renders.approvedConfirmedId = null;
+  if (results.candidates) {
+    for (const key of Object.keys(results.candidates)) {
+      if (key.startsWith(`${boardId}--`)) delete results.candidates[key];
+    }
+  }
+  return removed;
 }
 
 // ---------------------------------------------------------------------------
