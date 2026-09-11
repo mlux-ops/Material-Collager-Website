@@ -48,10 +48,27 @@ function useConnectedImageUrl(id: string, portId: string): string | undefined {
   }, [edges, nodes, id, portId]);
 }
 
+// Shapes arriving on the optional Region input (a Crop node's Region output).
+// When present they override the hand-drawn region, so the patch is grafted
+// into exactly the pixels the crop was taken from.
+function useConnectedRegionShapes(id: string): MaskShape[] | undefined {
+  const edges = useEdges();
+  const nodes = useNodes<WorkbenchNode>();
+  return useMemo(() => {
+    const edge = edges.find((candidate) => candidate.target === id && candidate.targetHandle === "region");
+    if (!edge) return undefined;
+    const source = nodes.find((candidate) => candidate.id === edge.source);
+    const run = source ? activeRunOf(source) : undefined;
+    const value = source && run ? outputValuesFor(source, run, edge.sourceHandle ?? "region").find((entry) => entry.kind === "mask") : undefined;
+    return value && value.kind === "mask" && value.shapes?.length ? value.shapes : undefined;
+  }, [edges, nodes, id]);
+}
+
 export const Component = memo(function PatchNode({ id, data }: WorkbenchNodeProps) {
   const updateParams = useWorkbenchStore((state) => state.updateParams);
   const inputImages = useConnectedImageCount(id, ["base", "patch"]);
   const baseUrl = useConnectedImageUrl(id, "base");
+  const wiredShapes = useConnectedRegionShapes(id);
   const [modalOpen, setModalOpen] = useState(false);
 
   const existingShapes = shapesFromParams(data.params);
@@ -80,10 +97,14 @@ export const Component = memo(function PatchNode({ id, data }: WorkbenchNodeProp
       <p className={styles.hint}>
         Grafts the Edited image into the Original inside the drawn region. Everything outside stays bit-identical.
       </p>
-      <button type="button" className="nodrag" onClick={() => setModalOpen(true)} disabled={!baseUrl}>
-        {existingShapes ? "Edit region…" : "Draw region…"}
-      </button>
-      {!baseUrl && <p className={styles.hint}>Connect and run the Original input to draw the region.</p>}
+      {wiredShapes ? (
+        <p className={styles.hint}>Region comes from the connected Crop node — the patch lands exactly where that crop was taken.</p>
+      ) : (
+        <button type="button" className="nodrag" onClick={() => setModalOpen(true)} disabled={!baseUrl}>
+          {existingShapes ? "Edit region…" : "Draw region…"}
+        </button>
+      )}
+      {!baseUrl && !wiredShapes && <p className={styles.hint}>Connect and run the Original input to draw the region.</p>}
       <label className={styles.field}>
         <span>Edited image is</span>
         <select
@@ -338,8 +359,10 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
   const patch = ctx.inputs("patch")[0];
   if (!patch || patch.kind !== "image") throw new Error("Connect the Edited image first.");
 
-  const shapes = shapesFromParams(ctx.params);
-  if (!shapes) throw new Error("Draw the region to patch first.");
+  const region = ctx.inputs("region")[0];
+  const wired = region && region.kind === "mask" && region.shapes?.length ? region.shapes : undefined;
+  const shapes = wired ?? shapesFromParams(ctx.params);
+  if (!shapes) throw new Error("Draw the region to patch first, or connect a Crop node's Region output.");
 
   ctx.setProgress("Patching region…");
   const { blob, fit, colorMatched } = await patchImages(base.url, patch.url, shapes, {

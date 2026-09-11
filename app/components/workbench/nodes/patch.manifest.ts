@@ -114,6 +114,9 @@ export const patchManifest: NodeManifest = {
     inputs: [
       { id: "base", kind: "image", label: "Original", required: true },
       { id: "patch", kind: "image", label: "Edited", required: true },
+      // Optional: a Crop node's Region output. When wired it overrides the
+      // hand-drawn region so the patch lands exactly where the crop was taken.
+      { id: "region", kind: "mask", label: "Region" },
     ],
     outputs: [{ id: "image", kind: "image", label: "Image" }],
   },

@@ -121,7 +121,10 @@ export type NodeOutputValue =
     }
   | { kind: "text"; text: string }
   | { kind: "references"; items: ReferenceItem[]; order: string[] } // order: item ids
-  | { kind: "mask"; cacheKey: string };
+  // A mask value's cacheKey is a rasterized alpha mask (persistence restores
+  // it like an image). `shapes` optionally carries the exact vector geometry
+  // (0-1000 permille) so consumers such as Patch stay pixel-exact.
+  | { kind: "mask"; cacheKey: string; shapes?: MaskShape[] };
 
 export type NodeRun = {
   runId: string;
@@ -220,6 +223,7 @@ export type WorkbenchParams = {
   cropY?: number;
   cropWidth?: number;
   cropHeight?: number;
+  cropPolygon?: string; // "x,y,x,y,..." fractions; empty = rectangle crop (crop-geometry.ts)
   // exportDownload
   exportFormat?: "png" | "jpeg";
 };
