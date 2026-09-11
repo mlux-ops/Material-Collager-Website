@@ -86,13 +86,16 @@ test("Masked Edit exposes FLUX Fill guidance and seed, defaulting guidance below
   assert.equal(normalizeFluxSeed(1e12), FLUX_FILL_SEED_MAX);
 });
 
-test("Patch declares two image inputs and stays a free, blob-owning-free client node", () => {
+test("Patch declares two image inputs plus an optional Region mask input and stays a free, blob-owning-free client node", () => {
   const manifest = MANIFESTS.patch;
 
   assert.deepEqual(
     manifest.spec.inputs.map((port) => [port.id, port.required ?? false]),
-    [["base", true], ["patch", true]],
+    [["base", true], ["patch", true], ["region", false]],
   );
+  assert.equal(manifest.spec.inputs.find((port) => port.id === "region").kind, "mask");
+  // Crop's Region output is what feeds that port.
+  assert.deepEqual(MANIFESTS.crop.spec.outputs.map((port) => [port.id, port.kind]), [["image", "image"], ["region", "mask"]]);
   assert.equal(manifest.spec.paid ?? false, false, "canvas compositing costs nothing");
   assert.equal(manifest.paid ?? false, false);
   // The region is re-rendered from maskShapes at execute time, so unlike

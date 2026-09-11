@@ -13,15 +13,23 @@ export const cropManifest: NodeManifest = {
     title: "Crop",
     description: "Crop an image to a region (zero API cost).",
     inputs: [{ id: "image", kind: "image", label: "Image", required: true }],
-    outputs: [{ id: "image", kind: "image", label: "Image" }],
+    outputs: [
+      { id: "image", kind: "image", label: "Image" },
+      // The crop shape itself, in Patch's mask geometry, so a Patch node can
+      // graft the edited crop back into exactly the pixels it came from.
+      { id: "region", kind: "mask", label: "Region" },
+    ],
   },
-  defaultParams: { cropX: 0, cropY: 0, cropWidth: 1, cropHeight: 1 },
+  defaultParams: { cropX: 0, cropY: 0, cropWidth: 1, cropHeight: 1, cropPolygon: "" },
   importSchema: {
     paramKeys: {
       cropX: { type: "number", optional: true, min: 0, max: 1 },
       cropY: { type: "number", optional: true, min: 0, max: 1 },
       cropWidth: { type: "number", optional: true, min: 0, max: 1 },
       cropHeight: { type: "number", optional: true, min: 0, max: 1 },
+      // Comma-separated x,y fraction pairs; "" or absent means rectangle crop.
+      // 200 points x 2 x "0.12345," is well under this cap.
+      cropPolygon: { type: "string", optional: true, maxLength: 4000 },
     },
     sourceBlobKeys: [],
   },
