@@ -1724,3 +1724,30 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+/* GenerationSettings: custom width x height entry. */
+.sizeCustomRow {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.sizeCustomRow .field {
+  flex: 1;
+  min-width: 0;
+}
+
+.sizeCustomTimes {
+  padding-bottom: 8px;
+  color: #777;
+}
+
+.sizeCustomError {
+  color: #b42318;
+}
+
+.sizeCustomError button {
+  margin-left: 4px;
+  font-size: 11px;
+  padding: 2px 6px;
+}
