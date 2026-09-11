@@ -213,6 +213,9 @@ export type WorkbenchParams = {
   patchFit?: "auto" | "aligned" | "region";
   patchFeather?: number;
   patchColorMatch?: boolean;
+  // Output only the region as a cut-out: pixels outside the drawn/wired
+  // shape become transparent instead of showing the untouched original.
+  patchClipToRegion?: boolean;
   // aiAssistant
   instruction?: string;
   model?: string;

@@ -102,6 +102,7 @@ export const PATCH_PARAM_RULES = {
   patchFit: { type: "enum", optional: true, values: PATCH_FIT_MODES },
   patchFeather: { type: "number", optional: true, min: PATCH_FEATHER_MIN, max: PATCH_FEATHER_MAX },
   patchColorMatch: { type: "boolean", optional: true },
+  patchClipToRegion: { type: "boolean", optional: true },
 } satisfies Record<string, ImportParamRule>;
 
 export const patchManifest: NodeManifest = {
@@ -124,6 +125,7 @@ export const patchManifest: NodeManifest = {
     patchFit: "auto",
     patchFeather: PATCH_FEATHER_DEFAULT,
     patchColorMatch: true,
+    patchClipToRegion: false,
   },
   importSchema: {
     paramKeys: { ...PATCH_PARAM_RULES },

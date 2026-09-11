@@ -139,6 +139,20 @@ export const Component = memo(function PatchNode({ id, data }: WorkbenchNodeProp
         />
         <span>Match colour to surroundings</span>
       </label>
+      <label className={styles.inlineToggle}>
+        <input
+          className="nodrag"
+          type="checkbox"
+          checked={data.params.patchClipToRegion ?? false}
+          onChange={(event) => updateParams(id, { patchClipToRegion: event.target.checked })}
+        />
+        <span>Output only the region (transparent outside)</span>
+      </label>
+      {(data.params.patchClipToRegion ?? false) && (
+        <p className={styles.hint}>
+          The result is a cut-out of the patched region — a polygon crop comes back as a clean polygon on transparency instead of the full frame. Feather softens the cut edge too.
+        </p>
+      )}
       <p className={styles.hint}>
         Colour matching measures the exposure and white-balance drift in a ring just outside the region — where both
         images show the same content — and corrects the patch by it. Turn it off when the edit is meant to change the
@@ -352,6 +366,35 @@ export async function patchImages(
   return { blob: await canvasToBlob(baseCanvas), fit, colorMatched };
 }
 
+// Apply the region shapes as an alpha mask to a finished composite: inside
+// stays, outside becomes transparent. The mask edge is softened by the same
+// feather radius the seam used so the cut-out does not show a hard staircase.
+async function clipToShapes(blob: Blob, shapes: MaskShape[], featherPercent: number): Promise<Blob> {
+  const objectUrl = URL.createObjectURL(blob);
+  let image: HTMLImageElement;
+  try {
+    image = await loadInputImage(objectUrl);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Could not prepare the canvas for clipping.");
+  context.drawImage(image, 0, 0, width, height);
+  const mask = shapesAlphaCanvas(shapes, width, height);
+  const radius = featherRadiusPx(featherPercent, width, height);
+  context.globalCompositeOperation = "destination-in";
+  if (radius > 0) context.filter = `blur(${radius / 2}px)`;
+  context.drawImage(mask, 0, 0);
+  context.filter = "none";
+  context.globalCompositeOperation = "source-over";
+  return canvasToBlob(canvas);
+}
+
 // DOM-touching execute wrapper. Canvas only — no network request, no cost.
 export async function execute(ctx: ExecuteContext): Promise<void> {
   const base = ctx.inputs("base")[0];
@@ -371,10 +414,16 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
     colorMatch: ctx.params.patchColorMatch ?? true,
   });
 
+  // Optional cut-out: keep only the region (feathered edge included) and make
+  // everything outside it transparent, so a polygon crop's render comes back
+  // as a clean polygon on transparency rather than the full frame.
+  const clip = ctx.params.patchClipToRegion === true;
+  const output = clip ? await clipToShapes(blob, shapes, clampPatchFeather(ctx.params.patchFeather)) : blob;
+
   const runId = ctx.createRunId();
   const cacheKey = `${ctx.nodeId}:${runId}:0`;
-  const url = putBlob(cacheKey, blob);
-  ctx.setProgress(colorMatched ? `Patched (${fit}, colour-matched)` : `Patched (${fit})`);
+  const url = putBlob(cacheKey, output);
+  ctx.setProgress(`${colorMatched ? `Patched (${fit}, colour-matched)` : `Patched (${fit})`}${clip ? ", clipped to region" : ""}`);
   ctx.applyRun({
     runId,
     signature: ctx.signature,
