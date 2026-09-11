@@ -12,6 +12,9 @@ export const imageGenerateManifest: NodeManifest = {
     title: "Image Generation",
     description: "Generate an image from a prompt, optionally guided by reference images.",
     inputs: [
+      // Optional primary image: sets the render size via "Match input image"
+      // (e.g. a Crop's exact output) and travels first, at full quality.
+      { id: "image", kind: "image", label: "Image" },
       { id: "prompt", kind: "text", label: "Prompt", required: true },
       { id: "references", kind: "image", label: "References", multi: true, acceptedKinds: ["image", "references"] },
     ],

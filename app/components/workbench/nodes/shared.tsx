@@ -734,11 +734,12 @@ export async function executeGeneration(ctx: ExecuteContext, options: { requireB
 
   const form = new FormData();
   const files: File[] = [];
-  if (options.requireBaseImage) {
-    const base = ctx.inputs("image");
-    if (!base.length) throw new Error("Connect an input image first.");
-    files.push(await blobFromImageValue(base[0]));
-  }
+  // The "image" port is the primary image: required for edit-shaped nodes,
+  // optional for Image Generation (where, when connected, it sets the size
+  // via "Match input image" and leads the reference set at full quality).
+  const base = ctx.inputs("image");
+  if (options.requireBaseImage && !base.length) throw new Error("Connect an input image first.");
+  if (base.length) files.push(await blobFromImageValue(base[0]));
   const references = ctx.inputs("references");
   if (references.length) {
     // Each plain image contributes one file; a references value expands to
