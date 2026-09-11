@@ -32,6 +32,18 @@ import {
   type RectHandle,
   type ViewTransform,
 } from "./crop-geometry";
+import {
+  ASPECT_PRESETS,
+  constrainedDraw,
+  constrainedResize,
+  cropFitness,
+  formatAspect,
+  parseAspect,
+  serializeAspect,
+  snapRect,
+  type AspectLock,
+  type RectConstraint,
+} from "./crop-constraints";
 
 export type CropEditorResult = { kind: "rect"; rect: PixelRect } | { kind: "polygon"; points: Point[] };
 
@@ -71,6 +83,12 @@ export function CropEditor({ imageUrl, initial, onCancel, onApply }: CropEditorP
   const [spaceHeld, setSpaceHeld] = useState(false);
   const [cursor, setCursor] = useState<Point | null>(null);
   const [fitted, setFitted] = useState(false);
+  // Rectangle constraints: an optional aspect-ratio lock and the exact-size
+  // grid (edges on multiples of 16 so the output IS the crop, no resampling).
+  const [aspect, setAspect] = useState<AspectLock>(null);
+  const [customAspect, setCustomAspect] = useState("");
+  const [gridLock, setGridLock] = useState(true);
+  const constraint: RectConstraint = { lock: aspect, grid: gridLock };
 
   const { closing, requestClose } = useModalDismiss(() => {
     const result = pendingApply.current;
@@ -279,14 +297,24 @@ export function CropEditor({ imageUrl, initial, onCancel, onApply }: CropEditorP
         setDrag({ kind: "pan", last: screen });
         break;
       case "draw":
-        setRect(normalizePixelRect(drag.start, image, imageSize.width, imageSize.height));
+        setRect(
+          constraint.lock || constraint.grid
+            ? constrainedDraw(drag.start, image, imageSize.width, imageSize.height, constraint)
+            : normalizePixelRect(drag.start, image, imageSize.width, imageSize.height),
+        );
         break;
       case "move":
         setRect((current) => (current ? movePixelRect(current, image.x - drag.last.x, image.y - drag.last.y, imageSize.width, imageSize.height) : current));
         setDrag({ kind: "move", last: image });
         break;
       case "resize":
-        setRect((current) => (current ? resizePixelRect(current, drag.handle, image, imageSize.width, imageSize.height) : current));
+        setRect((current) =>
+          current
+            ? constraint.lock || constraint.grid
+              ? constrainedResize(current, drag.handle, image, imageSize.width, imageSize.height, constraint)
+              : resizePixelRect(current, drag.handle, image, imageSize.width, imageSize.height)
+            : current,
+        );
         break;
       case "vertex":
         setPolygon((points) => points.map((p, index) => (index === drag.index ? clampToImage(image) : p)));
@@ -337,8 +365,29 @@ export function CropEditor({ imageUrl, initial, onCancel, onApply }: CropEditorP
     }
     if (!source) return null;
     const snapped = clampToValidEditSize(Math.max(1, Math.round(source.width)), Math.max(1, Math.round(source.height)));
-    return { source, snapped };
+    const fitness = cropFitness(source.width, source.height);
+    return { source, snapped, fitness };
   }, [imageSize, mode, rect, polygon]);
+
+  // Re-apply the constraint to the current rect when a lock changes.
+  const applyLock = (next: RectConstraint) => {
+    if (!imageSize || !rect || (!next.lock && !next.grid)) return;
+    setRect(snapRect(rect, imageSize.width, imageSize.height, next));
+  };
+  const chooseAspect = (value: string) => {
+    if (value === "__custom__") {
+      setCustomAspect(customAspect || "16:10");
+      const lock = parseAspect(customAspect || "16:10");
+      setAspect(lock);
+      applyLock({ lock, grid: gridLock });
+      return;
+    }
+    setCustomAspect("");
+    const lock = parseAspect(value);
+    setAspect(lock);
+    applyLock({ lock, grid: gridLock });
+  };
+  const aspectSelectValue = customAspect ? "__custom__" : serializeAspect(aspect);
 
   // Draw: image, dimmed outside, selection, handles/vertices.
   useEffect(() => {
@@ -473,6 +522,49 @@ export function CropEditor({ imageUrl, initial, onCancel, onApply }: CropEditorP
         <div className={styles.maskToolbar}>
           {modeButton("rect", "Rectangle")}
           {modeButton("polygon", "Polygon")}
+          {mode === "rect" && (
+            <>
+              <span className={styles.cropEditorDivider} />
+              <label className={styles.cropEditorLock}>
+                Ratio
+                <select className="nodrag" value={aspectSelectValue} onChange={(event) => chooseAspect(event.target.value)}>
+                  {ASPECT_PRESETS.map((preset) => (
+                    <option key={preset.label} value={preset.value}>{preset.label}</option>
+                  ))}
+                  <option value="__custom__">Custom…</option>
+                </select>
+              </label>
+              {customAspect !== "" && (
+                <input
+                  className={`nodrag ${styles.cropEditorAspectInput}`}
+                  type="text"
+                  value={customAspect}
+                  placeholder="W:H"
+                  aria-label="Custom aspect ratio"
+                  onChange={(event) => {
+                    setCustomAspect(event.target.value);
+                    const lock = parseAspect(event.target.value);
+                    if (lock) {
+                      setAspect(lock);
+                      applyLock({ lock, grid: gridLock });
+                    }
+                  }}
+                />
+              )}
+              <label className={styles.cropEditorLock}>
+                <input
+                  className="nodrag"
+                  type="checkbox"
+                  checked={gridLock}
+                  onChange={(event) => {
+                    setGridLock(event.target.checked);
+                    applyLock({ lock: aspect, grid: event.target.checked });
+                  }}
+                />
+                Exact size (16 px grid)
+              </label>
+            </>
+          )}
           <span className={styles.cropEditorDivider} />
           <button type="button" className="nodrag" onClick={() => zoomButton(1 / 1.25)} aria-label="Zoom out" disabled={view.scale <= MIN_ZOOM}>−</button>
           <span className={styles.cropEditorZoom}>{Math.round(view.scale * 100)}%</span>
@@ -522,7 +614,21 @@ export function CropEditor({ imageUrl, initial, onCancel, onApply }: CropEditorP
           </span>
           {readout && (
             <span className={styles.cropEditorReadout}>
-              {Math.round(readout.source.x)},{Math.round(readout.source.y)} · {Math.round(readout.source.width)}×{Math.round(readout.source.height)} px
+              <span
+                className={`${styles.cropFitBadge} ${readout.fitness.exact ? styles.cropFitOk : readout.fitness.aspectOk ? styles.cropFitWarn : styles.cropFitBad}`}
+                title={
+                  readout.fitness.exact
+                    ? "Output is this crop pixel-for-pixel."
+                    : !readout.fitness.aspectOk
+                      ? "Aspect is outside Sunburst's 1:3 – 3:1 range; the output will be reshaped to fit."
+                      : !readout.fitness.pixelsOk
+                        ? "Outside Sunburst's pixel limits (0.66–8.3 MP, longest edge 3840); the output will be resized."
+                        : "Edges are not multiples of 16; the output will be resampled to the nearest valid size."
+                }
+              >
+                {readout.fitness.exact ? "✓ exact" : !readout.fitness.aspectOk ? "✕ aspect" : !readout.fitness.pixelsOk ? "△ size" : "△ resample"}
+              </span>{" "}
+              {formatAspect(readout.source.width, readout.source.height)} · {Math.round(readout.source.x)},{Math.round(readout.source.y)} · {Math.round(readout.source.width)}×{Math.round(readout.source.height)} px
               {" → "}
               output {readout.snapped.width}×{readout.snapped.height}
             </span>

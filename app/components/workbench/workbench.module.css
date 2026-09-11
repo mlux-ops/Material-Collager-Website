@@ -1725,6 +1725,45 @@
   white-space: nowrap;
 }
 
+.cropEditorLock {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: #555;
+}
+
+.cropEditorLock select {
+  font-size: 12px;
+}
+
+.cropEditorAspectInput {
+  width: 64px;
+  font-size: 12px;
+  padding: 2px 4px;
+}
+
+.cropFitBadge {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.cropFitOk {
+  color: #15803d;
+}
+
+.cropFitWarn {
+  color: #b45309;
+}
+
+.cropFitBad {
+  color: #b42318;
+}
+
 /* GenerationSettings: custom width x height entry. */
 .sizeCustomRow {
   display: flex;
