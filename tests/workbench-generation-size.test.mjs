@@ -34,10 +34,10 @@ test("import rules accept any short size string plus a sizeMode enum", () => {
   assert.deepEqual(GENERATION_PARAM_RULES.sizeMode.values, ["preset", "input", "custom"]);
 });
 
-test("Image Generation exposes an optional Image input ahead of the required prompt", async () => {
+test("Image Generation exposes a size-only image input and a separate Image Reference input", async () => {
   const { imageGenerateManifest } = await import("../app/components/workbench/nodes/imageGenerate.manifest.ts");
   assert.deepEqual(
-    imageGenerateManifest.spec.inputs.map((port) => [port.id, port.kind, port.required ?? false]),
-    [["image", "image", false], ["prompt", "text", true], ["references", "image", false]],
+    imageGenerateManifest.spec.inputs.map((port) => [port.id, port.kind, port.label, port.required ?? false]),
+    [["size", "image", "Size", false], ["prompt", "text", "Prompt", true], ["references", "image", "Image Reference", false]],
   );
 });

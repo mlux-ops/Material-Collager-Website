@@ -734,12 +734,14 @@ export async function executeGeneration(ctx: ExecuteContext, options: { requireB
 
   const form = new FormData();
   const files: File[] = [];
-  // The "image" port is the primary image: required for edit-shaped nodes,
-  // optional for Image Generation (where, when connected, it sets the size
-  // via "Match input image" and leads the reference set at full quality).
-  const base = ctx.inputs("image");
-  if (options.requireBaseImage && !base.length) throw new Error("Connect an input image first.");
-  if (base.length) files.push(await blobFromImageValue(base[0]));
+  if (options.requireBaseImage) {
+    const base = ctx.inputs("image");
+    if (!base.length) throw new Error("Connect an input image first.");
+    files.push(await blobFromImageValue(base[0]));
+  }
+  // Image Generation's "size" port is deliberately NOT read here: it only
+  // drives params.size via "Match input image" (GenerationSettings) and is
+  // never sent to the model, so it costs no image-input tokens.
   const references = ctx.inputs("references");
   if (references.length) {
     // Each plain image contributes one file; a references value expands to

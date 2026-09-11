@@ -14,12 +14,12 @@ import {
 } from "./shared";
 
 export const Component = memo(function ImageGenerateNode({ id, data }: WorkbenchNodeProps) {
-  const inputImages = useConnectedImageCount(id, ["image", "references"]);
+  const inputImages = useConnectedImageCount(id, ["references"]);
   return (
     <NodeShell data={data} footer={<RunFooter id={id} data={data} inputImages={inputImages} />}>
-      <GenerationSettings id={id} data={data} inputPortId="image" />
+      <GenerationSettings id={id} data={data} inputPortId="size" />
       <p className={styles.hint}>
-        Optional Image input: choose “Match input image” to render at its exact size (a Crop’s output, for example); it is also sent first, at full quality, as the lead reference.
+        Size input: connect an image (a Crop’s output, for example) and choose “Match input image” to render at its exact pixel size. It is never sent to the model. Image Reference inputs guide the render and are billed as input images.
       </p>
       <OutputPreview id={id} data={data} />
     </NodeShell>
