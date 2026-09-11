@@ -156,6 +156,7 @@ export type WorkbenchParams = {
   extraDirection?: string;
   // imageGenerate / imageEdit
   size?: string;
+  sizeMode?: "preset" | "input" | "custom"; // see GENERATION_SIZE_MODES in nodes/generation.ts
   quality?: SunburstQuality;
   background?: SunburstBackground;
   outputFormat?: "png" | "jpeg" | "webp";

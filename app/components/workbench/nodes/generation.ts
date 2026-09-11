@@ -4,7 +4,7 @@
 // test runner, so runtime imports carry explicit .ts extensions and nothing
 // here touches the DOM at module scope.
 
-import { smallestValidEditSize } from "../../../lib/image-edit.ts";
+import { clampToValidEditSize, smallestValidEditSize, validateEditSize } from "../../../lib/image-edit.ts";
 import { estimateOutputOnlyUsd } from "../cost.ts";
 import {
   SUNBURST_BACKGROUNDS,
@@ -20,10 +20,46 @@ export const GENERATION_SIZES = ["1024x1024", "1536x1024", "1024x1536", "2048x20
 export const GENERATION_QUALITIES = SUNBURST_QUALITIES;
 export const GENERATION_BACKGROUNDS = SUNBURST_BACKGROUNDS;
 export const GENERATION_FORMATS = ["png", "webp", "jpeg"] as const;
+// How params.size is chosen. params.size itself always holds a concrete
+// "WxH" string so cost, draft override, signature and the route keep reading
+// one field:
+//   preset -- one of GENERATION_SIZES
+//   input  -- follow the connected input image's exact dimensions, snapped to
+//             a valid Sunburst size (GenerationSettings re-resolves whenever
+//             that input changes, so a Crop upstream drives the size)
+//   custom -- typed width/height, validated by validateEditSize
+export const GENERATION_SIZE_MODES = ["preset", "input", "custom"] as const;
+export type GenerationSizeMode = (typeof GENERATION_SIZE_MODES)[number];
+// Longest legal size string is "3840x2160"-shaped: 4+1+4 = 9 chars.
+export const SIZE_STRING_MAX_LENGTH = 9;
+
+export function parseSize(size: unknown): { width: number; height: number } | null {
+  if (typeof size !== "string") return null;
+  const match = /^(\d{1,4})x(\d{1,4})$/.exec(size.trim());
+  if (!match) return null;
+  return { width: Number(match[1]), height: Number(match[2]) };
+}
+
+// The size a render should use to match an input image of these dimensions:
+// the exact size when Sunburst accepts it, otherwise the nearest valid one.
+export function sizeForInput(width: number, height: number): string {
+  const snapped = clampToValidEditSize(Math.max(1, Math.round(width)), Math.max(1, Math.round(height)));
+  return `${snapped.width}x${snapped.height}`;
+}
+
+// Validation message for a typed custom size, or null when it is renderable.
+export function customSizeError(size: unknown): string | null {
+  const parsed = parseSize(size);
+  if (!parsed) return "Size must look like 1536x1024.";
+  return validateEditSize(`${parsed.width}x${parsed.height}`);
+}
 
 // Import-validation rules shared by both generation-shaped nodes.
 export const GENERATION_PARAM_RULES = {
-  size: { type: "enum", optional: true, values: GENERATION_SIZES },
+  // Any "WxH" string: presets, input-matched and custom sizes all land here.
+  // The edit route re-validates against Sunburst's limits before spending.
+  size: { type: "string", optional: true, maxLength: SIZE_STRING_MAX_LENGTH },
+  sizeMode: { type: "enum", optional: true, values: GENERATION_SIZE_MODES },
   quality: { type: "enum", optional: true, values: GENERATION_QUALITIES },
   candidates: { type: "number", optional: true, integer: true, min: 1, max: 4 },
   model: { type: "enum", optional: true, values: [SUNBURST_MODEL] },

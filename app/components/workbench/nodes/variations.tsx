@@ -119,7 +119,7 @@ export const Component = memo(function VariationsNode({ id, data }: WorkbenchNod
       visibleOutputIds={visibleOutputIds}
       footer={<RunFooter id={id} data={data} inputImages={inputImages} />}
     >
-      <GenerationSettings id={id} data={data} />
+      <GenerationSettings id={id} data={data} inputPortId="image" />
       <label className={styles.field}>
         <span>Candidates (n)</span>
         <input

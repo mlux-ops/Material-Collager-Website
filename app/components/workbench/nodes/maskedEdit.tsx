@@ -678,7 +678,7 @@ export const Component = memo(function MaskedEditNode({ id, data }: WorkbenchNod
       </button>
       {/* Size/quality are gpt-image-2 knobs; the inpaint engines derive their
           working size from the input image, so hide them there. */}
-      {engine === "gpt-image" && <GenerationSettings id={id} data={data} />}
+      {engine === "gpt-image" && <GenerationSettings id={id} data={data} inputPortId="image" />}
       <OutputPreview id={id} data={data} />
       {modalOpen && inputImageUrl && (
         <MaskModal

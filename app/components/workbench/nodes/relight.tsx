@@ -19,7 +19,7 @@ export const Component = memo(function RelightNode({ id, data }: WorkbenchNodePr
   const inputImages = useConnectedImageCount(id, ["image"]);
   return (
     <NodeShell data={data} footer={<RunFooter id={id} data={data} inputImages={inputImages} />}>
-      <GenerationSettings id={id} data={data} />
+      <GenerationSettings id={id} data={data} inputPortId="image" />
       <OutputPreview id={id} data={data} />
     </NodeShell>
   );

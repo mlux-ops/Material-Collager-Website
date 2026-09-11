@@ -38,12 +38,16 @@ import {
 } from "../types";
 import {
   buildGenerationPayload,
+  customSizeError,
   decodeBase64Image,
   GENERATION_QUALITIES,
   GENERATION_BACKGROUNDS,
   GENERATION_FORMATS,
   GENERATION_SIZES,
   imageCacheKeysFromValue,
+  parseSize,
+  sizeForInput,
+  type GenerationSizeMode,
 } from "./generation";
 import { draftOverrideMap, estimateCostMap, outputValuesFor, paidMap, specFor } from "./manifests";
 
@@ -543,19 +547,138 @@ export function useConnectedImageCount(id: string, portIds: string[]) {
   }, [edges, nodes, id, portIds]);
 }
 
-export function GenerationSettings({ id, data }: { id: string; data: WorkbenchNodeData }) {
+// The cacheKey of the single image on one input port, for UI that needs the
+// input's pixel dimensions (GenerationSettings' "Match input image" size).
+export function useConnectedImageCacheKey(id: string, portId: string | undefined): string | undefined {
+  const edges = useEdges();
+  const nodes = useNodes<WorkbenchNode>();
+  return useMemo(() => {
+    if (!portId) return undefined;
+    const edge = edges.find((candidate) => candidate.target === id && candidate.targetHandle === portId);
+    if (!edge) return undefined;
+    const source = nodes.find((candidate) => candidate.id === edge.source);
+    if (!source) return undefined;
+    const run = activeRunOf(source);
+    if (!run) return undefined;
+    const value = outputValuesFor(source, run, edge.sourceHandle ?? specFor(source.data.kind).outputs[0]?.id ?? "")[0];
+    return value ? imageCacheKeysFromValue(value)[0] : undefined;
+  }, [edges, nodes, id, portId]);
+}
+
+const SIZE_MODE_INPUT = "__input__";
+const SIZE_MODE_CUSTOM = "__custom__";
+
+export function GenerationSettings({ id, data, inputPortId }: { id: string; data: WorkbenchNodeData; inputPortId?: string }) {
   const updateParams = useWorkbenchStore((state) => state.updateParams);
   const background = data.params.background ?? "opaque";
   const requestedFormat = data.params.outputFormat ?? "png";
   const outputFormat = background === "transparent" && requestedFormat === "jpeg" ? "png" : requestedFormat;
+
+  const size = data.params.size || "1536x1024";
+  const sizeMode: GenerationSizeMode = data.params.sizeMode ?? ((GENERATION_SIZES as readonly string[]).includes(size) ? "preset" : "custom");
+  const inputCacheKey = useConnectedImageCacheKey(id, inputPortId);
+  // Dimensions are stored with the cacheKey they were measured from, so a
+  // changed/disconnected input simply stops matching -- no reset needed.
+  const [measured, setMeasured] = useState<{ key: string; width: number; height: number } | null>(null);
+  const inputSize = measured && measured.key === inputCacheKey ? measured : null;
+
+  // Read the connected input's dimensions whenever it changes; in "input"
+  // mode, write the matched size into params so every reader of params.size
+  // (payload, cost, draft override, signature) sees a concrete value.
+  useEffect(() => {
+    if (!inputCacheKey) return;
+    const blob = getBlob(inputCacheKey);
+    if (!blob || typeof createImageBitmap !== "function") return;
+    let cancelled = false;
+    createImageBitmap(blob)
+      .then((bitmap) => {
+        const dims = { key: inputCacheKey, width: bitmap.width, height: bitmap.height };
+        bitmap.close();
+        if (cancelled) return;
+        setMeasured(dims);
+        if (sizeMode === "input") {
+          const matched = sizeForInput(dims.width, dims.height);
+          if (matched !== size) updateParams(id, { size: matched });
+        }
+      })
+      .catch(() => {
+        // Unreadable blob: leave the previous measurement (if any) in place.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [inputCacheKey, sizeMode, size, id, updateParams]);
+
+  const selectValue = sizeMode === "input" ? SIZE_MODE_INPUT : sizeMode === "custom" ? SIZE_MODE_CUSTOM : size;
+  const parsed = parseSize(size) ?? { width: 1536, height: 1024 };
+  const customError = sizeMode === "custom" ? customSizeError(size) : null;
+  const snapped = customError ? sizeForInput(parsed.width, parsed.height) : null;
+  const inputExact = inputSize ? sizeForInput(inputSize.width, inputSize.height) === `${inputSize.width}x${inputSize.height}` : true;
+
+  const onSizeSelect = (value: string) => {
+    if (value === SIZE_MODE_INPUT) {
+      const matched = inputSize ? sizeForInput(inputSize.width, inputSize.height) : size;
+      updateParams(id, { sizeMode: "input", size: matched });
+    } else if (value === SIZE_MODE_CUSTOM) {
+      updateParams(id, { sizeMode: "custom", size });
+    } else {
+      updateParams(id, { sizeMode: "preset", size: value });
+    }
+  };
+
+  const onCustomDimension = (axis: "width" | "height", raw: string) => {
+    const next = Math.max(0, Math.min(9999, Math.floor(Number(raw) || 0)));
+    const width = axis === "width" ? next : parsed.width;
+    const height = axis === "height" ? next : parsed.height;
+    updateParams(id, { sizeMode: "custom", size: `${width}x${height}` });
+  };
+
   return (
     <>
       <label className={styles.field}>
         <span>Size</span>
-        <select className="nodrag" value={data.params.size} onChange={(event) => updateParams(id, { size: event.target.value })}>
+        <select className="nodrag" value={selectValue} onChange={(event) => onSizeSelect(event.target.value)}>
           {GENERATION_SIZES.map((option) => <option key={option} value={option}>{option}{option === "2560x1440" ? " (2K)" : ""}</option>)}
+          {inputPortId && (
+            <option value={SIZE_MODE_INPUT} disabled={!inputCacheKey}>
+              Match input image{inputSize ? ` (${sizeForInput(inputSize.width, inputSize.height)})` : inputCacheKey ? "" : " — connect an image"}
+            </option>
+          )}
+          <option value={SIZE_MODE_CUSTOM}>Custom…</option>
         </select>
       </label>
+      {sizeMode === "input" && inputSize && !inputExact && (
+        <p className={styles.hint}>
+          Input is {inputSize.width}×{inputSize.height}; Sunburst needs multiples of 16 within its limits, so the render uses {sizeForInput(inputSize.width, inputSize.height)}.
+        </p>
+      )}
+      {sizeMode === "custom" && (
+        <>
+          <div className={styles.sizeCustomRow}>
+            <label className={styles.field}>
+              <span>Width</span>
+              <input className="nodrag" type="number" min={16} max={3840} step={16} value={parsed.width || ""} onChange={(event) => onCustomDimension("width", event.target.value)} />
+            </label>
+            <span className={styles.sizeCustomTimes}>×</span>
+            <label className={styles.field}>
+              <span>Height</span>
+              <input className="nodrag" type="number" min={16} max={3840} step={16} value={parsed.height || ""} onChange={(event) => onCustomDimension("height", event.target.value)} />
+            </label>
+          </div>
+          {customError ? (
+            <p className={`${styles.hint} ${styles.sizeCustomError}`}>
+              {customError}{" "}
+              {snapped && (
+                <button type="button" className="nodrag" onClick={() => updateParams(id, { sizeMode: "custom", size: snapped })}>
+                  Use {snapped}
+                </button>
+              )}
+            </p>
+          ) : (
+            <p className={styles.hint}>Multiples of 16, aspect 1:3–3:1, longest edge ≤ 3840, 0.66–8.3 MP.</p>
+          )}
+        </>
+      )}
       <label className={styles.field}>
         <span>Quality</span>
         <select className="nodrag" value={data.params.quality ?? "medium"} onChange={(event) => updateParams(id, { quality: event.target.value as WorkbenchParams["quality"] })}>
@@ -616,6 +739,9 @@ export async function executeGeneration(ctx: ExecuteContext, options: { requireB
     if (!base.length) throw new Error("Connect an input image first.");
     files.push(await blobFromImageValue(base[0]));
   }
+  // Image Generation's "size" port is deliberately NOT read here: it only
+  // drives params.size via "Match input image" (GenerationSettings) and is
+  // never sent to the model, so it costs no image-input tokens.
   const references = ctx.inputs("references");
   if (references.length) {
     // Each plain image contributes one file; a references value expands to

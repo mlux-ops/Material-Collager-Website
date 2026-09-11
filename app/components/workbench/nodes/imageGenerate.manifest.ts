@@ -12,8 +12,12 @@ export const imageGenerateManifest: NodeManifest = {
     title: "Image Generation",
     description: "Generate an image from a prompt, optionally guided by reference images.",
     inputs: [
+      // Size-only input: "Match input image" reads this image's exact pixel
+      // dimensions (e.g. a Crop's output). It is never sent to the model.
+      { id: "size", kind: "image", label: "Size" },
       { id: "prompt", kind: "text", label: "Prompt", required: true },
-      { id: "references", kind: "image", label: "References", multi: true, acceptedKinds: ["image", "references"] },
+      // Images that guide the render; these ARE sent (and billed as input).
+      { id: "references", kind: "image", label: "Image Reference", multi: true, acceptedKinds: ["image", "references"] },
     ],
     outputs: [{ id: "image", kind: "image", label: "Image" }],
     paid: true,
