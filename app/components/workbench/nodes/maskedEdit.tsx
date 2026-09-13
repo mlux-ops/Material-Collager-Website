@@ -10,6 +10,17 @@ import { useWorkbenchStore } from "../store";
 import { useModalDismiss } from "../useModalDismiss";
 import styles from "../workbench.module.css";
 import type { ExecuteContext, MaskShape, NodeOutputValue, WorkbenchNode, WorkbenchParams } from "../types";
+import {
+  fitTransform,
+  imageToScreen,
+  MAX_ZOOM,
+  MIN_ZOOM,
+  panBy,
+  screenToImage,
+  zoomAround,
+  type Point,
+  type ViewTransform,
+} from "./crop-geometry";
 import { buildGenerationPayload, decodeBase64Image } from "./generation";
 import {
   buildMaskedReferencePrompt,
@@ -254,15 +265,27 @@ export function MaskModal({
 }) {
   const areaRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
   const [tool, setTool] = useState<MaskTool>("rect");
   const [brushSize, setBrushSize] = useState(30);
   const [shapes, setShapes] = useState<MaskShape[]>(() => initialShapes ?? []);
   const [draftRect, setDraftRect] = useState<{ x: number; y: number; width: number; height: number } | undefined>();
   const [brushPoints, setBrushPoints] = useState<number[] | undefined>();
   const [polygonPoints, setPolygonPoints] = useState<number[]>([]);
+  // Hover position in (unclamped) normalized units, for the polygon rubber
+  // band and the brush cursor ring.
   const [cursor, setCursor] = useState<{ x: number; y: number } | undefined>();
   const [surfaceSize, setSurfaceSize] = useState({ width: 0, height: 0 });
+  // Zoom/pan over the full-resolution source, same model as the crop editor:
+  // screen = image px * scale + offset. Shapes stay in normalized 0-1000
+  // units, so zooming never touches the stored geometry.
+  const [view, setView] = useState<ViewTransform>({ scale: 1, offsetX: 0, offsetY: 0 });
+  const [fitted, setFitted] = useState(false);
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const [panning, setPanning] = useState(false);
   const dragStart = useRef<{ x: number; y: number } | null>(null);
+  const panLast = useRef<Point | null>(null);
   // Both dismissal paths animate out: Apply stashes its shapes here so the
   // shared exit animation runs before onApply/onCancel fires.
   const pendingApply = useRef<MaskShape[] | null>(null);
@@ -272,26 +295,78 @@ export function MaskModal({
     else onCancel();
   });
 
-  // Keep the overlay canvas bitmap in sync with the displayed image size.
+  // Once both the bitmap and the surface sizes are known, fit the image to
+  // the surface exactly once. Called from the load/resize callbacks (event
+  // callbacks, not effect bodies) so no effect sets state.
+  const seededRef = useRef(false);
+  const latestSizes = useRef<{ image: { width: number; height: number } | null; surface: { width: number; height: number } }>({
+    image: null,
+    surface: { width: 0, height: 0 },
+  });
+  const trySeed = () => {
+    const { image, surface } = latestSizes.current;
+    if (seededRef.current || !image || !surface.width || !surface.height) return;
+    seededRef.current = true;
+    setView(fitTransform(image.width, image.height, surface.width, surface.height));
+    setFitted(true);
+  };
+
+  // Load the bitmap once so we know its native size and can draw it ourselves.
+  useEffect(() => {
+    let cancelled = false;
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = () => {
+      if (cancelled) return;
+      imageRef.current = image;
+      const size = { width: image.naturalWidth, height: image.naturalHeight };
+      latestSizes.current.image = size;
+      setImageSize(size);
+      trySeed();
+    };
+    image.src = imageUrl;
+    return () => {
+      cancelled = true;
+    };
+     
+  }, [imageUrl]);
+
+  // Keep the overlay canvas bitmap in sync with the surface size.
   useEffect(() => {
     const area = areaRef.current;
     if (!area) return;
     const observer = new ResizeObserver(() => {
       const rect = area.getBoundingClientRect();
-      setSurfaceSize({ width: Math.round(rect.width), height: Math.round(rect.height) });
+      const size = { width: Math.round(rect.width), height: Math.round(rect.height) };
+      latestSizes.current.surface = size;
+      setSurfaceSize(size);
+      trySeed();
     });
     observer.observe(area);
     return () => observer.disconnect();
+     
   }, []);
 
-  const toNormalized = useCallback((clientX: number, clientY: number) => {
-    const rect = areaRef.current?.getBoundingClientRect();
-    if (!rect || !rect.width || !rect.height) return { x: 0, y: 0 };
-    return {
-      x: Math.round(Math.min(1000, Math.max(0, ((clientX - rect.left) / rect.width) * 1000))),
-      y: Math.round(Math.min(1000, Math.max(0, ((clientY - rect.top) / rect.height) * 1000))),
-    };
+  const screenPoint = useCallback((clientX: number, clientY: number): Point => {
+    const box = areaRef.current?.getBoundingClientRect();
+    return { x: clientX - (box?.left ?? 0), y: clientY - (box?.top ?? 0) };
   }, []);
+
+  // Screen px -> normalized 0-1000 image units. `clamp` keeps drawn geometry
+  // inside the image; the hover cursor is left free so the brush ring and
+  // rubber band follow the pointer over the letterbox too.
+  const toNormalized = useCallback((clientX: number, clientY: number, clamp = true) => {
+    const size = latestSizes.current.image;
+    if (!size) return { x: 0, y: 0 };
+    const image = screenToImage(screenPoint(clientX, clientY), view);
+    const x = (image.x / size.width) * 1000;
+    const y = (image.y / size.height) * 1000;
+    if (!clamp) return { x, y };
+    return {
+      x: Math.round(Math.min(1000, Math.max(0, x))),
+      y: Math.round(Math.min(1000, Math.max(0, y))),
+    };
+  }, [screenPoint, view]);
 
   const commitPolygon = useCallback(() => {
     setPolygonPoints((points) => {
@@ -303,13 +378,19 @@ export function MaskModal({
   }, []);
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    // Primary pointer only: ignore right/middle clicks and multi-touch
-    // secondaries so a stray second finger can't corrupt the shape.
-    if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
+    if (!event.isPrimary || !fitted) return;
     // preventDefault kills native image ghost-drag/text selection;
     // stopPropagation keeps the gesture out of any ancestor handlers.
     event.preventDefault();
     event.stopPropagation();
+    // Space+drag, middle-drag, or right-drag pans; everything else draws.
+    if (spaceHeld || event.button === 1 || event.button === 2) {
+      event.currentTarget.setPointerCapture(event.pointerId);
+      panLast.current = screenPoint(event.clientX, event.clientY);
+      setPanning(true);
+      return;
+    }
+    if (event.pointerType === "mouse" && event.button !== 0) return;
     const point = toNormalized(event.clientX, event.clientY);
     if (tool === "polygon") {
       // Clicking near the first vertex closes the ring (min 3 vertices).
@@ -326,15 +407,22 @@ export function MaskModal({
     dragStart.current = point;
     if (tool === "rect") setDraftRect({ x: point.x, y: point.y, width: 0, height: 0 });
     else setBrushPoints([point.x, point.y]);
-  }, [tool, toNormalized]);
+  }, [tool, toNormalized, screenPoint, spaceHeld, fitted]);
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (!event.isPrimary) return;
     event.stopPropagation();
-    const point = toNormalized(event.clientX, event.clientY);
-    setCursor(point);
+    if (panLast.current) {
+      const screen = screenPoint(event.clientX, event.clientY);
+      const last = panLast.current;
+      setView((current) => panBy(current, screen.x - last.x, screen.y - last.y));
+      panLast.current = screen;
+      return;
+    }
+    setCursor(toNormalized(event.clientX, event.clientY, false));
     const start = dragStart.current;
     if (!start) return;
+    const point = toNormalized(event.clientX, event.clientY);
     if (tool === "rect") {
       setDraftRect({
         x: Math.min(start.x, point.x),
@@ -352,14 +440,19 @@ export function MaskModal({
         return [...points, point.x, point.y];
       });
     }
-  }, [tool, toNormalized]);
+  }, [tool, toNormalized, screenPoint]);
 
   const handlePointerUp = useCallback(() => {
+    if (panLast.current) {
+      panLast.current = null;
+      setPanning(false);
+      return;
+    }
     if (!dragStart.current) return;
     dragStart.current = null;
     if (tool === "rect") {
       setDraftRect((draft) => {
-        if (draft && draft.width > 4 && draft.height > 4) {
+        if (draft && draft.width >= 5 && draft.height >= 5) {
           setShapes((current) => [...current, { kind: "rect", ...draft }]);
         }
         return undefined;
@@ -384,62 +477,123 @@ export function MaskModal({
     setShapes([]);
   }, []);
 
-  // Escape backs out of an in-progress polygon without touching the modal.
+  // Escape backs out of an in-progress polygon without touching the modal;
+  // Space is the temporary pan modifier.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPolygonPoints([]);
+      if (event.code === "Space") {
+        event.preventDefault();
+        setSpaceHeld(true);
+      } else if (event.key === "Escape") {
+        setPolygonPoints([]);
+      }
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.code === "Space") setSpaceHeld(false);
     };
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
   }, []);
 
-  // Redraw the overlay: committed + in-progress shapes as one translucent
-  // purple layer (flattened first so overlaps don't double-darken), then the
-  // in-progress outlines (dashed rect, polygon rubber band, brush cursor).
+  // Native, non-passive wheel listener: React's onWheel is passive, so
+  // preventDefault (needed to stop the page/canvas scrolling under the
+  // modal) would be ignored and logged as an error.
+  const fittedRef = useRef(fitted);
+  useEffect(() => {
+    fittedRef.current = fitted;
+  }, [fitted]);
+  useEffect(() => {
+    const surface = areaRef.current;
+    if (!surface) return;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      if (!fittedRef.current) return;
+      const box = surface.getBoundingClientRect();
+      const anchor = { x: event.clientX - box.left, y: event.clientY - box.top };
+      const factor = Math.exp(-event.deltaY * (event.ctrlKey ? 0.01 : 0.0015));
+      setView((current) => zoomAround(current, factor, anchor));
+    };
+    surface.addEventListener("wheel", onWheel, { passive: false });
+    return () => surface.removeEventListener("wheel", onWheel);
+  }, []);
+
+  const zoomButton = (factor: number) => {
+    setView((current) => zoomAround(current, factor, { x: surfaceSize.width / 2, y: surfaceSize.height / 2 }));
+  };
+
+  const fit = () => {
+    if (imageSize) setView(fitTransform(imageSize.width, imageSize.height, surfaceSize.width, surfaceSize.height));
+  };
+
+  // Redraw: the source bitmap under the current view, then committed +
+  // in-progress shapes as one translucent purple layer (flattened first so
+  // overlaps don't double-darken), then the in-progress outlines (dashed
+  // rect, polygon rubber band, brush cursor).
   useEffect(() => {
     const canvas = canvasRef.current;
+    const image = imageRef.current;
     const { width, height } = surfaceSize;
-    if (!canvas || !width || !height) return;
-    canvas.width = width;
-    canvas.height = height;
+    if (!canvas || !image || !imageSize || !width || !height) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
     const context = canvas.getContext("2d");
     if (!context) return;
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    context.clearRect(0, 0, width, height);
+    context.imageSmoothingEnabled = view.scale < 1;
+
+    const origin = imageToScreen({ x: 0, y: 0 }, view);
+    const drawW = imageSize.width * view.scale;
+    const drawH = imageSize.height * view.scale;
+    context.drawImage(image, origin.x, origin.y, drawW, drawH);
 
     const preview: MaskShape[] = [...shapes];
     if (draftRect) preview.push({ kind: "rect", ...draftRect });
     if (brushPoints) preview.push({ kind: "brush", points: brushPoints, radius: brushSize });
+    // The layer is surface-sized (not image-sized) so an 8x zoom on a large
+    // source never asks for a canvas beyond browser limits; the shape tracer
+    // is simply offset to the image origin.
     const layer = document.createElement("canvas");
-    layer.width = width;
-    layer.height = height;
+    layer.width = canvas.width;
+    layer.height = canvas.height;
     const layerContext = layer.getContext("2d");
     if (!layerContext) return;
+    layerContext.setTransform(dpr, 0, 0, dpr, origin.x * dpr, origin.y * dpr);
     layerContext.fillStyle = "#7c3aed";
     layerContext.strokeStyle = "#7c3aed";
-    traceShapesInto(layerContext, preview, width, height);
+    traceShapesInto(layerContext, preview, drawW, drawH);
     context.globalAlpha = 0.35;
-    context.drawImage(layer, 0, 0);
+    context.drawImage(layer, 0, 0, width, height);
     context.globalAlpha = 1;
 
-    const sx = width / 1000;
-    const sy = height / 1000;
+    // Normalized 0-1000 -> screen px.
+    const sx = drawW / 1000;
+    const sy = drawH / 1000;
+    const nx = (value: number) => origin.x + value * sx;
+    const ny = (value: number) => origin.y + value * sy;
     context.strokeStyle = "#7c3aed";
     context.lineWidth = 2;
     if (draftRect) {
       context.setLineDash([6, 4]);
-      context.strokeRect(draftRect.x * sx, draftRect.y * sy, draftRect.width * sx, draftRect.height * sy);
+      context.strokeRect(nx(draftRect.x), ny(draftRect.y), draftRect.width * sx, draftRect.height * sy);
       context.setLineDash([]);
     }
     if (polygonPoints.length) {
       context.beginPath();
-      context.moveTo(polygonPoints[0] * sx, polygonPoints[1] * sy);
+      context.moveTo(nx(polygonPoints[0]), ny(polygonPoints[1]));
       for (let index = 2; index < polygonPoints.length - 1; index += 2) {
-        context.lineTo(polygonPoints[index] * sx, polygonPoints[index + 1] * sy);
+        context.lineTo(nx(polygonPoints[index]), ny(polygonPoints[index + 1]));
       }
-      if (cursor) context.lineTo(cursor.x * sx, cursor.y * sy);
+      if (cursor) context.lineTo(nx(cursor.x), ny(cursor.y));
       context.stroke();
       for (let index = 0; index < polygonPoints.length - 1; index += 2) {
         context.beginPath();
-        context.arc(polygonPoints[index] * sx, polygonPoints[index + 1] * sy, index === 0 ? 6 : 3.5, 0, Math.PI * 2);
+        context.arc(nx(polygonPoints[index]), ny(polygonPoints[index + 1]), index === 0 ? 6 : 3.5, 0, Math.PI * 2);
         context.fillStyle = index === 0 ? "#fff" : "#7c3aed";
         context.fill();
         if (index === 0) {
@@ -449,10 +603,10 @@ export function MaskModal({
     }
     if (tool === "brush" && cursor && !brushPoints) {
       context.beginPath();
-      context.arc(cursor.x * sx, cursor.y * sy, Math.max(1, brushSize * sx), 0, Math.PI * 2);
+      context.arc(nx(cursor.x), ny(cursor.y), Math.max(1, brushSize * sx), 0, Math.PI * 2);
       context.stroke();
     }
-  }, [shapes, draftRect, brushPoints, polygonPoints, cursor, tool, brushSize, surfaceSize]);
+  }, [imageSize, shapes, draftRect, brushPoints, polygonPoints, cursor, tool, brushSize, surfaceSize, view]);
 
   const canApply = shapes.length > 0;
   const toolButton = (value: MaskTool, label: string) => (
@@ -471,7 +625,7 @@ export function MaskModal({
 
   return createPortal(
     <div className={`${styles.maskModalOverlay} nodrag nopan nowheel ${closing ? styles.overlayClosing : ""}`} role="dialog" aria-modal="true" aria-label="Draw the mask to edit">
-      <div className={styles.maskModal}>
+      <div className={`${styles.maskModal} ${styles.cropEditor}`}>
         <p className={styles.hint}>
           Paint, outline, or box the area to edit — everything outside is protected.{" "}
           {pixelExact ? "Only the masked pixels are repainted." : "Masking is guidance, not pixel-exact."}
@@ -498,20 +652,43 @@ export function MaskModal({
           )}
           <button type="button" className="nodrag" onClick={undo} disabled={!shapes.length && !polygonPoints.length}>Undo</button>
           <button type="button" className="nodrag" onClick={clearAll} disabled={!shapes.length && !polygonPoints.length}>Clear</button>
+          <span className={styles.cropEditorDivider} />
+          <button type="button" className="nodrag" onClick={() => zoomButton(1 / 1.25)} aria-label="Zoom out" disabled={!fitted || view.scale <= MIN_ZOOM}>−</button>
+          <span className={styles.cropEditorZoom}>{Math.round(view.scale * 100)}%</span>
+          <button type="button" className="nodrag" onClick={() => zoomButton(1.25)} aria-label="Zoom in" disabled={!fitted || view.scale >= MAX_ZOOM}>+</button>
+          <button type="button" className="nodrag" onClick={fit} disabled={!fitted}>Fit</button>
+          <button
+            type="button"
+            className="nodrag"
+            disabled={!fitted}
+            onClick={() => setView((current) => zoomAround(current, 1 / current.scale, { x: surfaceSize.width / 2, y: surfaceSize.height / 2 }))}
+          >
+            100%
+          </button>
         </div>
         <div
           ref={areaRef}
-          className={`${styles.maskCanvasArea} nodrag nopan nowheel`}
+          className={`${styles.cropEditorSurface} nodrag nopan nowheel`}
+          style={{ cursor: spaceHeld || panning ? "grab" : "crosshair" }}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
           onPointerLeave={() => setCursor(undefined)}
+          onContextMenu={(event) => event.preventDefault()}
           onDoubleClick={commitPolygon}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={imageUrl} alt="Node input" draggable={false} />
           <canvas ref={canvasRef} className={styles.maskPreviewCanvas} />
+          {!imageSize && <p className={styles.hint}>Loading image…</p>}
+        </div>
+        <div className={styles.cropEditorFooter}>
+          <span className={styles.hint}>
+            {tool === "polygon"
+              ? "Click to place vertices; click the first point, double-click, or Close shape to finish. Wheel zooms, Space+drag or right-drag pans."
+              : tool === "brush"
+                ? "Drag to paint. Wheel zooms, Space+drag or right-drag pans."
+                : "Drag to box an area. Wheel zooms, Space+drag or right-drag pans."}
+          </span>
         </div>
         <div className={styles.maskModalActions}>
           <button type="button" className="nodrag" onClick={requestClose}>Cancel</button>
