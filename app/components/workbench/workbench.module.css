@@ -870,27 +870,8 @@
   gap: 10px;
 }
 
-.maskCanvasArea {
-  position: relative;
-  touch-action: none;
-  max-width: 80vw;
-  max-height: 70dvh;
-  overflow: hidden;
-  cursor: crosshair;
-  line-height: 0;
-}
-
-.maskCanvasArea img {
-  display: block;
-  max-width: 80vw;
-  max-height: 70dvh;
-  width: auto;
-  height: auto;
-  user-select: none;
-}
-
-/* Shape preview overlay: bitmap kept in sync with the displayed image via a
-   ResizeObserver; pointer events stay on the parent surface. */
+/* Shape preview overlay (mask + crop editors): bitmap kept in sync with the
+   surface via a ResizeObserver; pointer events stay on the parent surface. */
 .maskPreviewCanvas {
   position: absolute;
   inset: 0;
