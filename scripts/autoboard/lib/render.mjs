@@ -157,8 +157,19 @@ export function resolveRenderOptions(board, kind, overrides = {}) {
   };
 }
 
+// Bump when the prompt text app/lib/collage.ts produces changes shape, not just
+// when a render option changes. selectionHash covers the board (items, notes,
+// instruction) but not the prompt builder, so without this a prompt change
+// would silently alter output while every existing render still reported as
+// fresh. Folding it in here makes pre-change renders show as stale, which is
+// what the review board already knows how to display.
+// 2: change-scoped framing for layout-reference (confirm/final) renders.
+const PROMPT_SHAPE_VERSION = 2;
+
 export function renderOptionsHash(options) {
-  return createHash("sha1").update(JSON.stringify({ quality: options.quality, background: options.background })).digest("hex");
+  return createHash("sha1")
+    .update(JSON.stringify({ quality: options.quality, background: options.background, promptShape: PROMPT_SHAPE_VERSION }))
+    .digest("hex");
 }
 
 function actualCost(json) {

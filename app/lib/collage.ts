@@ -4,6 +4,7 @@ import {
   type SunburstBackground,
   type SunburstQuality,
 } from "./sunburst.ts";
+import { changeScopeLines } from "./prompt-sections.ts";
 
 export { SUNBURST_BACKGROUNDS, SUNBURST_MODEL, SUNBURST_QUALITIES } from "./sunburst.ts";
 
@@ -315,7 +316,10 @@ export function resolvedSize(request: CollageRequestInput) {
   const orientation = resolvedOrientation(request);
   if (resolvedOutputResolution(request) === "final") {
     if (orientation === "portrait") return "1440x2560";
-    if (orientation === "square") return "2048x2048";
+    // 1920x1920 is exactly 3,686,400 px — the same budget the portrait and
+    // landscape values already sit on, and the ceiling above which OpenAI
+    // documents output as experimental. 2048x2048 exceeded it.
+    if (orientation === "square") return "1920x1920";
     return "2560x1440";
   }
   if (resolvedOutputResolution(request) === "standard") {
@@ -324,7 +328,7 @@ export function resolvedSize(request: CollageRequestInput) {
     return "1536x1024";
   }
   if (orientation === "portrait") return "1360x2048";
-  if (orientation === "square") return "2048x2048";
+  if (orientation === "square") return "1920x1920";
   return "2048x1360";
 }
 
@@ -410,9 +414,21 @@ export function buildGenerationPrompt(request: CollageRequestInput) {
     `- Keep each item readable. Overlap may crop only a small nonessential edge; never cover a defining product feature or most of a sample.`,
   ];
 
+  // With a layout reference this is an edit turn, not a fresh creation: Image 1
+  // is a render this pipeline already produced. OpenAI's guide is explicit that
+  // edits want change-scoped framing ("change only X", then a preserve list)
+  // rather than a create instruction, so the opening differs by stage while the
+  // rest of the prompt stays identical. Wording comes from prompt-sections so
+  // the workbench Prompt Builder's Edit mode says the same thing.
+  const opening = request.layoutReference
+    ? changeScopeLines({
+        change: "the rendering fidelity of the collage in Image 1, re-rendering every item from its own reference images",
+        preserve: ["its composition, placement, scale, overlap, camera angle, lighting direction, and negative space"],
+      }).flatMap((section) => [section.heading, section.body])
+    : ["GOAL", "Create one photorealistic interior-design material collage for an architecture and interiors editorial."];
+
   return [
-    "GOAL",
-    "Create one photorealistic interior-design material collage for an architecture and interiors editorial.",
+    ...opening,
     TYPE_PROMPTS[request.collageType],
     "ART DIRECTION",
     // A layout reference already dictates arrangement and spacing, so emitting

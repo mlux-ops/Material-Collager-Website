@@ -154,6 +154,21 @@ export type WorkbenchParams = {
   lighting?: string;
   styleDirection?: string;
   extraDirection?: string;
+  // promptBuilder, mode-aware (see nodes/promptBuilder.manifest.ts). Per-mode
+  // fields are namespaced so switching modes and back never destroys what was
+  // typed in the other mode.
+  promptMode?: "generate" | "edit" | "refine";
+  genScene?: string;
+  genSubject?: string;
+  genDetails?: string;
+  genConstraints?: string;
+  editChange?: string;
+  editPreserve?: string[];
+  editExclusions?: string[];
+  refineChange?: string;
+  refineCarry?: string[];
+  // Index-aligned with the references arriving on the node's references port.
+  referenceRoles?: string[];
   // imageGenerate / imageEdit
   size?: string;
   sizeMode?: "preset" | "input" | "custom"; // see GENERATION_SIZE_MODES in nodes/generation.ts

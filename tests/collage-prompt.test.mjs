@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildGenerationPrompt } from "../app/lib/collage.ts";
+import { COLLAGE_TYPES, ORIENTATIONS, OUTPUT_RESOLUTIONS, buildGenerationPrompt, resolvedSize } from "../app/lib/collage.ts";
+import { classifySize } from "../app/lib/image-model-limits.ts";
 
 // A "supporting view" is a second, third, ... image uploaded into one item slot:
 // another photograph of the SAME physical item. The generator kept rendering
@@ -133,4 +134,37 @@ test("transparent prompts change only background wording while retaining product
     assert.ok(opaque.includes(phrase), `opaque prompt should retain ${phrase}`);
     assert.ok(transparent.includes(phrase), `transparent prompt should retain ${phrase}`);
   }
+});
+
+// Every size the generator can emit must clear OpenAI's documented limits, and
+// must also stay off the experimental tier — unlike the Upscaler, which offers
+// experimental sizes on purpose, nothing here should be silently rendering
+// above 3,686,400 px.
+test("resolvedSize only ever emits legal, non-experimental sizes", () => {
+  for (const collageType of COLLAGE_TYPES) {
+    for (const orientation of ORIENTATIONS) {
+      for (const outputResolution of OUTPUT_RESOLUTIONS) {
+        const size = resolvedSize(request({ collageType, orientation, outputResolution }));
+        const verdict = classifySize(size);
+        const where = `${collageType}/${orientation}/${outputResolution} -> ${size}`;
+        assert.ok(verdict.legal, `${where} is illegal: ${verdict.reasons.join(", ")}`);
+        assert.equal(verdict.experimental, false, `${where} is above the experimental threshold`);
+      }
+    }
+  }
+});
+
+// A layout reference means Image 1 is a render this pipeline already made, so
+// confirm/final are edit turns. OpenAI's guide wants edits framed as a scoped
+// change plus a preserve list, not as a fresh "create one ..." instruction.
+test("a layout-reference render opens change-scoped, while plain generation still opens with GOAL", () => {
+  const edit = buildGenerationPrompt(request({ layoutReference: true }));
+  const generate = buildGenerationPrompt(request());
+
+  assert.match(edit, /^CHANGE\n\nChange ONLY the rendering fidelity of the collage in Image 1/);
+  assert.match(edit, /PRESERVE\n\nPreserve its composition, placement, scale, overlap, camera angle, lighting direction, and negative space\. Keep all other aspects of the image unchanged\./);
+  assert.doesNotMatch(edit, /Create one photorealistic interior-design material collage/);
+
+  assert.match(generate, /^GOAL\n\nCreate one photorealistic interior-design material collage/);
+  assert.doesNotMatch(generate, /Change ONLY/);
 });

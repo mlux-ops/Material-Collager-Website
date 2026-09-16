@@ -16,6 +16,7 @@ import {
 import { memo, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { readApiResponse } from "@/app/lib/api-client";
+import { classifySize } from "@/app/lib/image-model-limits";
 import { optimizeReferencesForTransport } from "@/app/lib/image-transport";
 import { ensureThumbnail, getBlob, getBlobUrl, putBlob } from "../blob-cache";
 import { confirmHighCost, formatOutputUsd } from "../cost";
@@ -638,7 +639,14 @@ export function GenerationSettings({ id, data, inputPortId }: { id: string; data
       <label className={styles.field}>
         <span>Size</span>
         <select className="nodrag" value={selectValue} onChange={(event) => onSizeSelect(event.target.value)}>
-          {GENERATION_SIZES.map((option) => <option key={option} value={option}>{option}{option === "2560x1440" ? " (2K)" : ""}</option>)}
+          {GENERATION_SIZES.map((option) => {
+            const label = `${option}${option === "2560x1440" ? " (2K)" : ""}`;
+            return (
+              <option key={option} value={option}>
+                {classifySize(option).experimental ? `${label} (experimental)` : label}
+              </option>
+            );
+          })}
           {inputPortId && (
             <option value={SIZE_MODE_INPUT} disabled={!inputCacheKey}>
               Match input image{inputSize ? ` (${sizeForInput(inputSize.width, inputSize.height)})` : inputCacheKey ? "" : " — connect an image"}
