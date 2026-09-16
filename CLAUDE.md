@@ -62,6 +62,13 @@ as a CSRF defense.
 
 Image generation entry point is `app/api/generate/route.ts` (edge runtime).
 
+Upstream prompting and parameter rules for the model this app runs on are
+distilled in `docs/reference/openai-image-prompting.md` (OpenAI's GPT Image 2.5
+guide). Read it before changing prompt construction in `app/lib/collage.ts`,
+`src/material_collager/prompts.py`, or the autoboard stage payloads — it covers
+reference-role assignment, multi-turn edit constraints, size limits, and the
+transparency rules.
+
 ## Cloudflare bindings
 
 Declared in `wrangler.jsonc`: `DB` (D1, `material-collager-db`), `OUTPUTS` (R2),

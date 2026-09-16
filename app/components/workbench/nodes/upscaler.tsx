@@ -2,6 +2,7 @@
 
 import { memo } from "react";
 import { readApiResponse } from "@/app/lib/api-client";
+import { classifySize } from "@/app/lib/image-model-limits";
 import { putBlob } from "../blob-cache";
 import { useWorkbenchStore } from "../store";
 import styles from "../workbench.module.css";
@@ -38,9 +39,14 @@ export const Component = memo(function UpscalerNode({ id, data }: WorkbenchNodeP
       <label className={styles.field}>
         <span>Target size</span>
         <select className="nodrag" value={size} onChange={(event) => updateParams(id, { size: event.target.value })}>
-          {UPSCALE_SIZES.map((option) => (
-            <option key={option} value={option}>{option}{targetLongestEdge(option) >= 2048 ? " (2K+)" : ""}</option>
-          ))}
+          {UPSCALE_SIZES.map((option) => {
+            const label = `${option}${targetLongestEdge(option) >= 2048 ? " (2K+)" : ""}`;
+            return (
+              <option key={option} value={option}>
+                {classifySize(option).experimental ? `${label} (experimental)` : label}
+              </option>
+            );
+          })}
         </select>
       </label>
       <label className={styles.field}>
