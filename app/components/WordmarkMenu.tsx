@@ -69,6 +69,7 @@ const ROWS: MenuRow[] = [
     ],
   },
   { label: "ARCHIVE", kind: "route", href: "/archive" },
+  { label: "REVIEW BOARDS", kind: "route", href: "/review-boards" },
   // Four live controls (see SettingsControls): reduce motion, potato machine,
   // wipe speed, landing page.
   { label: "SETTINGS", kind: "settings", controls: 4 },

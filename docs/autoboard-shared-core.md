@@ -111,3 +111,86 @@ catches.
 
 Until it is fixed, `variants.mjs` keeps its `node:path` import and stays on the
 CLI side.
+
+---
+
+# The web review board
+
+`/review-boards` points at a project's Smartsheet, narrows it to the subsection
+you want, and stores the result as a project you can switch back to. It runs the
+same `app/lib/autoboard` core the CLI does — it does not reimplement slot
+matching.
+
+## Why there is a preview step the CLI never needed
+
+`buildBoards` cannot run before reference photos exist. An item whose
+`resolveImages` returns nothing is recorded in `gaps.imagelessItems` and dropped,
+so a board built straight from a freshly-read sheet comes back empty and every
+board falls under `minSlots`. The web flow therefore has a step the CLI does not:
+
+> read the sheet → see what each slot matched → gather photos for those rows →
+> build boards
+
+`previewBoards` is that middle step. It runs the same
+`groupRowsByRoom → boardTypesForRoom → assignSlots` chain and mints ids with the
+same `boardIdFor`, so a preview's board and the board finally built from it are
+the same board. It differs from `buildBoards` in exactly two ways, both
+deliberate:
+
+- **It keeps an empty board.** `buildBoards` drops a board under `minSlots`; the
+  whole point of a preview is to show that a subsection produced nothing.
+- **It does not apply the tile gate.** That decision belongs to the build, once
+  photos exist.
+
+`tests/autoboard-web-preview.test.mjs` holds the two functions to the same
+answer on board ids, slot assignment, substitutes and unmapped rows. Divergence
+between them is the failure mode this feature can most easily develop.
+
+## Storage
+
+One D1 table, `autoboard_projects`, created lazily like `generation_jobs`. A
+project stores the rows **as they read at build time** rather than re-fetching on
+every view: a board is a record of what the sheet said when it was built, and a
+live sheet changes underneath you. `PATCH { action: "refresh" }` is the explicit
+way to take a new reading.
+
+Rows and preview are stored as JSON in one row, so the write refuses anything
+over 800 KB with a message saying to narrow the subsection. D1 caps a TEXT value
+at 1 MB.
+
+`SMARTSHEET_ACCESS_TOKEN` is a Worker secret (`wrangler secret put`), and locally
+lives in git-ignored `.dev.vars` beside `OPENAI_API_KEY`.
+
+## API
+
+| Route | Does |
+|---|---|
+| `POST /api/autoboard/sheet` | Read a sheet, return its facets and what a subsection would fill. Stores nothing. |
+| `GET /api/autoboard/projects` | List stored projects |
+| `POST /api/autoboard/projects` | Build and store one |
+| `GET /api/autoboard/projects/[id]` | One project with its preview |
+| `PATCH /api/autoboard/projects/[id]` | `{ action: "refresh" }` or `{ name }` |
+| `DELETE /api/autoboard/projects/[id]` | Remove it |
+
+Mutating routes require `Content-Type: application/json`, the same CSRF defense
+the CLI's review server uses.
+
+Facets come from the **whole** sheet, never the filtered slice — a picker that
+narrowed its own options as you chose would strand you. An empty filter means
+everything, not nothing.
+
+## Two things the page had to be built around
+
+- **`body { overflow: hidden }`** above 1280px (globals.css), which propagates to
+  the viewport. A document-scrolling page is clipped to one screenful on a wide
+  display. `/review-boards` owns its own scroll, like `/archive`. A sticky offset
+  inside it is measured from the scroll container's *padding* box, so the rail
+  uses `top: 0` — anything else is added on top of the nav clearance rather than
+  replacing it.
+- **`*, *::before, *::after { border-radius: 0 !important }`** (globals.css
+  §"v4 normalisation"): sharp corners are the house style, and separation comes
+  from 1px rules and black/white inversion, never rounding, colour or shadow. Any
+  `border-radius` written under `app/components/review-boards/` is dead on
+  arrival. Colour appears in exactly one place — slot state — which AGENTS.md
+  permits as state treatment, and shape and text carry the same distinction so it
+  never depends on hue alone.

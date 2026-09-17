@@ -247,6 +247,14 @@ export function assignSlots(
 // Board building
 // ---------------------------------------------------------------------------
 
+// The board's stable identity. Shared so the preview the web review board
+// stores and the board the pipeline later builds carry the same id — a preview
+// whose id drifted from its board would orphan every note and selection made
+// against it.
+export function boardIdFor(unitType: string, roomLabel: string, collageType: CollageType): string {
+  return `${slugify(unitType)}-${slugify(roomLabel)}-${BOARD_KIND_SLUGS[collageType]}`;
+}
+
 export function slugify(value: unknown): string {
   return String(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
@@ -254,6 +262,27 @@ export function slugify(value: unknown): string {
 // Reserve one of the model's 16 reference slots for the finalize pass's
 // layout-reference draft, so a candidate board can always be finalized.
 export const MAX_PRODUCT_REFERENCES = 15;
+
+export type RoomGroup = { unitType: string; roomLabel: string; rows: LibraryRow[] };
+
+// Groups rows into the (unit type, room) buckets a board is built for.
+//
+// The key is the raw lowercased pair, NOT roomKey() — roomKey normalizes the
+// room label a second time, and the two disagree for any label the aliases
+// touch. Rows arrive already normalized by source.ts, so this preserves the
+// grouping buildBoards has always done; swapping in roomKey here would merge
+// rooms that are currently separate.
+export function groupRowsByRoom(rows: LibraryRow[]): Map<string, RoomGroup> {
+  const roomGroups = new Map<string, RoomGroup>();
+  for (const row of rows) {
+    const key = `${row.unitType.toLowerCase()}::${row.roomLabel.toLowerCase()}`;
+    if (!roomGroups.has(key)) {
+      roomGroups.set(key, { unitType: row.unitType, roomLabel: row.roomLabel, rows: [] });
+    }
+    roomGroups.get(key)!.rows.push(row);
+  }
+  return roomGroups;
+}
 
 export function buildBoards(rows: LibraryRow[], options: BuildBoardsOptions): { boards: Board[]; gaps: Gaps } {
   const {
@@ -273,14 +302,7 @@ export function buildBoards(rows: LibraryRow[], options: BuildBoardsOptions): { 
     tileIndex = new Map(),
   } = options;
 
-  const roomGroups = new Map<string, { unitType: string; roomLabel: string; rows: LibraryRow[] }>();
-  for (const row of rows) {
-    const key = `${row.unitType.toLowerCase()}::${row.roomLabel.toLowerCase()}`;
-    if (!roomGroups.has(key)) {
-      roomGroups.set(key, { unitType: row.unitType, roomLabel: row.roomLabel, rows: [] });
-    }
-    roomGroups.get(key)!.rows.push(row);
-  }
+  const roomGroups = groupRowsByRoom(rows);
 
   const boards: Board[] = [];
   for (const group of roomGroups.values()) {
@@ -455,9 +477,8 @@ export function buildBoards(rows: LibraryRow[], options: BuildBoardsOptions): { 
         continue;
       }
 
-      const kindSlug = BOARD_KIND_SLUGS[collageType];
       boards.push({
-        id: `${slugify(group.unitType)}-${slugify(group.roomLabel)}-${kindSlug}`,
+        id: boardIdFor(group.unitType, group.roomLabel, collageType),
         unitType: group.unitType,
         roomLabel: group.roomLabel,
         collageType,

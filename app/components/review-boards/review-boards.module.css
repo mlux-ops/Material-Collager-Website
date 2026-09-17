@@ -1,0 +1,569 @@
+/* Review boards — /review-boards
+   Two regions: a projects rail that stays put while you switch between stored
+   projects, and a board region that changes under it. Hierarchy comes from
+   type scale, grouping and the slot-state color, not from boxing everything
+   in one-pixel borders (AGENTS.md, generator design rules). */
+
+/* This page scrolls ITSELF rather than relying on the document. globals.css
+   sets `body { overflow: hidden }` and only flips it back under 1280px, and
+   body overflow propagates to the viewport — so a document-scrolling page is
+   clipped to one screenful on a wide display, with no way to reach the rest
+   (the same trap app/components/archive/archive.module.css documents). Owning
+   the scroll here fixes it at every width without touching a global the
+   library and generator depend on. */
+.page {
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  /* Clears the fixed 58px nav bar, which stays put while this page scrolls. */
+  padding-top: 92px;
+}
+
+.shell {
+  margin: 0 auto;
+  max-width: 1540px;
+  padding: 0 18px 72px;
+  display: grid;
+  grid-template-columns: minmax(268px, 320px) minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+
+/* --- Projects rail ------------------------------------------------------ */
+
+.rail {
+  position: sticky;
+  /* Zero, not 92px: a sticky offset is measured from the scroll container's
+     PADDING box, and .page already pads the nav's height — so any value here
+     is added on top of that clearance rather than replacing it. */
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.railHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.railTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.projectList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.projectButton {
+  width: 100%;
+  display: block;
+  padding: 13px 15px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: var(--ink);
+  transition: background 140ms ease;
+}
+
+.projectButton:hover {
+  background: var(--surface-quiet);
+}
+
+/* Inversion, not a tint: the same move the nav pill makes for the current
+   page, so "which project am I looking at" reads at a glance. */
+.projectButton[aria-current="true"],
+.projectButton[aria-current="true"]:hover {
+  background: var(--ink);
+  color: var(--surface);
+}
+
+.projectButton[aria-current="true"] .projectMeta {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.projectName {
+  display: block;
+  font-size: 15px;
+  font-weight: 550;
+  line-height: 1.3;
+}
+
+.projectMeta {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.empty {
+  padding: 16px 15px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+/* --- Build form --------------------------------------------------------- */
+
+.builder {
+  background: var(--surface);
+  padding: 18px;
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.builderTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-quiet);
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.input:focus {
+  border-color: var(--line-strong);
+  background: var(--surface);
+}
+
+.help {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  padding: 6px 11px;
+  border: 1px solid var(--line);
+  background: var(--surface-quiet);
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.chip:hover {
+  border-color: var(--line-strong);
+}
+
+.chip[aria-pressed="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--surface);
+}
+
+.chipCount {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  opacity: 0.65;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.primary,
+.secondary,
+.quiet {
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 550;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.primary {
+  background: var(--ink);
+  color: var(--surface);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--accent-dark);
+}
+
+.secondary {
+  background: var(--surface-quiet);
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.secondary:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+.quiet {
+  background: transparent;
+  color: var(--muted);
+  padding-inline: 10px;
+}
+
+.quiet:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.primary:disabled,
+.secondary:disabled,
+.quiet:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.notice {
+  padding: 11px 13px;
+  font-size: 13px;
+  line-height: 1.5;
+  background: rgba(154, 57, 47, 0.08);
+  color: var(--danger);
+}
+
+/* --- Board region ------------------------------------------------------- */
+
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-width: 0;
+}
+
+.mainHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.mainTitle {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.15;
+}
+
+.source {
+  margin: 6px 0 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.tally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+}
+
+.tallyItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tallyValue {
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.tallyLabel {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.boards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 18px;
+  /* Cards size to their own slot count; stretching a four-slot board to match
+     a nine-slot one beside it reads as missing content. */
+  align-items: start;
+}
+
+.board {
+  background: var(--surface);
+  padding: 20px;
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.boardHead {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.boardRoom {
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.boardKind {
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.boardFill {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.slots {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.slot {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  gap: 11px;
+  align-items: start;
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+}
+
+.slot:first-child {
+  border-top: 0;
+}
+
+/* The one place colour carries meaning, which AGENTS.md permits for state
+   treatment. Shape carries it too — a solid block, a ring, a faint ring — so
+   it never depends on hue alone, and every row also states its status in text
+   for a screen reader. Square by house rule: globals.css zeroes every radius
+   with !important, so a "dot" here is a 8px block, not a circle. */
+.dot {
+  /* A bare <span> is inline, where width and height do nothing — without this
+     the state marker renders as a filled line box rather than a dot. */
+  display: block;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+}
+
+.dotFilled {
+  background: var(--accent);
+}
+
+.dotRequired {
+  border: 2px solid var(--danger);
+}
+
+.dotOptional {
+  border: 2px solid var(--line-strong);
+}
+
+.slotBody {
+  display: block;
+  min-width: 0;
+}
+
+.slotName {
+  display: block;
+  font-size: 14px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.slotNameEmpty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.slotMeta {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.tier {
+  margin-left: 6px;
+  padding: 1px 6px;
+  background: var(--surface-soft);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.gaps {
+  background: var(--surface-soft);
+  padding: 20px;
+}
+
+.gapsTitle {
+  margin: 0 0 4px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.gapsIntro {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+  max-width: 68ch;
+}
+
+.gapGroup {
+  margin-top: 14px;
+}
+
+.gapGroup:first-of-type {
+  margin-top: 0;
+}
+
+.gapHead {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.gapList {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gapItem {
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.gapWhere {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.placeholder {
+  padding: 60px 24px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 1080px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rail {
+    position: static;
+  }
+}
+
+@media (max-width: 620px) {
+  .page {
+    padding-top: 78px;
+  }
+
+
+  .shell {
+    padding: 0 14px 56px;
+    gap: 22px;
+  }
+
+  .mainTitle {
+    font-size: 24px;
+  }
+
+  .boards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .projectButton,
+  .chip,
+  .primary,
+  .secondary {
+    transition: none;
+  }
+}

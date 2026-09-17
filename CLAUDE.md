@@ -56,6 +56,14 @@ them (nothing else does).
 override). Its render-workflow POST endpoints require `Content-Type: application/json`
 as a CSRF defense.
 
+The web equivalent is `/review-boards`: point it at a project's Smartsheet, pick
+the unit types and rooms you want, and it stores the result as a project you can
+switch between. It runs the same core, but stops at a slot PREVIEW rather than a
+board — `buildBoards` drops any item without a reference photo, so boards cannot
+be built until the photo step exists. Storage is the lazily-created D1 table
+`autoboard_projects`; reading a sheet needs the `SMARTSHEET_ACCESS_TOKEN` Worker
+secret. See `docs/autoboard-shared-core.md`.
+
 Projects without a Smartsheet sheet of their own live as tracked definitions in
 `scripts/autoboard/projects/`; `npm run autoboard:scaffold -- --project <id>` turns one
 into the library root (`build_manifest_v2.csv` + `_BUILD_LOG.csv` + photo folders) that
