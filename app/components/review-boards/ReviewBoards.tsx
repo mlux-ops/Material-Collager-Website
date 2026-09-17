@@ -18,7 +18,7 @@
  * agree by construction (docs/autoboard-shared-core.md).
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RouteReady } from "../RouteReady";
 import { SiteNavigation } from "../SiteNavigation";
 import { SlotPhotos, type ProjectPhoto } from "./SlotPhotos";
@@ -128,6 +128,18 @@ export function ReviewBoards() {
   const [photos, setPhotos] = useState<ProjectPhoto[]>([]);
   const [renders, setRenders] = useState<BoardRender[]>([]);
   const [view, setView] = useState<View>("slots");
+  const pageRef = useRef<HTMLDivElement>(null);
+
+  // ?design=concept previews docs/generator-design-concept.md on this page.
+  // Set on the node in an effect rather than held in state: the server cannot
+  // see the query string, so rendering it into the markup would be a hydration
+  // mismatch. The concept is an unapproved proposal — see the preview block at
+  // the end of review-boards.module.css.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("design") === "concept") {
+      pageRef.current?.setAttribute("data-design", "concept");
+    }
+  }, []);
 
   const [sheetId, setSheetId] = useState("");
   const [name, setName] = useState("");
@@ -301,7 +313,7 @@ export function ReviewBoards() {
   }, [shown, photosByRow]);
 
   return (
-    <div className={styles.page}>
+    <div className={styles.page} ref={pageRef}>
       <RouteReady path="/review-boards" />
       <SiteNavigation active={null} />
 
