@@ -1,0 +1,238 @@
+{
+  "model": "jev-latest",
+  "ranAt": "2026-09-17T04:00:31.234Z",
+  "adversarial": true,
+  "perturbed": true,
+  "boards": [
+    {
+      "room": "Bath 2",
+      "collageType": "bathroom_fixture_collage",
+      "baseline": {
+        "rows": [
+          {
+            "slot": "vanity_faucet",
+            "expected": "B2-04",
+            "actual": "B2-04",
+            "correct": true
+          },
+          {
+            "slot": "shower_head",
+            "expected": null,
+            "actual": null,
+            "correct": true
+          },
+          {
+            "slot": "valve_trim",
+            "expected": "B2-05",
+            "actual": "B2-05",
+            "correct": true
+          },
+          {
+            "slot": "cabinet_hardware",
+            "expected": "B2-06",
+            "actual": "B2-06",
+            "correct": true
+          },
+          {
+            "slot": "light_fixture",
+            "expected": "B2-07",
+            "actual": "B2-07",
+            "correct": true
+          },
+          {
+            "slot": "vanity_wood",
+            "expected": "B2-12",
+            "actual": "B2-12",
+            "correct": true
+          },
+          {
+            "slot": "main_tile",
+            "expected": "B2-01",
+            "actual": "B2-14",
+            "correct": false
+          },
+          {
+            "slot": "accent_tile",
+            "expected": "B2-02",
+            "actual": "B2-16",
+            "correct": false
+          },
+          {
+            "slot": "countertop",
+            "expected": null,
+            "actual": null,
+            "correct": true
+          }
+        ],
+        "correct": 7,
+        "total": 9
+      },
+      "treatments": {}
+    },
+    {
+      "room": "Bath 2",
+      "collageType": "bathroom_tile_collage",
+      "baseline": {
+        "rows": [
+          {
+            "slot": "wall_tile",
+            "expected": "B2-01",
+            "actual": "B2-15",
+            "correct": false
+          },
+          {
+            "slot": "floor_tile",
+            "expected": "B2-03",
+            "actual": "B2-14",
+            "correct": false
+          },
+          {
+            "slot": "accent_tile",
+            "expected": "B2-02",
+            "actual": "B2-16",
+            "correct": false
+          },
+          {
+            "slot": "vanity_wood",
+            "expected": "B2-12",
+            "actual": "B2-12",
+            "correct": true
+          },
+          {
+            "slot": "countertop",
+            "expected": null,
+            "actual": null,
+            "correct": true
+          },
+          {
+            "slot": "metal_finish",
+            "expected": "B2-08",
+            "actual": null,
+            "correct": false
+          }
+        ],
+        "correct": 2,
+        "total": 6
+      },
+      "treatments": {}
+    },
+    {
+      "room": "Bath 3",
+      "collageType": "bathroom_fixture_collage",
+      "baseline": {
+        "rows": [
+          {
+            "slot": "vanity_faucet",
+            "expected": "B3-05",
+            "actual": "B3-05",
+            "correct": true
+          },
+          {
+            "slot": "shower_head",
+            "expected": "B3-06",
+            "actual": null,
+            "correct": false
+          },
+          {
+            "slot": "valve_trim",
+            "expected": null,
+            "actual": null,
+            "correct": true
+          },
+          {
+            "slot": "cabinet_hardware",
+            "expected": "B3-08",
+            "actual": "B3-08",
+            "correct": true
+          },
+          {
+            "slot": "light_fixture",
+            "expected": "B3-09",
+            "actual": "B3-09",
+            "correct": true
+          },
+          {
+            "slot": "vanity_wood",
+            "expected": "B3-14",
+            "actual": "B3-14",
+            "correct": true
+          },
+          {
+            "slot": "main_tile",
+            "expected": "B3-01",
+            "actual": "B3-16",
+            "correct": false
+          },
+          {
+            "slot": "accent_tile",
+            "expected": "B3-02",
+            "actual": "B3-19",
+            "correct": false
+          },
+          {
+            "slot": "countertop",
+            "expected": "B3-15",
+            "actual": "B3-15",
+            "correct": true
+          }
+        ],
+        "correct": 6,
+        "total": 9
+      },
+      "treatments": {}
+    },
+    {
+      "room": "Bath 3",
+      "collageType": "bathroom_tile_collage",
+      "baseline": {
+        "rows": [
+          {
+            "slot": "wall_tile",
+            "expected": "B3-01",
+            "actual": null,
+            "correct": false
+          },
+          {
+            "slot": "floor_tile",
+            "expected": "B3-03",
+            "actual": null,
+            "correct": false
+          },
+          {
+            "slot": "accent_tile",
+            "expected": "B3-02",
+            "actual": null,
+            "correct": false
+          },
+          {
+            "slot": "vanity_wood",
+            "expected": "B3-14",
+            "actual": null,
+            "correct": false
+          },
+          {
+            "slot": "countertop",
+            "expected": "B3-15",
+            "actual": null,
+            "correct": false
+          },
+          {
+            "slot": "metal_finish",
+            "expected": "B3-10",
+            "actual": null,
+            "correct": false
+          }
+        ],
+        "correct": 0,
+        "total": 6
+      },
+      "treatments": {}
+    }
+  ],
+  "usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "requests": 0,
+    "latencyMs": 0
+  }
+}

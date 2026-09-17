@@ -98,6 +98,38 @@ const ADVERSARIAL_NAMES = {
   "B2-12": "Light natural-wood vanity (product pending)",
 };
 
+// --- perturbation arm ------------------------------------------------------
+// The canonical fixture names were written by someone who had already read
+// SLOT_RULES. That flatters the regex: "ELM Palette Seafoam Wall Tile" says
+// "wall tile" because the rule needs it to. This arm rewrites each row the way
+// a different person might write the same line in a schedule — same product,
+// same finish, same size, ordinary trade shorthand — and asks what survives.
+//
+// These are faithful renamings, not adversarial noise: every one names the
+// product unambiguously to a human reader. Any slot lost here is a slot the
+// pipeline holds only by naming discipline, which no one has written down.
+const PERTURBED_NAMES = {
+  "B2-01": "Palette Seafoam 6x6, glossy ceramic",
+  "B2-02": "Gems Caraibi 5x10 fluted porcelain, niche back",
+  "B2-03": "Bottega Caliza 23x23 porcelain, floors",
+  "B2-04": "Purist wall-mount lav faucet trim, BN",
+  "B2-05": "Purist bath/shower trim, BN",
+  "B2-06": "Purist 5in pull, BN",
+  "B2-07": "Cinch 24in LED bath bar, BN",
+  "B2-08": "BN finish swatch",
+  "B2-12": "Vanity cabinet, pale natural wood, TBD",
+  "B3-01": "Grounded Alabaster 12x24 matte, shower walls",
+  "B3-02": "Vivid Ligne Noir 3x10 matte relief, niche back",
+  "B3-03": "Grounded Alabaster 12x24 matte, floors",
+  "B3-05": "Purist widespread lav faucet, BL",
+  "B3-06": "Purist showering kit with slidebar, BL",
+  "B3-08": "Purist 5in pull, BL",
+  "B3-09": "Banda 24in LED bath bar, BL",
+  "B3-10": "BL finish swatch",
+  "B3-14": "Vanity cabinet, white, TBD",
+  "B3-15": "Vanity top, white quartz, TBD",
+};
+
 const SLOT_MEANING = {
   vanity_faucet: "The faucet at the vanity basin. Not a tub filler, not shower fittings.",
   shower_head: "The showerhead, rain head, or a showerhead-and-handshower package.",
@@ -113,10 +145,16 @@ const SLOT_MEANING = {
   metal_finish: "A sample standing for the room's metal finish.",
 };
 
-function rowsForRoom(definition, room, { adversarial }) {
+function nameFor(item, { adversarial, perturb }) {
+  if (perturb && PERTURBED_NAMES[item.rowId]) return PERTURBED_NAMES[item.rowId];
+  if (adversarial && ADVERSARIAL_NAMES[item.rowId]) return ADVERSARIAL_NAMES[item.rowId];
+  return item.name;
+}
+
+function rowsForRoom(definition, room, { adversarial, perturb }) {
   return (definition.rooms.find((entry) => entry.room === room)?.items ?? []).map((item) => ({
     id: item.rowId,
-    name: adversarial && ADVERSARIAL_NAMES[item.rowId] ? ADVERSARIAL_NAMES[item.rowId] : item.name,
+    name: nameFor(item, { adversarial, perturb }),
     costCode: item.costCode ?? "",
     sku: item.sku ?? "",
     status: item.status ?? "preferred",
@@ -208,12 +246,13 @@ async function main() {
       "baseline-only": { type: "boolean" },
       condition: { type: "string", default: "both" },
       adversarial: { type: "boolean", default: true },
+      perturb: { type: "boolean" },
     },
   });
   const definition = JSON.parse(await readFile(PROJECT, "utf8"));
   const conditions = values.condition === "both" ? ["parity", "rich"] : [values.condition];
 
-  const results = { model: MODEL, ranAt: new Date().toISOString(), adversarial: values.adversarial, boards: [], usage: { input_tokens: 0, output_tokens: 0, requests: 0, latencyMs: 0 } };
+  const results = { model: MODEL, ranAt: new Date().toISOString(), adversarial: values.adversarial, perturbed: Boolean(values.perturb), boards: [], usage: { input_tokens: 0, output_tokens: 0, requests: 0, latencyMs: 0 } };
   let apiKey = null;
   if (!values["baseline-only"]) {
     try {
@@ -225,7 +264,7 @@ async function main() {
   }
 
   for (const [room, boardLabels] of Object.entries(LABELS)) {
-    const rows = rowsForRoom(definition, room, { adversarial: values.adversarial });
+    const rows = rowsForRoom(definition, room, { adversarial: values.adversarial, perturb: values.perturb });
     const { byType } = baselineBoards(definition, rows, room);
 
     for (const [collageType, labels] of Object.entries(boardLabels)) {
@@ -260,7 +299,7 @@ async function main() {
   }
 
   await mkdir(OUT_DIR, { recursive: true });
-  const outFile = path.join(OUT_DIR, "slot-assignment.json");
+  const outFile = path.join(OUT_DIR, values.perturb ? "slot-assignment-perturbed.json" : "slot-assignment.json");
   await writeFile(outFile, `${JSON.stringify(results, null, 2)}\n`, "utf8");
 
   const header = ["board", "baseline", ...conditions.filter(() => apiKey)];
