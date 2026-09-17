@@ -115,6 +115,12 @@ is a local placeholder, so do not treat it as real. Repo secrets required:
 secret set separately (`wrangler secret put`), and locally lives in git-ignored
 `.dev.vars`. See `docs/DEPLOYING.md`.
 
+**Local dev enforces the Access gate.** `CF_ACCESS_TEAM_DOMAIN` and
+`CF_ACCESS_AUD` are set in `wrangler.jsonc` `vars`, and Miniflare reads that
+block too, so `npm run dev` answers 403 to every page with nothing in front of
+localhost to mint a JWT. Blank both in `.dev.vars`, which overrides
+`wrangler.jsonc` — `.dev.vars.example` has the full local set.
+
 ## Gotchas
 
 - Dev, build, and start all run through `vinext`, not `next` directly. Reaching for

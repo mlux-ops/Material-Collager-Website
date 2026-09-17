@@ -1,5 +1,19 @@
 # Copy this file to .dev.vars (git-ignored) for local development.
 # `npm run dev` runs on Miniflare, which reads .dev.vars the same way
-# Cloudflare Workers reads production secrets.
+# Cloudflare Workers reads production secrets — and .dev.vars OVERRIDES the
+# `vars` block in wrangler.jsonc, which is what the two blank lines below rely on.
 
+# Renders. Without it /api/generate answers 401 and the review board's
+# "Render draft" reports "Add an OpenAI API key in Settings".
 OPENAI_API_KEY=sk-...
+
+# Reading a project sheet on /review-boards. Not needed for anything else.
+SMARTSHEET_ACCESS_TOKEN=
+
+# Blank on purpose: wrangler.jsonc sets these for production, and Miniflare
+# picks them up too, so local dev enforces the Cloudflare Access gate and
+# answers 403 to every page. There is no Access proxy in front of localhost to
+# mint a JWT, so the only way through is to unset them here. Do NOT put real
+# values in these — see worker/access.ts.
+CF_ACCESS_TEAM_DOMAIN=
+CF_ACCESS_AUD=

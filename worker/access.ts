@@ -172,8 +172,15 @@ function forbidden(): Response {
 /**
  * Returns a 403 response when the request lacks a valid Access JWT, or null
  * when the request may proceed. Enforcement is enabled by configuring both
- * CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD (wrangler.jsonc "vars"); local dev
- * has no Access proxy in front, so both stay unset there and requests pass.
+ * CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD.
+ *
+ * Both are set in wrangler.jsonc "vars", and Miniflare reads that block too —
+ * so LOCAL DEV ENFORCES THIS and answers 403 to every page, with no Access
+ * proxy in front of localhost to mint a JWT. Blank them in .dev.vars (which
+ * overrides wrangler.jsonc) to work locally; see .dev.vars.example. Failing
+ * closed is deliberate, so this is not special-cased on hostname: a
+ * host-derived bypass in an auth gate is exactly the kind of thing that becomes
+ * a hole later.
  */
 export async function enforceAccessJwt(request: Request, env: AccessEnv): Promise<Response | null> {
   const teamDomain = env.CF_ACCESS_TEAM_DOMAIN;
