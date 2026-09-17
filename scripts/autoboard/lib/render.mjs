@@ -3,7 +3,6 @@
 // and the review server's render queue: build the exact payload the app's
 // /api/generate expects, post it, save the PNG, record the result.
 
-import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { copyFileSync, mkdirSync } from "node:fs";
 import { unlink, writeFile } from "node:fs/promises";
@@ -116,61 +115,25 @@ export function estimateStageOutputUsd(results, board, kind, count = 1) {
   });
 }
 
-export const SUNBURST_QUALITY_OPTIONS = ["low", "medium", "high", "xhigh", "max", "auto"];
-export const SUNBURST_BACKGROUND_OPTIONS = ["opaque", "transparent"];
-const DEFAULT_STAGE_QUALITY = { draft: "low", confirm: "medium", final: "high" };
+import {
+  boardForRender,
+  renderOptionsHash,
+  renderRecordIsStale,
+  resolveRenderOptions,
+  savedRenderOptions,
+  selectionHash,
+} from "../../../app/lib/autoboard/render-options.ts";
 
-function validQuality(value) {
-  return typeof value === "string" && SUNBURST_QUALITY_OPTIONS.includes(value) ? value : undefined;
-}
-
-function validBackground(value) {
-  return typeof value === "string" && SUNBURST_BACKGROUND_OPTIONS.includes(value) ? value : undefined;
-}
-
-// Saved options are intentionally sparse. A plan written before the options
-// UI has no renderOptions field and therefore remains opaque, with the stage's
-// historical quality default. Reading this helper never mutates that plan.
-export function savedRenderOptions(board) {
-  const saved = board?.renderOptions && typeof board.renderOptions === "object" ? board.renderOptions : {};
-  return {
-    quality: validQuality(saved.quality),
-    background: validBackground(saved.background) ?? "opaque",
-  };
-}
-
-// Explicit command/panel overrides win over a saved board option, which wins
-// over the established draft/confirm/final default. Finals retain the Task 1
-// minimum of high: low, medium, and auto are upgraded while xhigh/max remain
-// explicit choices.
-export function resolveRenderOptions(board, kind, overrides = {}) {
-  const saved = savedRenderOptions(board);
-  const stageDefault = DEFAULT_STAGE_QUALITY[kind];
-  if (!stageDefault) throw new Error(`Unknown render kind "${kind}".`);
-  const requestedQuality = validQuality(overrides.quality) ?? saved.quality ?? stageDefault;
-  const quality = kind === "final" && ["low", "medium", "auto"].includes(requestedQuality)
-    ? "high"
-    : requestedQuality;
-  return {
-    quality,
-    background: validBackground(overrides.background) ?? saved.background,
-  };
-}
-
-// Bump when the prompt text app/lib/collage.ts produces changes shape, not just
-// when a render option changes. selectionHash covers the board (items, notes,
-// instruction) but not the prompt builder, so without this a prompt change
-// would silently alter output while every existing render still reported as
-// fresh. Folding it in here makes pre-change renders show as stale, which is
-// what the review board already knows how to display.
-// 2: change-scoped framing for layout-reference (confirm/final) renders.
-const PROMPT_SHAPE_VERSION = 2;
-
-export function renderOptionsHash(options) {
-  return createHash("sha1")
-    .update(JSON.stringify({ quality: options.quality, background: options.background, promptShape: PROMPT_SHAPE_VERSION }))
-    .digest("hex");
-}
+export {
+  SUNBURST_BACKGROUND_OPTIONS,
+  SUNBURST_QUALITY_OPTIONS,
+  boardForRender,
+  renderOptionsHash,
+  renderRecordIsStale,
+  resolveRenderOptions,
+  savedRenderOptions,
+  selectionHash,
+} from "../../../app/lib/autoboard/render-options.ts";
 
 function actualCost(json) {
   if (typeof json?.costUsd === "number" && Number.isFinite(json.costUsd) && json.costUsd >= 0) return json.costUsd;
@@ -193,19 +156,6 @@ export function recordMetadata(payload, json) {
   };
 }
 
-export function renderRecordIsStale(board, record, kind, instruction = "") {
-  if (!record) return true;
-  if (record.selectionHash !== selectionHash(board, instruction)) return true;
-  // Historical records predate renderOptionsHash. Keep them unchanged and
-  // compatible while marking them stale as soon as a board explicitly gains
-  // saved options.
-  if (record.renderOptionsHash || board?.renderOptions) {
-    const current = resolveRenderOptions(board, kind);
-    if (record.renderOptionsHash !== renderOptionsHash(current)) return true;
-  }
-  return false;
-}
-
 // Direct CLI finalize and batch-finalize share the same review gate. When a
 // plan has saved render options (or the operator supplies an explicit CLI
 // override), compare the candidate's effective draft settings before either
@@ -224,38 +174,10 @@ export function candidateIsStaleForFinalize(board, candidate, overrides = {}) {
   return isStaleCandidate(board, draftCandidate, draftRenderOptions);
 }
 
-// Hash of everything the model actually sees for this board: which images
-// fill each slot, each slot's note, and the board instruction. Used for
-// stale detection and revision bumps. Bookkeeping fields (overriddenAt,
-// title, provenance, imageMeta) deliberately excluded.
-export function selectionHash(board, instruction = "") {
-  const material = {
-    instruction: String(instruction ?? "").trim(),
-    // item.notes goes through modelNotes so an edit to a legacy provenance
-    // sentence it strips anyway (see modelNotes/LEGACY_NOTE_PATTERNS in
-    // variants.mjs) doesn't mark an otherwise-unchanged draft stale.
-    items: orderedBoardItems(board).map((item) => [item.slotId, item.images ?? [], modelNotes(item.notes) ?? "", String(item.note ?? "").trim()]),
-  };
-  return createHash("sha1").update(JSON.stringify(material)).digest("hex");
-}
-
 // The collage request has no board-level notes field (app/lib/collage.ts),
 // only per-item notes, so the board instruction rides on the hero item —
 // the first item in payload order — prefixed so the model can tell it apart
 // from that item's own note. Returns a copy; never mutates the plan board.
-export function boardForRender(board, instruction = "") {
-  const heroSlotId = orderedBoardItems(board)[0]?.slotId;
-  const cleanInstruction = String(instruction ?? "").trim();
-  return {
-    ...board,
-    items: board.items.map((item) => {
-      const parts = [modelNotes(item.notes) ?? "", String(item.note ?? "").trim()];
-      if (cleanInstruction && item.slotId === heroSlotId) parts.push(`Board instruction: ${cleanInstruction}`);
-      return { ...item, notes: parts.filter(Boolean).join(" ") };
-    }),
-  };
-}
-
 function finish(payload, files) {
   validateCollageRequest(payload);
   return { payload, files };

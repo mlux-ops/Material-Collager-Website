@@ -56,6 +56,18 @@ export type BoardItem = {
   images: string[];
   tier?: string;
   provenance?: string;
+
+  // `notes` and `note` are NOT the same field and must not be merged.
+  // `notes` is model-facing and reaches buildGenerationPrompt as the item's
+  // "specific instruction"; `note` is what a reviewer typed about this slot in
+  // the review UI. boardForRender joins them, in that order, only at render
+  // time. Both feed selectionHash, so editing either makes a draft stale.
+  note?: string;
+
+  // Review bookkeeping, deliberately excluded from selectionHash: changing
+  // them must not invalidate an otherwise-identical render.
+  overriddenAt?: number;
+  imageMeta?: { path: string; width?: number; height?: number; error?: string }[];
 };
 
 export type Board = {
@@ -67,6 +79,14 @@ export type Board = {
   title: string;
   items: BoardItem[];
   aliases?: string[];
+
+  // Set from the review UI. `heroItemId` names the slot that anchors the
+  // composition, overriding the per-board-type ranking, but only while it still
+  // names a slot the board has. `renderOptions` is sparse on purpose: a plan
+  // written before the options UI has no such field and keeps the stage's
+  // historical quality default.
+  heroItemId?: string;
+  renderOptions?: { quality?: string; background?: string };
 };
 
 export type TileEntry = {
