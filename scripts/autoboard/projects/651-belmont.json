@@ -526,7 +526,7 @@
     {
       "room": "Kitchen",
       "identity": "Penthouse (unit 3) kitchen — Thermador Pro Harmony suite, panel-ready",
-      "note": "Transcribed 2026-09-17 from the live Smartsheet FINISH DATABASE: 651 Belmont (sheet 6391628162879364), Unit Type = Penthouse, Cost Code = 11 30 Appliances - T&M. Only rows NOT flagged AGENT IGNORE are carried: the sheet holds many superseded duplicates of the same appliances. Each row keeps its Smartsheet row id. Three further live Penthouse appliance rows sit in the Laundry room — LG washer WM4000HBSS, LG gas dryer DLGX4001BSS and the Thermador T18IW905SP wine column — and are deliberately not here: no board type maps to Laundry.",
+      "note": "Transcribed 2026-09-17 from the live Smartsheet FINISH DATABASE: 651 Belmont (sheet 6391628162879364), Unit Type = Penthouse, Cost Code = 11 30 Appliances - T&M. Only rows NOT flagged AGENT IGNORE are carried: the sheet holds many superseded duplicates of the same appliances. Each row keeps its Smartsheet row id. Three further live Penthouse appliance rows sit in the Laundry room — LG washer WM4000HBSS, LG gas dryer DLGX4001BSS and the Thermador T18IW905SP wine column — and are deliberately not here: no board type maps to Laundry. One data discrepancy carried as-is rather than silently corrected: K-04’s SKU reads MC30WPSS, which no manufacturer sells; the product is MC30WP (see that row’s photo note).",
       "items": [
         {
           "rowId": "K-01",
@@ -574,7 +574,7 @@
           "status": "preferred",
           "spec": "30 in. speed oven, gray glass on stainless",
           "smartsheetRowId": "5449229062832004",
-          "photo": "Vendor product shot. Panel-ready units photograph as a custom wood panel, so prefer the stainless/pro shot where the vendor offers both."
+          "photo": "Thermador Professional Series 30 in. speed oven, gray glass on stainless. NOTE: the sheet SKU \"MC30WPSS\" is not a manufacturer model — Thermador sells this as MC30WP, and the sheet appends SS for stainless. Evidence: this row’s own Reference resolves to Ferguson product id 1655894, and another row in the same sheet gives that id as /thermador-mc30wp/s1655894. Hunt MC30WP; MC30WS is the Masterpiece line, a different unit."
         },
         {
           "rowId": "K-05",
