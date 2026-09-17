@@ -22,7 +22,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { RouteReady } from "../RouteReady";
 import { SiteNavigation } from "../SiteNavigation";
 import { SlotPhotos, type ProjectPhoto } from "./SlotPhotos";
-import { BoardWorkflow, type BuiltBoard } from "./BoardWorkflow";
+import { BoardWorkflow, type BoardRender, type BuiltBoard } from "./BoardWorkflow";
 import styles from "./review-boards.module.css";
 
 type Facet = { value: string; rowCount: number };
@@ -126,6 +126,7 @@ export function ReviewBoards() {
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
   const [built, setBuilt] = useState<Built | null>(null);
   const [photos, setPhotos] = useState<ProjectPhoto[]>([]);
+  const [renders, setRenders] = useState<BoardRender[]>([]);
   const [view, setView] = useState<View>("slots");
 
   const [sheetId, setSheetId] = useState("");
@@ -164,14 +165,16 @@ export function ReviewBoards() {
     let cancelled = false;
     void (async () => {
       try {
-        const [payload, photoPayload] = await Promise.all([
+        const [payload, photoPayload, renderPayload] = await Promise.all([
           api<{ project: ProjectDetail; built: Built }>(`/api/autoboard/projects/${encodeURIComponent(activeId)}`),
           api<{ photos: ProjectPhoto[] }>(`/api/autoboard/projects/${encodeURIComponent(activeId)}/photos`),
+          api<{ renders: BoardRender[] }>(`/api/autoboard/projects/${encodeURIComponent(activeId)}/renders`),
         ]);
         if (!cancelled) {
           setDetail(payload.project);
           setBuilt(payload.built);
           setPhotos(photoPayload.photos);
+          setRenders(renderPayload.renders);
         }
       } catch (cause) {
         if (!cancelled) setError((cause as Error).message);
@@ -263,13 +266,15 @@ export function ReviewBoards() {
 
   const reloadPhotos = useCallback(async () => {
     if (!activeId) return;
-    const [payload, photoPayload] = await Promise.all([
+    const [payload, photoPayload, renderPayload] = await Promise.all([
       api<{ project: ProjectDetail; built: Built }>(`/api/autoboard/projects/${encodeURIComponent(activeId)}`),
       api<{ photos: ProjectPhoto[] }>(`/api/autoboard/projects/${encodeURIComponent(activeId)}/photos`),
+      api<{ renders: BoardRender[] }>(`/api/autoboard/projects/${encodeURIComponent(activeId)}/renders`),
     ]);
     setDetail(payload.project);
     setBuilt(payload.built);
     setPhotos(photoPayload.photos);
+    setRenders(renderPayload.renders);
   }, [activeId]);
 
   const photosByRow = useMemo(() => {
@@ -500,7 +505,7 @@ export function ReviewBoards() {
               </div>
 
               {view === "boards" ? (
-                <BuiltBoards built={built} projectId={shown.id} onSaved={reloadPhotos} />
+                <BuiltBoards built={built} projectId={shown.id} renders={renders} onSaved={reloadPhotos} />
               ) : (
               <div className={styles.boards}>
                 {shown.preview.boards.map((board) => (
@@ -689,10 +694,12 @@ function GapsSection({ preview }: { preview: BoardsPreview }) {
 function BuiltBoards({
   built,
   projectId,
+  renders,
   onSaved,
 }: {
   built: Built | null;
   projectId: string;
+  renders: BoardRender[];
   onSaved: () => Promise<void>;
 }) {
   if (!built || !built.boards.length) {
@@ -728,7 +735,12 @@ function BuiltBoards({
               </li>
             ))}
           </ul>
-          <BoardWorkflow projectId={projectId} board={board} onSaved={onSaved} />
+          <BoardWorkflow
+            projectId={projectId}
+            board={board}
+            renders={renders.filter((render) => render.boardId === board.id)}
+            onSaved={onSaved}
+          />
         </article>
       ))}
     </div>

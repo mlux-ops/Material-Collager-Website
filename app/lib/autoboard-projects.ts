@@ -13,8 +13,14 @@ import { env } from "cloudflare:workers";
 import { buildGenerationPrompt } from "./collage.ts";
 import { buildBoards } from "./autoboard/match.ts";
 import { DEFAULT_VARIANTS, boardPayload } from "./autoboard/variants.ts";
-import { boardForRender, resolveRenderOptions, selectionHash } from "./autoboard/render-options.ts";
+import {
+  boardForRender,
+  renderOptionsHash,
+  resolveRenderOptions,
+  selectionHash,
+} from "./autoboard/render-options.ts";
 import { deleteProjectBoardState, emptyBoardState, listBoardState, type BoardState } from "./autoboard-board-state.ts";
+import { deleteProjectRenders } from "./autoboard-renders.ts";
 import { previewBoards, filterRows, type BoardsPreview, type SubsectionFilter } from "./autoboard/preview.ts";
 import { emptyGaps, loadSmartsheetRows } from "./autoboard/source.ts";
 import type { Board, Gaps, LibraryRow } from "./autoboard/types.ts";
@@ -213,6 +219,7 @@ export async function deleteProject(id: string): Promise<boolean> {
   // objects nothing will ever reference again.
   await deleteProjectPhotos(id);
   await deleteProjectBoardState(id);
+  await deleteProjectRenders(id);
   const result = await DB.prepare("DELETE FROM autoboard_projects WHERE id = ?").bind(id).run();
   return Boolean(result.meta?.changes);
 }
@@ -232,6 +239,8 @@ export type BuiltBoard = Board & {
   /** Hash of everything the model sees. A render is current only while it matches. */
   selectionHash: string;
   renderOptions: { quality: string; background: string };
+  /** Recorded on every render, so a board can say which of its renders are stale. */
+  renderOptionsHash: string;
   /** The prompt this board would send, from the app's own builder. */
   prompt: string;
   referenceCount: number;
@@ -280,6 +289,7 @@ export async function buildProjectBoards(
         state: boardState,
         selectionHash: selectionHash(withState, boardState.instruction),
         renderOptions,
+        renderOptionsHash: renderOptionsHash(renderOptions),
         prompt: buildGenerationPrompt(payload as never),
         referenceCount: withState.items.reduce((sum, item) => sum + item.images.length, 0),
       };
