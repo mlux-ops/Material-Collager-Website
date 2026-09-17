@@ -84,6 +84,12 @@ const SLOT_RULES = {
     ],
     vanity_wood: [{ any: [/vanity/i], none: [/faucet/i, /light/i, /top/i] }],
     main_tile: [{ any: [/tile/i], none: [/accent/i, /mosaic/i] }],
+    // Deliberately narrower than the tile board's accent rule (/accent/i,
+    // /mosaic/i): on a FIXTURE board this competes with the tile-assignment
+    // path below, so it only claims a row that names itself a tile. A
+    // library whose tiles are photos rather than rows (Wieland) still gets
+    // its accent from tile-assignments.json exactly as before.
+    accent_tile: [{ any: [/accent tile/i, /mosaic tile/i] }],
     countertop: [{ any: [/countertop/i, /counter top/i, /quartz/i, /marble/i, /granite/i] }],
   },
   bathroom_tile_collage: {
@@ -371,6 +377,11 @@ export function buildBoards(rows, options) {
         for (const [slotId, codeField] of [["main_tile", "mainTile"], ["accent_tile", "accentTile"]]) {
           const preset = (ITEM_PRESETS[collageType] ?? []).find((entry) => entry.id === slotId);
           if (!preset) continue;
+          // A library that carries its tiles as real rows (see
+          // scripts/autoboard/projects/) has already filled this slot through
+          // assignSlots; adding the assignment's tile on top would put two
+          // items on the same slot id and the app's validator rejects that.
+          if (items.some((item) => item.slotId === slotId)) continue;
           const code = assignment?.[codeField];
           // No push here for a missing assignment — the generic unfilled-slot
           // loop below already reports every preset absent from `items`,

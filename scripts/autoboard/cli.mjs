@@ -333,7 +333,16 @@ async function commandPlan(values) {
     const slots = board.items.map((item) => item.slotId).join(", ");
     const mergedNote = board.aliases && board.aliases.length ? `  ("${board.title}")` : "";
     console.log(`  ${board.id}  [${board.items.length} slots: ${slots}]${mergedNote}`);
-    if (board.items.some((item) => item.slotId === "main_tile" || item.slotId === "accent_tile")) {
+    // Only a tile that CAME FROM tile-assignments.json carries the schedule's
+    // HOLD status. Those are the tile items with no manifest row behind them
+    // (match.mjs builds them from the tile photo index); a project whose tiles
+    // are ordinary rows with vendor SKUs — see scripts/autoboard/projects/ —
+    // fills the same slots and must not be tarred with the Wieland schedule.
+    if (
+      board.items.some(
+        (item) => (item.slotId === "main_tile" || item.slotId === "accent_tile") && item.rowId === null,
+      )
+    ) {
       boardsWithProvisionalTiles++;
     }
   }
