@@ -102,6 +102,8 @@ test("Patch declares two image inputs plus an optional Region mask input and sta
   // Masked Edit this node caches no mask blob to persist or GC.
   assert.deepEqual(manifest.importSchema.sourceBlobKeys, []);
   assert.equal(manifest.defaultParams.patchColorMatch, true);
+  assert.equal(manifest.defaultParams.patchClipToRegion, false, "clip-to-region is opt-in");
+  assert.equal(manifest.importSchema.paramKeys.patchClipToRegion.type, "boolean");
   assert.equal(manifest.defaultParams.patchFit, "auto");
 });
 
