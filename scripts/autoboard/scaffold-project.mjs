@@ -23,7 +23,7 @@
 // matched_files and the checklist's counts are rebuilt from what is on disk.
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -250,6 +250,13 @@ async function defaultDownload(url) {
 // props ("every visible object must come from a reference image"), so a
 // manifest entry may carry a crop that keeps only the material. sharp is
 // imported lazily: a project with no crops needs nothing beyond node.
+function extensionFor(file) {
+  return EXTENSION_BY_TYPE[file.contentType] ?? path.extname(new URL(file.url).pathname) ?? ".jpg";
+}
+
+// The shape fetchReferenceImages writes: <rowId>-<n>-<kind>.<ext>.
+const FETCHED_NAME = /^[^/]+-\d+-[a-z]+\.(jpg|jpeg|png|webp|avif)$/i;
+
 async function cropBuffer(buffer, crop) {
   const { default: sharp } = await import("sharp");
   return sharp(buffer)
@@ -266,7 +273,7 @@ export async function fetchReferenceImages({
   log = () => {},
 }) {
   const libraryRoot = path.resolve(root ?? definition.libraryRoot ?? ".");
-  const summary = { downloaded: 0, skipped: 0, failures: [], drifted: [], withoutImages: [] };
+  const summary = { downloaded: 0, skipped: 0, failures: [], drifted: [], withoutImages: [], removed: [] };
   for (const room of definition.rooms) {
     for (const item of room.items ?? []) {
       if (!item.imageKey) continue;
@@ -278,9 +285,16 @@ export async function fetchReferenceImages({
       }
       const folder = path.join(libraryRoot, ...folderFor(room, item).split("/"));
       mkdirSync(folder, { recursive: true });
+      // Names this fetch will write, so a stale file from an earlier fetch can
+      // be cleared below. A manifest entry can change extension — swapping a
+      // dealer's .jpg for the manufacturer's .webp writes a new name and would
+      // otherwise leave the old file in place, where the build log sorts it
+      // first and the board keeps rendering the picture that was replaced.
+      const written = new Set(
+        files.map((file, index) => `${item.rowId}-${index + 1}-${file.kind ?? "ref"}${extensionFor(file)}`),
+      );
       for (const [index, file] of files.entries()) {
-        const extension = EXTENSION_BY_TYPE[file.contentType] ?? path.extname(new URL(file.url).pathname) ?? ".jpg";
-        const name = `${item.rowId}-${index + 1}-${file.kind ?? "ref"}${extension}`;
+        const name = `${item.rowId}-${index + 1}-${file.kind ?? "ref"}${extensionFor(file)}`;
         const target = path.join(folder, name);
         if (existsSync(target) && !force) {
           summary.skipped += 1;
@@ -303,6 +317,16 @@ export async function fetchReferenceImages({
           summary.failures.push({ rowId: item.rowId, url: file.url, error: error.message });
           log(`  ${item.rowId}  FAILED ${file.url} — ${error.message}`);
         }
+      }
+      // Only ever removes files this tool wrote: the <rowId>-<n>-<kind>.<ext>
+      // shape. A photo dropped into the folder by hand does not match it and
+      // is left alone.
+      for (const existing of readdirSync(folder)) {
+        if (written.has(existing)) continue;
+        if (!FETCHED_NAME.test(existing) || !existing.startsWith(`${item.rowId}-`)) continue;
+        rmSync(path.join(folder, existing));
+        summary.removed.push({ rowId: item.rowId, file: existing });
+        log(`  ${item.rowId}  removed ${existing} (replaced)`);
       }
     }
   }

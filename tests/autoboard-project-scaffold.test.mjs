@@ -263,6 +263,34 @@ test("fetchReferenceImages writes each item's photos and the build log then find
   }
 });
 
+test("re-fetching clears a file the manifest no longer writes, but not a hand-dropped photo", async () => {
+  const root = tempRoot();
+  try {
+    const definition = await belmont();
+    await scaffoldProject({ definition, root });
+    const room = definition.rooms.find((entry) => entry.room === "Bath 2");
+    const item = room.items.find((entry) => entry.rowId === "B2-01");
+    const folder = path.join(root, ...folderFor(room, item).split("/"));
+
+    const asJpeg = { images: { "elm-palette-seafoam": { files: [{ url: "https://example.test/a.jpg", kind: "face", contentType: "image/jpeg" }] } } };
+    const download = async () => ({ buffer: PNG, contentType: "image/jpeg" });
+    await fetchReferenceImages({ definition, manifest: asJpeg, root, download });
+    // A photo someone put there by hand, which must survive every re-fetch.
+    writeFileSync(path.join(folder, "site-photo.png"), PNG);
+    assert.deepEqual(readdirSync(folder).sort(), ["B2-01-1-face.jpg", "site-photo.png"]);
+
+    // Swapping the dealer's jpeg for the manufacturer's webp changes the
+    // filename; the old one must not linger, or the build log sorts it first
+    // and the board keeps rendering the picture that was replaced.
+    const asWebp = { images: { "elm-palette-seafoam": { files: [{ url: "https://example.test/a.webp", kind: "face", contentType: "image/webp" }] } } };
+    const summary = await fetchReferenceImages({ definition, manifest: asWebp, root, download, force: true });
+    assert.deepEqual(readdirSync(folder).sort(), ["B2-01-1-face.webp", "site-photo.png"]);
+    assert.deepEqual(summary.removed.map((entry) => entry.file), ["B2-01-1-face.jpg"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("fetchReferenceImages records a download failure instead of throwing", async () => {
   const root = tempRoot();
   try {

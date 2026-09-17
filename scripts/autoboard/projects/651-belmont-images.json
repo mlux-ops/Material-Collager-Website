@@ -568,27 +568,27 @@
       "product": "Thermador Emerald 5-Program Dishwasher 24 Inch, Panel Ready",
       "sku": "DWHD640EPR",
       "vendorPage": "https://www.fergusonhome.com/thermador-dwhd640epr/s2015633",
-      "note": "Model DWHD640EPR confirmed: 24-inch Emerald series fully integrated panel-ready dishwasher. Product photos showing the stainless steel exterior and control panel on plain background (panel-ready unit with stainless face).",
+      "note": "Panel-ready unit: the front shot shows it wearing a wood panel, the second shows the control panel with the door slightly open. Replaces a 493x700 dealer shot the pipeline flagged as low resolution.",
       "files": [
         {
-          "url": "https://images.plessers.com/photos/p/00184/1840210.jpg",
+          "url": "https://media3.bsh-group.com/Product_Shots/23595467_DWHD640EPR-Thermador-Emerald-Dishwasher-Front_def.webp",
           "kind": "face",
-          "contentType": "image/jpeg",
-          "bytes": 11882,
-          "width": 493,
-          "height": 700,
-          "sha256": "7483b96fab94353f950b19ebd23864c9ff36a64bfba6c8c514a370dc23145f84",
-          "source": "Plesser's Appliances"
+          "contentType": "image/webp",
+          "bytes": 348610,
+          "width": 1942,
+          "height": 2709,
+          "sha256": "c286c7c735f714992aebedce31a282cea5a17b9d7d71febf5c1d1e8927626a5c",
+          "source": "media3.bsh-group.com — Thermador/BSH official product shots"
         },
         {
-          "url": "https://images.plessers.com/photos/p/00184/1840212.jpg",
-          "kind": "iso",
-          "contentType": "image/jpeg",
-          "bytes": 29032,
-          "width": 502,
-          "height": 700,
-          "sha256": "e975305af0f57700bf004735eeef8b423ee33d270005e7189f027cbb0e14e6fc",
-          "source": "Plesser's Appliances"
+          "url": "https://media3.bsh-group.com/Product_Shots/23595468_DWHD640EPR-Thermador-Emerald-Dishwasher-Slightly-Open-Control-Panel_def.webp",
+          "kind": "angle",
+          "contentType": "image/webp",
+          "bytes": 254354,
+          "width": 2288,
+          "height": 2703,
+          "sha256": "cc9d23df1eef59b57f2c91857073432754b88f4be5d6ba3f39d50eaccfd70407",
+          "source": "media3.bsh-group.com — Thermador/BSH official product shots"
         }
       ]
     },
@@ -764,7 +764,7 @@
       "product": "Zephyr Monsoon II 48\" Stainless Steel Hood Insert",
       "sku": "AK9346BS",
       "vendorPage": "https://www.fergusonhome.com/zephyr-ak9346b/s1745799",
-      "note": "Model AK9346BS confirmed: 48-inch Monsoon II stainless steel hood insert. Product photos showing the insert unit itself on plain background.",
+      "note": "One photograph only — the two vendor URLs for this insert return byte-identical files. A second hunt for a larger shot returned only kitchen room scenes (one of them a white custom hood ENCLOSURE, not this stainless insert), so the 745x482 product shot stands and gaps.md flags it as low resolution.",
       "files": [
         {
           "url": "https://images.plessers.com/photos/p/00089/890946.jpg",
