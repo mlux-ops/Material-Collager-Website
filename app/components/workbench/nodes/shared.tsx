@@ -548,6 +548,32 @@ export function useConnectedImageCount(id: string, portIds: string[]) {
   }, [edges, nodes, id, portIds]);
 }
 
+// The same ordered expansion as useConnectedImageCount, but keeping each
+// image's identity and the node it came from. Prompt Builder needs this to
+// show WHICH photo is "Image 2": the numbering is edge order, which is
+// invisible on the canvas, so a row has to name its source to be usable.
+export function useConnectedReferenceSlots(id: string, portIds: string[]) {
+  const edges = useEdges();
+  const nodes = useNodes<WorkbenchNode>();
+  return useMemo(() => {
+    const slots: Array<{ cacheKey: string; sourceNodeId: string; sourceTitle: string }> = [];
+    for (const edge of edges) {
+      if (edge.target !== id || !portIds.includes(edge.targetHandle || "")) continue;
+      const source = nodes.find((candidate) => candidate.id === edge.source);
+      if (!source) continue;
+      const run = activeRunOf(source);
+      if (!run) continue;
+      const value = outputValuesFor(source, run, edge.sourceHandle ?? specFor(source.data.kind).outputs[0]?.id ?? "")[0];
+      if (!value) continue;
+      const sourceTitle = specFor(source.data.kind).title;
+      for (const cacheKey of imageCacheKeysFromValue(value)) {
+        slots.push({ cacheKey, sourceNodeId: source.id, sourceTitle });
+      }
+    }
+    return slots;
+  }, [edges, nodes, id, portIds]);
+}
+
 // The cacheKey of the single image on one input port, for UI that needs the
 // input's pixel dimensions (GenerationSettings' "Match input image" size).
 export function useConnectedImageCacheKey(id: string, portId: string | undefined): string | undefined {

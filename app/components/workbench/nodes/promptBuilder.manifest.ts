@@ -1,4 +1,5 @@
 import { assembleSections, buildReferenceMap, changeScopeLines } from "../../../lib/prompt-sections.ts";
+import { imageCacheKeysFromValue } from "./generation.ts";
 import type { NodeManifest, NodeOutputValue, WorkbenchParams } from "../types";
 
 const DOMAIN_LINES = {
@@ -17,41 +18,61 @@ export type PromptMode = (typeof PROMPT_MODES)[number];
 export const REFERENCE_ROLES = ["subject", "layout master", "style", "background", "supporting view"] as const;
 export const DEFAULT_REFERENCE_ROLE = "subject";
 
-// A references value groups many images; a bare image value is one. The prompt
-// must number what the model will actually receive, not how many wires arrive.
+// Counted through the exact function that builds the multipart body
+// (executeGeneration -> imageCacheKeysFromValue), never by re-deriving it: a
+// references item can carry several imageKeys and repeated item ids collapse,
+// so any parallel count drifts from what the model actually receives and the
+// prompt ends up numbering an image that was never sent.
 export function countReferences(values: NodeOutputValue[]): number {
-  let total = 0;
-  for (const value of values) {
-    if (value.kind === "references") total += value.items.length;
-    else if (value.kind === "image") total += 1;
-  }
-  return total;
+  return values.reduce((total, value) => total + imageCacheKeysFromValue(value).length, 0);
+}
+
+// Edit-shaped nodes push the base image into the multipart FIRST and then the
+// references (shared.tsx executeGeneration), so on the wire the thing being
+// edited is Image 1 and references start at Image 2. collage.ts compensates
+// the same way via its own nextIndex offset.
+const BASE_IMAGE_ROLE = "the image being edited";
+export function hasBaseImage(mode: PromptMode): boolean {
+  return mode !== "generate";
 }
 
 function lines(...parts: Array<string | undefined>): string {
   return parts.map((part) => part?.trim() ?? "").filter(Boolean).join("\n");
 }
 
-function referenceSection(params: WorkbenchParams, referenceCount: number) {
-  if (referenceCount < 1) return null;
+// List fields store the raw textarea text, never a normalized array: trimming
+// and dropping blank lines on every keystroke makes it impossible to type a
+// trailing space or press Enter, because the controlled value erases them as
+// fast as they are typed. Splitting happens here instead, at assembly time.
+// The array branch only exists for graphs saved before that change.
+export function toLines(value: string | string[] | undefined): string[] {
+  const raw = Array.isArray(value) ? value.join("\n") : value ?? "";
+  return raw.split("\n").map((line) => line.trim()).filter(Boolean);
+}
+
+function referenceSection(params: WorkbenchParams, referenceCount: number, mode: PromptMode) {
   const roles = params.referenceRoles ?? [];
   const refs = Array.from({ length: referenceCount }, (_, index) => ({
     role: roles[index]?.trim() || DEFAULT_REFERENCE_ROLE,
   }));
+  // The base image occupies Image 1 on an edit turn, so it has to be named
+  // here or every reference number below it is off by one.
+  if (hasBaseImage(mode)) refs.unshift({ role: BASE_IMAGE_ROLE });
+  if (!refs.length) return null;
   return { heading: "REFERENCE MAP", body: buildReferenceMap(refs) };
 }
 
 export function buildPrompt(params: WorkbenchParams, referenceCount: number, extra = ""): string {
   const mode: PromptMode = params.promptMode ?? "generate";
-  const refMap = referenceSection(params, referenceCount);
+  const refMap = referenceSection(params, referenceCount, mode);
   const tail = { heading: "ADDITIONAL DIRECTION", body: lines(params.extraDirection, extra) };
 
   if (mode === "edit") {
     return assembleSections([
       ...changeScopeLines({
         change: params.editChange?.trim() ?? "",
-        preserve: params.editPreserve,
-        exclusions: params.editExclusions,
+        preserve: toLines(params.editPreserve),
+        exclusions: toLines(params.editExclusions),
       }),
       refMap,
       tail,
@@ -64,11 +85,12 @@ export function buildPrompt(params: WorkbenchParams, referenceCount: number, ext
     // batching that rule exists to prevent.
     const [change, carry] = changeScopeLines({
       change: params.refineChange?.trim() ?? "",
-      preserve: params.refineCarry,
+      preserve: toLines(params.refineCarry),
     });
     return assembleSections([
       change ? { heading: "SINGLE CHANGE", body: change.body } : null,
       carry ? { heading: "CARRY FORWARD", body: carry.body } : null,
+      refMap,
       tail,
     ]);
   }
@@ -121,10 +143,10 @@ export const promptBuilderManifest: NodeManifest = {
     genDetails: "",
     genConstraints: "",
     editChange: "",
-    editPreserve: [],
-    editExclusions: [],
+    editPreserve: "",
+    editExclusions: "",
     refineChange: "",
-    refineCarry: [],
+    refineCarry: "",
     referenceRoles: [],
   },
   importSchema: {
@@ -139,10 +161,10 @@ export const promptBuilderManifest: NodeManifest = {
       genDetails: { type: "string", optional: true, maxLength: 4_000 },
       genConstraints: { type: "string", optional: true, maxLength: 4_000 },
       editChange: { type: "string", optional: true, maxLength: 4_000 },
-      editPreserve: { type: "stringList", optional: true, maxItems: 40, maxLength: 400 },
-      editExclusions: { type: "stringList", optional: true, maxItems: 40, maxLength: 400 },
+      editPreserve: { type: "string", optional: true, maxLength: 4_000 },
+      editExclusions: { type: "string", optional: true, maxLength: 4_000 },
       refineChange: { type: "string", optional: true, maxLength: 4_000 },
-      refineCarry: { type: "stringList", optional: true, maxItems: 40, maxLength: 400 },
+      refineCarry: { type: "string", optional: true, maxLength: 4_000 },
       referenceRoles: { type: "stringList", optional: true, maxItems: 64, maxLength: 60 },
     },
     sourceBlobKeys: [],

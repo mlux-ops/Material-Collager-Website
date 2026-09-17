@@ -3,12 +3,14 @@
 import { memo, useMemo } from "react";
 import { useWorkbenchStore } from "../store";
 import styles from "../workbench.module.css";
-import { NodeShell, useConnectedImageCount, type WorkbenchNodeProps } from "./shared";
+import { getBlobUrl, getThumbnailUrl } from "../blob-cache";
+import { NodeShell, useConnectedReferenceSlots, type WorkbenchNodeProps } from "./shared";
 import {
   DEFAULT_REFERENCE_ROLE,
   PROMPT_MODES,
   REFERENCE_ROLES,
   buildPrompt,
+  hasBaseImage,
   type PromptMode,
 } from "./promptBuilder.manifest";
 
@@ -20,14 +22,21 @@ const MODE_LABELS: Record<PromptMode, string> = {
   refine: "Refine",
 };
 
-function toList(text: string): string[] {
-  return text.split("\n").map((line) => line.trim()).filter(Boolean);
+// Renders exactly what was typed. Normalizing here would erase a space or a
+// newline the instant it is typed, because the controlled value round-trips on
+// every keystroke; buildPrompt splits the text at assembly time instead.
+function rawText(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value.join("\n") : value ?? "";
 }
 
 export const Component = memo(function PromptBuilderNode({ id, data }: WorkbenchNodeProps) {
   const updateParams = useWorkbenchStore((state) => state.updateParams);
-  const referenceCount = useConnectedImageCount(id, REFERENCE_PORTS);
+  const slots = useConnectedReferenceSlots(id, REFERENCE_PORTS);
+  const referenceCount = slots.length;
   const mode: PromptMode = data.params.promptMode ?? "generate";
+  // On an edit turn the base image is Image 1, so the references connected
+  // here are numbered from 2 (see executeGeneration's multipart order).
+  const numberOffset = hasBaseImage(mode) ? 1 : 0;
   const preview = useMemo(() => buildPrompt(data.params, referenceCount), [data.params, referenceCount]);
 
   const roles = data.params.referenceRoles ?? [];
@@ -101,11 +110,11 @@ export const Component = memo(function PromptBuilderNode({ id, data }: Workbench
           </label>
           <label className={styles.field}>
             <span>Preserve (one per line)</span>
-            <textarea className={`${styles.textarea} nodrag nowheel`} rows={3} value={(data.params.editPreserve ?? []).join("\n")} onChange={(event) => updateParams(id, { editPreserve: toList(event.target.value) })} placeholder={"camera angle\nroom lighting\nfloor shadows"} />
+            <textarea className={`${styles.textarea} nodrag nowheel`} rows={3} value={rawText(data.params.editPreserve)} onChange={(event) => updateParams(id, { editPreserve: event.target.value })} placeholder={"camera angle\nroom lighting\nfloor shadows"} />
           </label>
           <label className={styles.field}>
             <span>Exclusions (one per line)</span>
-            <textarea className={`${styles.textarea} nodrag nowheel`} rows={2} value={(data.params.editExclusions ?? []).join("\n")} onChange={(event) => updateParams(id, { editExclusions: toList(event.target.value) })} placeholder={"text\nlogos\nwatermarks"} />
+            <textarea className={`${styles.textarea} nodrag nowheel`} rows={2} value={rawText(data.params.editExclusions)} onChange={(event) => updateParams(id, { editExclusions: event.target.value })} placeholder={"text\nlogos\nwatermarks"} />
           </label>
         </>
       ) : null}
@@ -118,7 +127,7 @@ export const Component = memo(function PromptBuilderNode({ id, data }: Workbench
           </label>
           <label className={styles.field}>
             <span>Carry forward (one per line)</span>
-            <textarea className={`${styles.textarea} nodrag nowheel`} rows={3} value={(data.params.refineCarry ?? []).join("\n")} onChange={(event) => updateParams(id, { refineCarry: toList(event.target.value) })} placeholder={"the exact billboard text\nthe product label"} />
+            <textarea className={`${styles.textarea} nodrag nowheel`} rows={3} value={rawText(data.params.refineCarry)} onChange={(event) => updateParams(id, { refineCarry: event.target.value })} placeholder={"the exact billboard text\nthe product label"} />
           </label>
         </>
       ) : null}
@@ -126,20 +135,33 @@ export const Component = memo(function PromptBuilderNode({ id, data }: Workbench
       {referenceCount > 0 ? (
         <div className={styles.field}>
           <span>Reference roles ({referenceCount})</span>
-          {Array.from({ length: referenceCount }, (_, index) => (
-            <label key={index} className={styles.field}>
-              <span>Image {index + 1}</span>
-              <select
-                className="nodrag"
-                value={roles[index] ?? DEFAULT_REFERENCE_ROLE}
-                onChange={(event) => setRole(index, event.target.value)}
-              >
-                {REFERENCE_ROLES.map((role) => (
-                  <option key={role} value={role}>{role}</option>
-                ))}
-              </select>
-            </label>
-          ))}
+          {numberOffset ? (
+            <small>Image 1 is the image being edited, connected on the edit node.</small>
+          ) : null}
+          {slots.map((slot, index) => {
+            // A thumbnail only exists once something has generated one; the
+            // full blob is always there, so fall back to it rather than
+            // showing an empty row.
+            const thumbnail = getThumbnailUrl(slot.cacheKey) ?? getBlobUrl(slot.cacheKey);
+            return (
+              <label key={slot.cacheKey} className={styles.field}>
+                <span>
+                  Image {index + 1 + numberOffset} · {slot.sourceTitle}
+                </span>
+                {/* eslint-disable-next-line @next/next/no-img-element -- blob: URL from the in-memory cache; next/image cannot optimize it */}
+                {thumbnail ? <img src={thumbnail} alt="" width={48} height={48} style={{ objectFit: "cover" }} /> : null}
+                <select
+                  className="nodrag"
+                  value={roles[index] ?? DEFAULT_REFERENCE_ROLE}
+                  onChange={(event) => setRole(index, event.target.value)}
+                >
+                  {REFERENCE_ROLES.map((role) => (
+                    <option key={role} value={role}>{role}</option>
+                  ))}
+                </select>
+              </label>
+            );
+          })}
         </div>
       ) : null}
 
