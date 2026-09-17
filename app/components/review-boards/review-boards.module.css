@@ -1,4 +1,10 @@
 /* Review boards — /review-boards
+   Type scale is the site's, not this page's own: 22px page title, 15px section
+   heading, 14px item title, 11px supporting text, 11px controls, 10px buttons,
+   and kickers at 11px/750 with ZERO letter-spacing in --accent-dark (see
+   .studio-header h1, .surface-heading h2, .section-kicker and
+   .surface-actions button in app/globals.css). The compact studio workspace is
+   deliberately dense; a looser scale here reads as a different product.
    Two regions: a projects rail that stays put while you switch between stored
    projects, and a board region that changes under it. Hierarchy comes from
    type scale, grouping and the slot-state color, not from boxing everything
@@ -49,13 +55,24 @@
   gap: 12px;
 }
 
+/* The house kicker (.section-kicker in globals.css): 11px, weight 750, NO
+   letter-spacing, uppercase, in --accent-dark. Tracking-out small caps is a
+   different house's habit and reads as a different product next to the
+   generator. */
+.railTitle,
+.label,
+.gapHead,
+.candidatesHead,
+.boardRoom {
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: var(--accent-dark);
+}
+
 .railTitle {
   margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--muted);
 }
 
 .count {
@@ -103,8 +120,8 @@
 
 .projectName {
   display: block;
-  font-size: 15px;
-  font-weight: 550;
+  font-size: 14px;
+  font-weight: 500;
   line-height: 1.3;
 }
 
@@ -117,8 +134,8 @@
 }
 
 .empty {
-  padding: 16px 15px;
-  font-size: 14px;
+  padding: 14px 15px;
+  font-size: 11px;
   line-height: 1.55;
   color: var(--muted);
 }
@@ -136,8 +153,8 @@
 
 .builderTitle {
   margin: 0;
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .field {
@@ -147,20 +164,17 @@
 }
 
 .label {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
+  display: block;
 }
 
 .input {
   width: 100%;
-  padding: 10px 12px;
+  min-height: 34px;
+  padding: 6px 7px;
   border: 1px solid var(--line);
   background: var(--surface-quiet);
   color: var(--ink);
-  font-size: 14px;
+  font-size: 11px;
 }
 
 .input:focus {
@@ -169,7 +183,7 @@
 }
 
 .help {
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1.5;
   color: var(--muted);
 }
@@ -181,10 +195,11 @@
 }
 
 .chip {
-  padding: 6px 11px;
+  min-height: 26px;
+  padding: 4px 8px;
   border: 1px solid var(--line);
   background: var(--surface-quiet);
-  font-size: 13px;
+  font-size: 10px;
   color: var(--ink);
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease;
@@ -216,9 +231,10 @@
 .primary,
 .secondary,
 .quiet {
-  padding: 10px 16px;
-  font-size: 14px;
-  font-weight: 550;
+  min-height: 30px;
+  padding: 5px 9px;
+  font-size: 10px;
+  font-weight: 500;
   cursor: pointer;
   border: 1px solid transparent;
 }
@@ -260,8 +276,8 @@
 }
 
 .notice {
-  padding: 11px 13px;
-  font-size: 13px;
+  padding: 9px 11px;
+  font-size: 11px;
   line-height: 1.5;
   background: rgba(154, 57, 47, 0.08);
   color: var(--danger);
@@ -286,10 +302,9 @@
 
 .mainTitle {
   margin: 0;
-  font-size: 30px;
+  font-size: 22px;
   font-weight: 600;
-  letter-spacing: -0.015em;
-  line-height: 1.15;
+  line-height: 1.1;
 }
 
 .source {
@@ -313,7 +328,7 @@
 }
 
 .tallyValue {
-  font-size: 22px;
+  font-size: 15px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   line-height: 1;
@@ -321,9 +336,8 @@
 
 .tallyLabel {
   font-size: 11px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .boards {
@@ -351,16 +365,12 @@
 }
 
 .boardRoom {
-  font-size: 12px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
+  display: block;
 }
 
 .boardKind {
-  font-size: 19px;
+  font-size: 15px;
   font-weight: 600;
-  letter-spacing: -0.01em;
 }
 
 .boardFill {
@@ -460,16 +470,16 @@
 
 .gapsTitle {
   margin: 0 0 4px;
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 600;
 }
 
 .gapsIntro {
   margin: 0 0 14px;
-  font-size: 13px;
+  font-size: 11px;
   line-height: 1.55;
   color: var(--muted);
-  max-width: 68ch;
+  max-width: 78ch;
 }
 
 .gapGroup {
@@ -481,11 +491,7 @@
 }
 
 .gapHead {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted);
+  display: block;
 }
 
 .gapList {
@@ -498,7 +504,7 @@
 }
 
 .gapItem {
-  font-size: 13px;
+  font-size: 11px;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -511,10 +517,10 @@
 }
 
 .placeholder {
-  padding: 60px 24px;
+  padding: 56px 24px;
   text-align: center;
   color: var(--muted);
-  font-size: 15px;
+  font-size: 11px;
   line-height: 1.6;
 }
 
@@ -551,7 +557,7 @@
   }
 
   .mainTitle {
-    font-size: 24px;
+    font-size: 18px; /* matches the site's own narrow-viewport h1 step-down */
   }
 
   .boards {
@@ -650,10 +656,11 @@
 }
 
 .photoAction {
+  min-height: 26px;
   padding: 4px 8px;
   border: 1px solid var(--line);
   background: var(--surface-quiet);
-  font-size: 11px;
+  font-size: 10px;
   color: var(--muted);
   cursor: pointer;
 }
@@ -678,10 +685,11 @@
 .photoUrl {
   flex: 1 1 180px;
   min-width: 0;
-  padding: 4px 8px;
+  min-height: 26px;
+  padding: 4px 7px;
   border: 1px solid var(--line);
   background: var(--surface-quiet);
-  font-size: 11px;
+  font-size: 10px;
   color: var(--ink);
 }
 
@@ -694,10 +702,6 @@
 .candidatesHead {
   display: block;
   margin-bottom: 5px;
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
 }
 
 .candidateList {
@@ -754,13 +758,14 @@
 }
 
 .viewTab {
-  padding: 9px 15px;
+  min-height: 34px;
+  padding: 6px 11px;
   border: 0;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
   background: transparent;
-  font-size: 14px;
-  font-weight: 550;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--muted);
   cursor: pointer;
 }
@@ -800,7 +805,7 @@
 }
 
 .builtName {
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
