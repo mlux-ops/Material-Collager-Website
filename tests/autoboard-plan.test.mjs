@@ -109,6 +109,59 @@ test("assignSlots picks the first candidate deterministically and records altern
   assert.deepEqual(unmapped.map((entry) => entry.rowId), ["11"]);
 });
 
+test("assignSlots holds back a substitute and reports the slot it was kept out of", () => {
+  const rows = [
+    row({ rowId: "40", itemName: "Kohler Purist Wall-Mounted Basin Faucet Trim" }),
+    row({ rowId: "41", itemName: "AXOR Uno Lavatory Faucet", status: "alternative" }),
+  ];
+  const { filled, unmapped, conflicts, substitutes } = assignSlots(rows, "bathroom_fixture_collage");
+  assert.equal(filled.length, 1);
+  assert.equal(filled[0].row.rowId, "40");
+  // The substitute never becomes an alternate of the winner either: it was
+  // never a candidate.
+  assert.equal(conflicts.length, 0);
+  assert.deepEqual(substitutes.map((entry) => [entry.slotId, entry.rowId]), [["vanity_faucet", "41"]]);
+  // Reported as a substitute, so it must not also show up as unmapped.
+  assert.deepEqual(unmapped.map((entry) => entry.rowId), []);
+});
+
+test("assignSlots takes a substitute only out of slots it could have filled", () => {
+  const rows = [
+    row({ rowId: "50", itemName: "Kohler Purist Cabinet Pull", costCode: "09 00 Finishes Hardware - M", status: "alternative" }),
+    row({ rowId: "51", itemName: "Kohler Purist Towel Bar 18 in", costCode: "09 00 Finishes Hardware - M", status: "alternative" }),
+  ];
+  const { filled, unmapped, substitutes } = assignSlots(rows, "bathroom_fixture_collage");
+  assert.equal(filled.length, 0);
+  assert.deepEqual(substitutes.map((entry) => entry.rowId), ["50"]);
+  // The towel bar matches no slot at all, so it stays an ordinary unmapped row.
+  assert.deepEqual(unmapped.map((entry) => entry.rowId), ["51"]);
+});
+
+test("a substitute never wins a slot even when no preferred row matches", () => {
+  const rows = [row({ rowId: "60", itemName: "MSI Sande Ivory Floor Tile", status: "alternative" })];
+  const { filled, substitutes } = assignSlots(rows, "bathroom_fixture_collage");
+  // An empty slot is the correct outcome: gaps.md reports it, and the board
+  // renders without a material nobody selected.
+  assert.equal(filled.length, 0);
+  assert.equal(substitutes[0].slotId, "main_tile");
+});
+
+test("buildBoards records held-back substitutes in gaps", () => {
+  const rows = [
+    row({ rowId: "70", itemName: "Brizo Odin Lavatory Faucet" }),
+    row({ rowId: "71", itemName: "Brizo Round Showerhead" }),
+    row({ rowId: "72", itemName: "AXOR Uno Lavatory Faucet", status: "alternative" }),
+  ];
+  const gaps = emptyGaps();
+  const { boards } = buildBoards(rows, { resolveImages: () => ["a.jpg"], gaps });
+  const fixture = boards.find((board) => board.collageType === "bathroom_fixture_collage");
+  assert.equal(fixture.items.find((item) => item.slotId === "vanity_faucet").rowId, "70");
+  assert.ok(
+    gaps.substituteCandidates.some((gap) => gap.rowId === "72" && gap.slotId === "vanity_faucet" && gap.roomLabel === "Bath 2"),
+  );
+  assert.ok(!gaps.unmappedItems.some((gap) => gap.rowId === "72"));
+});
+
 test("assignSlots maps kitchen appliances", () => {
   const rows = [
     row({ rowId: "20", roomLabel: "Kitchen", costCode: "11 30 Appliances - T&M", itemName: "Miele 42- Built-In Panel Ready Fridge" }),

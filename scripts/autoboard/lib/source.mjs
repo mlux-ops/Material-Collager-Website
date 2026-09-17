@@ -96,9 +96,19 @@ export function roomKey(unitType, roomLabel) {
 //   itemName, sku, qty, reference }
 // ---------------------------------------------------------------------------
 
+// A project definition marks each row `preferred`, `alternative` or `pending`
+// (see scripts/autoboard/projects/). Only `alternative` changes behaviour: it
+// means "a substitute for another row", never an additional material, so
+// match.mjs keeps it out of automatic slot assignment. Anything else, including
+// a blank from a source that has no such column, is treated as a normal row.
+function normalizedStatus(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
 function normalizedRow(raw) {
   return {
     rowId: String(raw.rowId ?? "").trim(),
+    status: normalizedStatus(raw.status),
     unitType: String(raw.unitType ?? "").replace(/\s+/g, " ").trim(),
     roomLabel: normalizeRoomLabel(raw.roomType),
     roomOriginal: String(raw.roomType ?? "").replace(/\s+/g, " ").trim(),
@@ -132,6 +142,7 @@ export function emptyGaps() {
   return {
     blankUnitRows: [],
     blankRoomRows: [],
+    substituteCandidates: [],
     unmappedItems: [],
     imagelessItems: [],
     skippedRooms: [],
@@ -170,6 +181,7 @@ export async function loadOfflineRows(libraryRoot) {
       sku: record.sku,
       qty: record.qty,
       reference: record.reference,
+      status: record.status,
     })),
     gaps,
   );

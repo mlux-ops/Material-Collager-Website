@@ -95,6 +95,33 @@ and Title Case for the same manufacturer.
 This arm measures the baseline only. It does not show that a System One
 judgment would do better; that is what the unrun treatment arms are for.
 
+### After holding substitutes back from automatic assignment
+
+`assignSlots` now skips rows a project marked `alternative` and reports the slot
+each one was kept out of. Re-running both arms:
+
+| naming | correct / 30 | wrong row in the slot | slot emptied |
+|---|---|---|---|
+| canonical, before | 28 | 0 | 2 |
+| canonical, after | 28 | 0 | 2 |
+| reworded, before | 15 | 7 | 8 |
+| reworded, after | 14 | **0** | 16 |
+
+The normal case is unchanged, and every silent substitution is gone. The
+reworded arm loses one more slot because Bath 2's tile board no longer exists
+at all: its wall/floor/accent gate was being satisfied by three alternatives,
+so the board that disappeared was one built on three materials nobody chose.
+
+Accuracy is not what this change buys — 14 is not better than 15. What it buys
+is that every remaining failure is visible: 16 empty slots that `gaps.md`
+lists, instead of 7 wrong materials it did not mention.
+
+A second finding fell out of the live run: on the real 651 Belmont library the
+regexes offer **"Sonneman Stiletto Vanity Light" as a candidate for `main_tile`**,
+because `main_tile` matches `/tile/i` and "Stiletto" contains the letters
+t-i-l-e. It loses only because the Seafoam tile is listed first. Remove that row
+and a light fixture becomes the room's main tile.
+
 ## Token usage and latency
 
 | run | input tokens | output tokens | requests | latency |

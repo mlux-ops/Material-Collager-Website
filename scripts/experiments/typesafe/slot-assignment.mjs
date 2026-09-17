@@ -180,6 +180,9 @@ function baselineBoards(definition, rows, room) {
       sku: row.sku,
       qty: 1,
       reference: "",
+      // Carried through because the pipeline now reads it: a row marked
+      // `alternative` is held back from automatic slot assignment.
+      status: row.status,
     })),
     { resolveImages: () => ["placeholder.png"], minSlots: 1, gaps },
   );

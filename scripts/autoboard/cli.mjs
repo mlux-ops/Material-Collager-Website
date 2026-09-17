@@ -372,6 +372,8 @@ function gapsMarkdown(runId, source, gaps) {
       `- ${gap.unitType} / ${gap.roomLabel} / ${gap.collageType} / ${gap.slotId}: ${gap.itemName} (row ${gap.rowId}, SKU ${gap.sku || "—"})`],
     ["Preset slots left unfilled", gaps.unfilledSlots, (gap) =>
       `- ${gap.unitType} / ${gap.roomLabel} / ${gap.collageType} / ${gap.slotId}: ${gap.reason}`],
+    ["Substitutes held back from a slot (choose one in the review board to use it)", gaps.substituteCandidates ?? [], (gap) =>
+      `- ${gap.unitType} / ${gap.roomLabel} / ${gap.collageType} / ${gap.slotId}: ${gap.itemName} (row ${gap.rowId}, SKU ${gap.sku || "—"}) is marked as an alternative, so it never fills a slot automatically`],
     ["Library items not mapped to any slot", gaps.unmappedItems, (gap) =>
       `- ${gap.unitType} / ${gap.roomLabel}: ${gap.itemName} (row ${gap.rowId}, ${gap.costCode})`],
     ["Low-resolution references (flagged, not excluded)", gaps.lowResolutionReferences ?? [], (gap) =>

@@ -1,6 +1,6 @@
 {
   "model": "jev-latest",
-  "ranAt": "2026-09-17T04:00:31.234Z",
+  "ranAt": "2026-09-17T04:05:43.558Z",
   "adversarial": true,
   "perturbed": true,
   "boards": [
@@ -48,13 +48,13 @@
           {
             "slot": "main_tile",
             "expected": "B2-01",
-            "actual": "B2-14",
+            "actual": null,
             "correct": false
           },
           {
             "slot": "accent_tile",
             "expected": "B2-02",
-            "actual": "B2-16",
+            "actual": null,
             "correct": false
           },
           {
@@ -77,26 +77,26 @@
           {
             "slot": "wall_tile",
             "expected": "B2-01",
-            "actual": "B2-15",
+            "actual": null,
             "correct": false
           },
           {
             "slot": "floor_tile",
             "expected": "B2-03",
-            "actual": "B2-14",
+            "actual": null,
             "correct": false
           },
           {
             "slot": "accent_tile",
             "expected": "B2-02",
-            "actual": "B2-16",
+            "actual": null,
             "correct": false
           },
           {
             "slot": "vanity_wood",
             "expected": "B2-12",
-            "actual": "B2-12",
-            "correct": true
+            "actual": null,
+            "correct": false
           },
           {
             "slot": "countertop",
@@ -111,7 +111,7 @@
             "correct": false
           }
         ],
-        "correct": 2,
+        "correct": 1,
         "total": 6
       },
       "treatments": {}
@@ -160,13 +160,13 @@
           {
             "slot": "main_tile",
             "expected": "B3-01",
-            "actual": "B3-16",
+            "actual": null,
             "correct": false
           },
           {
             "slot": "accent_tile",
             "expected": "B3-02",
-            "actual": "B3-19",
+            "actual": null,
             "correct": false
           },
           {

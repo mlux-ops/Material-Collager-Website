@@ -1,7 +1,8 @@
 {
   "model": "jev-latest",
-  "ranAt": "2026-09-17T03:58:06.636Z",
+  "ranAt": "2026-09-17T04:05:43.420Z",
   "adversarial": true,
+  "perturbed": false,
   "boards": [
     {
       "room": "Bath 2",
