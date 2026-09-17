@@ -38,7 +38,13 @@ export const CUSTOM_ID_PREFIX = "custom:";
 // are still returned (imagePath: null) rather than hidden — the review UI
 // offers an upload affordance for exactly these.
 export function libraryOptionsForSlot({ board, slotId, roomIndex, tileIndex, resolveImages, customItems = [] }) {
-  if (slotKind(slotId) === "tile") {
+  // A tile slot normally browses the coded tile photos under Tile/tiles/. A
+  // project whose tiles are ordinary manifest rows (see
+  // scripts/autoboard/projects/) has no such index, and without the fallback
+  // below its tile slots offer nothing at all — the one kind of slot that
+  // could not be corrected from the board. When the index has entries, the
+  // list is unchanged, so a photo-coded library behaves exactly as before.
+  if (slotKind(slotId) === "tile" && tileIndex.size) {
     return [...tileIndex.values()].map((tile) => ({
       kind: "tile",
       code: tile.code,

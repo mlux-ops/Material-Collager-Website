@@ -84,6 +84,22 @@ test("libraryOptionsForSlot lists every tile code for a tile slot", () => {
   assert.deepEqual(options.map((option) => option.code).sort(), ["AT1", "WT1"]);
 });
 
+test("libraryOptionsForSlot falls back to room rows for a tile slot when the library has no tile photos", () => {
+  // 651 Belmont carries its tiles as manifest rows, so Tile/tiles/ is empty.
+  // Without this the board's tile slots would be the only ones a reviewer
+  // could not correct.
+  const roomIndex = buildRoomIndex([
+    row({ rowId: "1", itemName: "ELM Palette Seafoam Wall Tile" }),
+    row({ rowId: "2", itemName: "Porcelanosa Bottega Caliza Floor Tile" }),
+  ]);
+  const options = libraryOptionsForSlot({
+    board: board([]), slotId: "main_tile", roomIndex, tileIndex: new Map(),
+    resolveImages: (rowId) => [`/fake/${rowId}.png`],
+  });
+  assert.deepEqual(options.map((option) => option.rowId), ["1", "2"]);
+  assert.ok(options.every((option) => option.kind === "row"));
+});
+
 test("libraryOptionsForSlot lists every room row for a regular slot, including ones with no photo yet", () => {
   const roomIndex = buildRoomIndex([
     row({ rowId: "1", itemName: "Brizo Faucet" }),
