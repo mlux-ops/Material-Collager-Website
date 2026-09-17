@@ -451,7 +451,7 @@ black `#000` or muted `#657069` — never the teal. A page here that reaches for
 22px title and green kickers looks like a different product, which is what the
 first two attempts at this page did.
 
-`docs/generator-design-concept.md` §4 proposes a different scale and calls the
-current sub-12px type the generator's "most serious defect". It is marked
-proposal, awaiting approval, it was rendered on this page and turned down, and
-it is not what to match. Match the live app.
+A design concept once proposed a different scale here (an 11px floor, 18px
+headings, a 24px board title) and called the current sub-12px type the
+generator's "most serious defect". It was rendered on this page, reviewed and
+rejected, and the document is deleted. Match the live app.

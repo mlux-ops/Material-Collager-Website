@@ -86,7 +86,14 @@ for an R3F problem; fall back to direct Three.js instead.
 The Unveil reference is art direction, not an information architecture template for the
 generator.
 
-- The generator needs a dedicated approved full-screen design concept.
+- Design details come from the existing site — measured off the running app, not
+  from a concept document. One was written, rendered against real data and
+  rejected (2026-09-17); `docs/generator-design-concept.md` is deleted. Do not
+  write another without being asked for one.
+- Measure the live app, not `globals.css`. The `.generator-shell` block near the
+  end of that file overrides the earlier rules, so the source reads nothing like
+  what renders: `.section-kicker`, for one, is 11px/750 in teal at source and
+  8.4px/500 in black on screen.
 - Retain a clear setup rail, reference workspace, and review/output region only if usability analysis supports them.
 - Create hierarchy using typography, grouping, proportion, imagery, restrained material color, and state treatment—not only black borders and whitespace.
 - Avoid default browser controls where custom controls are needed, but preserve accessibility and keyboard behavior.

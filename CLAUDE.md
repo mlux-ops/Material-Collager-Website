@@ -7,6 +7,14 @@ API as actual image inputs — never downsampled to text descriptions.
 Frontend visual-fidelity rules live in `AGENTS.md`. Read it before touching the
 landing page or the generator UI.
 
+**Design details come from the existing site.** Measure the running app — type,
+colour and spacing — and match it. Do not design from `globals.css`: the
+`.generator-shell` block near the end of that file overrides the earlier rules,
+so the source reads nothing like what renders. The live scale is 8.4px uppercase
+labels and buttons, 10px sub text, 11px body and controls, 14px headings and
+item titles; nothing on any page is larger than 14px, and chrome text is black
+or `#657069`, never the teal — which is reserved for state.
+
 ## Commands
 
 ```bash
