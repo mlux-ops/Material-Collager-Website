@@ -284,3 +284,78 @@ re-read the whole file if that was inconclusive, since a JPEG's SOF can sit past
 a large EXIF segment. `tests/autoboard-image-size.test.mjs` checks every format
 against sharp, because a hand-rolled binary parser rewritten by hand is exactly
 the change that looks right and is wrong on one format.
+
+## The render workflow
+
+A board is only worth rendering once someone has said what they want from it.
+`/review-boards` carries the four decisions the CLI's review server carries —
+a board instruction, a note per slot, which slot anchors the composition, and
+the render options — and shows the prompt those produce.
+
+The prompt is **shown, not described**: it comes from the app's own
+`buildGenerationPrompt`, over the same payload a render would send, so what is
+on screen is what would go out.
+
+### Board state is stored apart from the project on purpose
+
+`autoboard_board_state` is keyed on `(project_id, board_id)`, not on a row. A
+project's rows are a reading of the sheet and a refresh replaces them wholesale;
+board state is a person's work and must survive that. Board ids are derived from
+unit type, room and board kind, so a board that still exists after a refresh
+keeps its notes.
+
+The state is applied to a **copy** when building, never written back into the
+rows a refresh replaces.
+
+Saves are patches, not replacements — the UI saves one field at a time, and a
+write that blanked the others would lose the notes on every keystroke elsewhere.
+An emptied note is deleted rather than stored blank, so `selectionHash` returns
+to exactly the value it had before the note existed.
+
+### What makes a render stale, and what does not
+
+| Change | `selectionHash` | `renderOptionsHash` |
+|---|---|---|
+| A slot's image | ✓ | |
+| A slot's note, or the board instruction | ✓ | |
+| Quality or background | | ✓ |
+| Hero slot | reorders the payload | |
+| `overriddenAt`, `title`, `provenance`, `imageMeta` | — | — |
+
+Both are checked by `renderRecordIsStale`. The bookkeeping fields are excluded
+deliberately: changing them must not invalidate an otherwise-identical render.
+
+### A synchronous SHA-1 that is not node:crypto
+
+Those digests are already written into every `results.json` on disk, so the
+algorithm is not free to change — a different hash marks every stored render
+stale and re-spends real money re-rendering approved boards.
+
+`node:crypto`'s `createHash` is synchronous but is a `node:` builtin, which
+`app/lib` must not import. `crypto.subtle` exists in both runtimes but is
+**async**, while every caller is synchronous all the way up. So
+`app/lib/autoboard/sha1.ts` implements it directly, and
+`tests/autoboard-render-hash.test.mjs` checks it against `node:crypto` across
+the padding and block boundaries where a hand-written loop goes wrong (55/56,
+63/64/65, 119/120, 127/128), unicode, and 200 random inputs. The two workflow
+digests are pinned to literals taken from `node:crypto` over the same material
+the original hashed — the pure version has to keep reproducing them, not merely
+be self-consistent.
+
+It is a change detector. Do not reach for it where collision resistance matters.
+
+### `basename` is injected, finally
+
+`boardPayload` and `boardReferenceFiles` moved to the core and now take a
+`basename` function. The two callers genuinely disagree about what a location
+is: the CLI holds Windows filesystem paths and injects `node:path`'s basename,
+the web holds `/api/autoboard/photos/<id>` urls and injects a last-segment split.
+Hard-coding either corrupts the other. The same function must reach both
+builders, or their lists drift out of the position-for-position alignment the
+multipart upload depends on.
+
+### Not yet wired
+
+Actually spending money on a render. Everything up to the payload exists and is
+validated; issuing the draft/confirm/final calls, storing the outputs and
+picking between them is the next step.

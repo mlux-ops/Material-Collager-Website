@@ -815,3 +815,101 @@
   font-size: 10px;
   color: var(--muted);
 }
+
+/* --- Board workflow ----------------------------------------------------- */
+
+.workflow {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.textarea {
+  width: 100%;
+  min-height: 46px;
+  padding: 6px 7px;
+  border: 1px solid var(--line);
+  background: var(--surface-quiet);
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.workflowRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.select {
+  min-height: 26px;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  background: var(--surface-quiet);
+  color: var(--ink);
+  font-size: 10px;
+}
+
+.noteList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.noteRow {
+  display: grid;
+  grid-template-columns: minmax(86px, auto) minmax(0, 1fr);
+  gap: 7px;
+  align-items: center;
+}
+
+.noteLabel {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.noteInput {
+  width: 100%;
+  min-height: 26px;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  background: var(--surface-quiet);
+  color: var(--ink);
+  font-size: 10px;
+}
+
+.workflowFoot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.workflowMeta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.prompt {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

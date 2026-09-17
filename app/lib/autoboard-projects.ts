@@ -10,7 +10,11 @@
 // needs no separate migration step.
 
 import { env } from "cloudflare:workers";
+import { buildGenerationPrompt } from "./collage.ts";
 import { buildBoards } from "./autoboard/match.ts";
+import { DEFAULT_VARIANTS, boardPayload } from "./autoboard/variants.ts";
+import { boardForRender, resolveRenderOptions, selectionHash } from "./autoboard/render-options.ts";
+import { deleteProjectBoardState, emptyBoardState, listBoardState, type BoardState } from "./autoboard-board-state.ts";
 import { previewBoards, filterRows, type BoardsPreview, type SubsectionFilter } from "./autoboard/preview.ts";
 import { emptyGaps, loadSmartsheetRows } from "./autoboard/source.ts";
 import type { Board, Gaps, LibraryRow } from "./autoboard/types.ts";
@@ -208,6 +212,7 @@ export async function deleteProject(id: string): Promise<boolean> {
   // Photos first: a project row deleted while its photos remain leaves R2
   // objects nothing will ever reference again.
   await deleteProjectPhotos(id);
+  await deleteProjectBoardState(id);
   const result = await DB.prepare("DELETE FROM autoboard_projects WHERE id = ?").bind(id).run();
   return Boolean(result.meta?.changes);
 }
@@ -222,23 +227,66 @@ export async function deleteProject(id: string): Promise<boolean> {
  * in gaps.imagelessItems and leaves the slot empty — exactly as it does on the
  * CLI when a library folder is empty.
  */
+export type BuiltBoard = Board & {
+  state: BoardState;
+  /** Hash of everything the model sees. A render is current only while it matches. */
+  selectionHash: string;
+  renderOptions: { quality: string; background: string };
+  /** The prompt this board would send, from the app's own builder. */
+  prompt: string;
+  referenceCount: number;
+};
+
+// Reference images here are /api/autoboard/photos/<id> urls, never filesystem
+// paths, so the last path segment IS the name. The CLI injects node:path's
+// basename instead, because its locations are Windows paths.
+const urlBasename = (location: string) => location.split("/").pop() ?? location;
+
 export async function buildProjectBoards(
   project: AutoboardProjectDetail,
-): Promise<{ boards: Board[]; gaps: Gaps }> {
-  const byRow = await selectedImagesByRow(project.id);
+): Promise<{ boards: BuiltBoard[]; gaps: Gaps }> {
+  const [byRow, state] = await Promise.all([selectedImagesByRow(project.id), listBoardState(project.id)]);
   const gaps = emptyGaps();
   const { boards } = buildBoards(project.rows, {
     resolveImages: (rowId) => byRow.get(rowId) ?? [],
     gaps,
   });
-  return { boards, gaps };
+
+  return {
+    gaps,
+    boards: boards.map((board) => {
+      const boardState = state.get(board.id) ?? emptyBoardState(board.id);
+      // The reviewer's decisions are applied to a COPY. They are stored per
+      // board and survive a sheet refresh, so they must not be written back
+      // into the rows a refresh replaces.
+      const withState: Board = {
+        ...board,
+        heroItemId: boardState.heroItemId ?? undefined,
+        renderOptions: {
+          ...(boardState.quality ? { quality: boardState.quality } : {}),
+          ...(boardState.background ? { background: boardState.background } : {}),
+        },
+        items: board.items.map((item) => ({ ...item, note: boardState.notes[item.slotId] ?? undefined })),
+      };
+      const renderOptions = resolveRenderOptions(withState, "draft");
+      // boardForRender is what the model actually receives: it folds each
+      // slot's note in and hangs the board instruction off the hero item.
+      const payload = boardPayload(boardForRender(withState, boardState.instruction), DEFAULT_VARIANTS[0], {
+        ...renderOptions,
+        basename: urlBasename,
+      });
+      return {
+        ...withState,
+        state: boardState,
+        selectionHash: selectionHash(withState, boardState.instruction),
+        renderOptions,
+        prompt: buildGenerationPrompt(payload as never),
+        referenceCount: withState.items.reduce((sum, item) => sum + item.images.length, 0),
+      };
+    }),
+  };
 }
 
-// Re-reads the sheet with the project's own filter and replaces its rows and
-// preview. Board ids are derived from unit type, room and board kind, so a
-// board that still exists keeps its id across a refresh and anything attached
-// to it survives; a board whose room left the sheet disappears, which is the
-// honest outcome.
 export async function refreshProject(id: string): Promise<AutoboardProjectDetail | null> {
   const DB = await ensureProjectStorage();
   const existing = await DB.prepare("SELECT * FROM autoboard_projects WHERE id = ?").bind(id).first<ProjectRow>();

@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { RouteReady } from "../RouteReady";
 import { SiteNavigation } from "../SiteNavigation";
 import { SlotPhotos, type ProjectPhoto } from "./SlotPhotos";
+import { BoardWorkflow, type BuiltBoard } from "./BoardWorkflow";
 import styles from "./review-boards.module.css";
 
 type Facet = { value: string; rowCount: number };
@@ -86,15 +87,6 @@ type ProjectDetail = Project & { preview: BoardsPreview };
 // selected. A row with no selected photo yields no images, so its slot is empty
 // here and recorded in built.gaps — the same thing that happens on the CLI when
 // a library folder is empty.
-type BuiltBoard = {
-  id: string;
-  title: string;
-  collageType: string;
-  kindLabel: string;
-  unitType: string;
-  roomLabel: string;
-  items: { slotId: string; name: string; brand: string; images: string[] }[];
-};
 type Built = { boards: BuiltBoard[]; gaps: { imagelessItems: { slotId: string; itemName: string }[] } };
 
 type View = "slots" | "boards";
@@ -508,7 +500,7 @@ export function ReviewBoards() {
               </div>
 
               {view === "boards" ? (
-                <BuiltBoards built={built} />
+                <BuiltBoards built={built} projectId={shown.id} onSaved={reloadPhotos} />
               ) : (
               <div className={styles.boards}>
                 {shown.preview.boards.map((board) => (
@@ -694,7 +686,15 @@ function GapsSection({ preview }: { preview: BoardsPreview }) {
  * board is a set of reference images, and until a person picks them there is no
  * board, only a plan for one.
  */
-function BuiltBoards({ built }: { built: Built | null }) {
+function BuiltBoards({
+  built,
+  projectId,
+  onSaved,
+}: {
+  built: Built | null;
+  projectId: string;
+  onSaved: () => Promise<void>;
+}) {
   if (!built || !built.boards.length) {
     return (
       <p className={styles.placeholder}>
@@ -728,6 +728,7 @@ function BuiltBoards({ built }: { built: Built | null }) {
               </li>
             ))}
           </ul>
+          <BoardWorkflow projectId={projectId} board={board} onSaved={onSaved} />
         </article>
       ))}
     </div>
