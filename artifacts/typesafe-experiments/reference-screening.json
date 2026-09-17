@@ -1,0 +1,28 @@
+{
+  "model": "jev-latest",
+  "ranAt": "2026-09-17T03:56:14.692Z",
+  "threshold": 0.5,
+  "cases": [],
+  "usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "requests": 0,
+    "latencyMs": 0
+  },
+  "counts": {
+    "accept": 39,
+    "reject": 8,
+    "flaggedAccept": 0,
+    "flaggedReject": 0,
+    "byEvidence": {
+      "metadata": {
+        "total": 3,
+        "flagged": 0
+      },
+      "pixels": {
+        "total": 5,
+        "flagged": 0
+      }
+    }
+  }
+}
