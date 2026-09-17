@@ -57,12 +57,17 @@ override). Its render-workflow POST endpoints require `Content-Type: application
 as a CSRF defense.
 
 The web equivalent is `/review-boards`: point it at a project's Smartsheet, pick
-the unit types and rooms you want, and it stores the result as a project you can
-switch between. It runs the same core, but stops at a slot PREVIEW rather than a
-board — `buildBoards` drops any item without a reference photo, so boards cannot
-be built until the photo step exists. Storage is the lazily-created D1 table
-`autoboard_projects`; reading a sheet needs the `SMARTSHEET_ACCESS_TOKEN` Worker
-secret. See `docs/autoboard-shared-core.md`.
+the unit types and rooms you want, collect a reference photo per row, and it
+builds and stores the boards. It runs the same core. Reference photos come from
+the sheet's link (resolved through the product page's `og:image` when the link
+is a page, not an image), a pasted URL, or an upload; nothing is used until a
+person selects it in the review grid. Storage is the lazily-created D1 tables
+`autoboard_projects` and `autoboard_photos` plus R2 under `autoboard/`; reading a
+sheet needs the `SMARTSHEET_ACCESS_TOKEN` Worker secret.
+
+Server-side URL fetching is an SSRF surface — a sheet cell is untrusted input.
+`app/lib/autoboard/photo-sources.ts` holds the guard; read it before touching
+anything that fetches. See `docs/autoboard-shared-core.md`.
 
 Projects without a Smartsheet sheet of their own live as tracked definitions in
 `scripts/autoboard/projects/`; `npm run autoboard:scaffold -- --project <id>` turns one

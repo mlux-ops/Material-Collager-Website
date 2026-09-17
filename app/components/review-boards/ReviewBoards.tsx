@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RouteReady } from "../RouteReady";
 import { SiteNavigation } from "../SiteNavigation";
+import { SlotPhotos, type ProjectPhoto } from "./SlotPhotos";
 import styles from "./review-boards.module.css";
 
 type Facet = { value: string; rowCount: number };
@@ -81,6 +82,23 @@ type Project = {
 
 type ProjectDetail = Project & { preview: BoardsPreview };
 
+// The boards that actually exist: buildBoards run over the photos a person
+// selected. A row with no selected photo yields no images, so its slot is empty
+// here and recorded in built.gaps — the same thing that happens on the CLI when
+// a library folder is empty.
+type BuiltBoard = {
+  id: string;
+  title: string;
+  collageType: string;
+  kindLabel: string;
+  unitType: string;
+  roomLabel: string;
+  items: { slotId: string; name: string; brand: string; images: string[] }[];
+};
+type Built = { boards: BuiltBoard[]; gaps: { imagelessItems: { slotId: string; itemName: string }[] } };
+
+type View = "slots" | "boards";
+
 const JSON_HEADERS = { "content-type": "application/json" };
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
@@ -102,10 +120,21 @@ function formatDate(ms: number): string {
   return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
+// extractBrand pulls the brand out of the item name but leaves the name intact,
+// so rendering both prints "Kohler Kohler Purist Basin Faucet". The brand is
+// shown in its own weight; the name drops the prefix it duplicates.
+function withoutBrandPrefix(name: string, brand: string): string {
+  if (!brand || !name.toLowerCase().startsWith(brand.toLowerCase())) return name;
+  return name.slice(brand.length).trim();
+}
+
 export function ReviewBoards() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
+  const [built, setBuilt] = useState<Built | null>(null);
+  const [photos, setPhotos] = useState<ProjectPhoto[]>([]);
+  const [view, setView] = useState<View>("slots");
 
   const [sheetId, setSheetId] = useState("");
   const [name, setName] = useState("");
@@ -143,10 +172,15 @@ export function ReviewBoards() {
     let cancelled = false;
     void (async () => {
       try {
-        const payload = await api<{ project: ProjectDetail }>(
-          `/api/autoboard/projects/${encodeURIComponent(activeId)}`,
-        );
-        if (!cancelled) setDetail(payload.project);
+        const [payload, photoPayload] = await Promise.all([
+          api<{ project: ProjectDetail; built: Built }>(`/api/autoboard/projects/${encodeURIComponent(activeId)}`),
+          api<{ photos: ProjectPhoto[] }>(`/api/autoboard/projects/${encodeURIComponent(activeId)}/photos`),
+        ]);
+        if (!cancelled) {
+          setDetail(payload.project);
+          setBuilt(payload.built);
+          setPhotos(photoPayload.photos);
+        }
       } catch (cause) {
         if (!cancelled) setError((cause as Error).message);
       }
@@ -235,13 +269,39 @@ export function ReviewBoards() {
     }
   }, [activeId, loadProjects]);
 
+  const reloadPhotos = useCallback(async () => {
+    if (!activeId) return;
+    const [payload, photoPayload] = await Promise.all([
+      api<{ project: ProjectDetail; built: Built }>(`/api/autoboard/projects/${encodeURIComponent(activeId)}`),
+      api<{ photos: ProjectPhoto[] }>(`/api/autoboard/projects/${encodeURIComponent(activeId)}/photos`),
+    ]);
+    setDetail(payload.project);
+    setBuilt(payload.built);
+    setPhotos(photoPayload.photos);
+  }, [activeId]);
+
+  const photosByRow = useMemo(() => {
+    const map = new Map<string, ProjectPhoto[]>();
+    for (const photo of photos) {
+      const list = map.get(photo.rowId) ?? [];
+      list.push(photo);
+      map.set(photo.rowId, list);
+    }
+    return map;
+  }, [photos]);
+
   const tally = useMemo(() => {
     if (!shown) return null;
     return {
       slots: shown.preview.boards.reduce((sum, board) => sum + board.slots.length, 0),
       openSlots: shown.preview.boards.reduce((sum, board) => sum + board.unfilledSlots.length, 0),
+      withPhoto: shown.preview.boards.reduce(
+        (sum, board) =>
+          sum + board.slots.filter((slot) => (photosByRow.get(slot.rowId) ?? []).some((p) => p.status === "selected")).length,
+        0,
+      ),
     };
-  }, [shown]);
+  }, [shown, photosByRow]);
 
   return (
     <div className={styles.page}>
@@ -422,12 +482,34 @@ export function ReviewBoards() {
                     <span className={styles.tallyLabel}>Slots open</span>
                   </div>
                   <div className={styles.tallyItem}>
-                    <span className={styles.tallyValue}>{shown.rowCount}</span>
-                    <span className={styles.tallyLabel}>Sheet rows</span>
+                    <span className={styles.tallyValue}>{tally.withPhoto}</span>
+                    <span className={styles.tallyLabel}>Photos chosen</span>
+                  </div>
+                  <div className={styles.tallyItem}>
+                    <span className={styles.tallyValue}>{built?.boards.length ?? 0}</span>
+                    <span className={styles.tallyLabel}>Boards built</span>
                   </div>
                 </div>
               ) : null}
 
+              <div className={styles.views} role="tablist" aria-label="What to show">
+                {(["slots", "boards"] as const).map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    className={styles.viewTab}
+                    aria-selected={view === key}
+                    onClick={() => setView(key)}
+                  >
+                    {key === "slots" ? "Slots & photos" : `Built boards (${built?.boards.length ?? 0})`}
+                  </button>
+                ))}
+              </div>
+
+              {view === "boards" ? (
+                <BuiltBoards built={built} />
+              ) : (
               <div className={styles.boards}>
                 {shown.preview.boards.map((board) => (
                   <article key={board.id} className={styles.board}>
@@ -442,27 +524,43 @@ export function ReviewBoards() {
                     </header>
 
                     <ul className={styles.slots}>
-                      {board.slots.map((slot) => (
+                      {board.slots.map((slot) => {
+                        const rowPhotos = photosByRow.get(slot.rowId) ?? [];
+                        const chosen = rowPhotos.some((photo) => photo.status === "selected");
+                        return (
                         <li key={slot.slotId} className={styles.slot}>
-                          <span className={`${styles.dot} ${styles.dotFilled}`} aria-hidden="true" />
+                          <span
+                            className={`${styles.dot} ${chosen ? styles.dotFilled : styles.dotNeedsPhoto}`}
+                            aria-hidden="true"
+                          />
                           <span className={styles.slotBody}>
                             <span className={styles.slotName}>
                               <span className={styles.visuallyHidden}>Filled: </span>
                               {slot.brand ? <strong>{slot.brand}</strong> : null}
                               {slot.brand ? " " : ""}
-                              {slot.brand && slot.name.startsWith(slot.brand)
-                                ? slot.name.slice(slot.brand.length).trim()
-                                : slot.name}
+                              {withoutBrandPrefix(slot.name, slot.brand)}
                               {slot.tier ? <span className={styles.tier}>{slot.tier}</span> : null}
                             </span>
                             <span className={styles.slotMeta}>
+                              <span className={styles.visuallyHidden}>
+                                {chosen ? "photo chosen. " : "no photo yet. "}
+                              </span>
                               {slot.slotId}
                               {slot.sku ? ` · ${slot.sku}` : ""}
                               {slot.qty > 1 ? ` · qty ${slot.qty}` : ""}
                             </span>
+                            <SlotPhotos
+                              projectId={shown.id}
+                              rowId={slot.rowId}
+                              itemName={slot.name}
+                              reference={slot.reference}
+                              photos={rowPhotos}
+                              onChanged={reloadPhotos}
+                            />
                           </span>
                         </li>
-                      ))}
+                        );
+                      })}
 
                       {board.unfilledSlots.map((slot) => (
                         <li key={slot.slotId} className={styles.slot}>
@@ -487,6 +585,7 @@ export function ReviewBoards() {
                   </article>
                 ))}
               </div>
+              )}
 
               <GapsSection preview={shown.preview} />
             </>
@@ -585,5 +684,52 @@ function GapsSection({ preview }: { preview: BoardsPreview }) {
         </div>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * The boards as they actually stand — buildBoards run over the selected photos.
+ *
+ * Empty until something is selected, and that emptiness is the honest state: a
+ * board is a set of reference images, and until a person picks them there is no
+ * board, only a plan for one.
+ */
+function BuiltBoards({ built }: { built: Built | null }) {
+  if (!built || !built.boards.length) {
+    return (
+      <p className={styles.placeholder}>
+        No board has enough chosen photos yet. Pick a photo for at least two slots in a room and its board
+        appears here.
+      </p>
+    );
+  }
+  return (
+    <div className={styles.boards}>
+      {built.boards.map((board) => (
+        <article key={board.id} className={styles.board}>
+          <header className={styles.boardHead}>
+            <span className={styles.boardRoom}>
+              {board.unitType} · {board.roomLabel}
+            </span>
+            <span className={styles.boardKind}>{board.kindLabel}</span>
+            <span className={styles.boardFill}>{board.items.length} references</span>
+          </header>
+          <ul className={styles.builtGrid}>
+            {board.items.map((item) => (
+              <li key={item.slotId} className={styles.builtCell}>
+                {/* eslint-disable-next-line @next/next/no-img-element -- see SlotPhotos */}
+                <img className={styles.builtImage} src={item.images[0]} alt="" loading="lazy" />
+                <span className={styles.builtName}>
+                  {item.brand ? <strong>{item.brand}</strong> : null}
+                  {item.brand ? " " : ""}
+                  {withoutBrandPrefix(item.name, item.brand)}
+                </span>
+                <span className={styles.builtSlot}>{item.slotId}</span>
+              </li>
+            ))}
+          </ul>
+        </article>
+      ))}
+    </div>
   );
 }

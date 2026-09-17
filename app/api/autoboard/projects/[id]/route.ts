@@ -1,4 +1,10 @@
-import { deleteProject, getProject, refreshProject, renameProject } from "@/app/lib/autoboard-projects";
+import {
+  buildProjectBoards,
+  deleteProject,
+  getProject,
+  refreshProject,
+  renameProject,
+} from "@/app/lib/autoboard-projects";
 import { jsonError, readJsonBody } from "@/app/lib/autoboard-http";
 
 export const runtime = "edge";
@@ -13,7 +19,12 @@ export async function GET(_request: Request, context: Context) {
   try {
     const { id } = await context.params;
     const project = await getProject(id);
-    return project ? Response.json({ ok: true, project }) : notFound();
+    if (!project) return notFound();
+    // The built boards ride along with the project: they are derived from the
+    // selected photos, so caching them would just be a second thing to keep in
+    // step with the grid.
+    const built = await buildProjectBoards(project);
+    return Response.json({ ok: true, project, built });
   } catch (error) {
     return jsonError(error, 500);
   }

@@ -8,6 +8,8 @@
 import { closeSync, fstatSync, openSync, readSync, readdirSync } from "node:fs";
 import path from "node:path";
 
+import { HEADER_PEEK_BYTES, readImageSizeFromBytes } from "../../../app/lib/autoboard/image-size.ts";
+
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 const CODE_PATTERN = /^(?:([A-Z]{2}\d+)_)+/;
 
@@ -68,13 +70,9 @@ export { resolveTileCode } from "../../../app/lib/autoboard/tiles.ts";
 
 // --- Header-only image size reading -----------------------------------
 //
-// indexTileCodes is synchronous (readdirSync-based, called without await at
-// both call sites), so dimensions here can't go through sharp's async API.
-// These are small, deliberately narrow header parsers — just enough to read
-// width/height from the three formats the tile library uses.
-
-const HEADER_PEEK_BYTES = 64 * 1024;
-const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+// The parsers moved to app/lib/autoboard/image-size.ts so the Worker can use
+// them too (it has no sharp, and indexTileCodes is synchronous so it cannot use
+// sharp's async API either). What stays here is the file reading.
 
 function readLeadingBytes(filePath, maxLength) {
   const fd = openSync(filePath, "r");
@@ -89,99 +87,17 @@ function readLeadingBytes(filePath, maxLength) {
   }
 }
 
-function parsePngSize(buffer) {
-  if (buffer.length < 24) return null;
-  if (!buffer.subarray(0, 8).equals(PNG_SIGNATURE)) return null;
-  // IHDR is always the file's first chunk: 4-byte length + "IHDR" + width(4) + height(4),
-  // so width/height sit at fixed offsets 16-23.
-  if (buffer.toString("ascii", 12, 16) !== "IHDR") return null;
-  return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
-}
-
-// Walks JPEG markers looking for the first SOFn (0xFFC0-0xFFCF, excluding
-// 0xFFC4 DHT, 0xFFC8 JPG, 0xFFCC DAC, which share the numeric range but
-// aren't start-of-frame segments). Returns null if none is found in
-// `buffer` — the caller re-reads the whole file and retries when that
-// happens, since a SOF can sit after large APP0/APP1/EXIF segments.
-function parseJpegSize(buffer) {
-  if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) return null;
-  let offset = 2;
-  while (offset + 4 <= buffer.length) {
-    if (buffer[offset] !== 0xff) {
-      offset += 1; // not a marker byte — resync
-      continue;
-    }
-    let markerOffset = offset;
-    let marker = buffer[markerOffset + 1];
-    while (marker === 0xff && markerOffset + 2 < buffer.length) {
-      markerOffset += 1; // markers may be padded with extra 0xFF fill bytes
-      marker = buffer[markerOffset + 1];
-    }
-    const isStandalone = marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd9);
-    if (isStandalone) {
-      offset = markerOffset + 2;
-      continue;
-    }
-    if (markerOffset + 4 > buffer.length) return null;
-    const segmentLength = buffer.readUInt16BE(markerOffset + 2);
-    const isSof = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
-    if (isSof) {
-      if (markerOffset + 9 > buffer.length) return null; // segment header truncated
-      return { height: buffer.readUInt16BE(markerOffset + 5), width: buffer.readUInt16BE(markerOffset + 7) };
-    }
-    offset = markerOffset + 2 + segmentLength;
-  }
-  return null;
-}
-
-// RIFF/WEBP container: 12-byte header, then a "VP8 " (lossy), "VP8L"
-// (lossless), or "VP8X" (extended) chunk carrying the dimensions in three
-// different bit layouts.
-function parseWebpSize(buffer) {
-  if (buffer.length < 30) return null;
-  if (buffer.toString("ascii", 0, 4) !== "RIFF" || buffer.toString("ascii", 8, 12) !== "WEBP") return null;
-  const fourCC = buffer.toString("ascii", 12, 16);
-  const chunkDataStart = 20; // 12-byte RIFF/WEBP header + 4-byte fourCC + 4-byte chunk size
-  if (fourCC === "VP8 ") {
-    // 3-byte frame tag, then the 3-byte start code 0x9d 0x01 0x2a, then
-    // width/height as little-endian u16 (14-bit dimension + 2-bit scale).
-    const startCode = chunkDataStart + 3;
-    if (buffer[startCode] !== 0x9d || buffer[startCode + 1] !== 0x01 || buffer[startCode + 2] !== 0x2a) return null;
-    return {
-      width: buffer.readUInt16LE(startCode + 3) & 0x3fff,
-      height: buffer.readUInt16LE(startCode + 5) & 0x3fff,
-    };
-  }
-  if (fourCC === "VP8L") {
-    if (buffer[chunkDataStart] !== 0x2f) return null; // VP8L signature byte
-    const bits = buffer.readUInt32LE(chunkDataStart + 1); // 14-bit width-1, 14-bit height-1, packed LE
-    return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 };
-  }
-  if (fourCC === "VP8X") {
-    // 1-byte flags + 3-byte reserved, then 24-bit LE canvas width-1 and height-1.
-    return {
-      width: buffer.readUIntLE(chunkDataStart + 4, 3) + 1,
-      height: buffer.readUIntLE(chunkDataStart + 7, 3) + 1,
-    };
-  }
-  return null;
-}
-
 // Reads image dimensions straight from the file header, without sharp.
-// Reads only the first ~64 KB; if that's inconclusive for a JPEG and the
-// file is bigger than the peek, re-reads the whole file once. Returns null
-// for anything it can't parse.
+// Reads only the first ~64 KB; if that is inconclusive and the file is bigger
+// than the peek, re-reads the whole file once (a JPEG's SOF can sit past a
+// large EXIF segment). Returns null for anything it cannot parse.
 export function readImageSize(filePath) {
   const { buffer, truncated } = readLeadingBytes(filePath, HEADER_PEEK_BYTES);
-  const png = parsePngSize(buffer);
-  if (png) return png;
-  const webp = parseWebpSize(buffer);
-  if (webp) return webp;
-  const jpeg = parseJpegSize(buffer);
-  if (jpeg) return jpeg;
+  const size = readImageSizeFromBytes(buffer);
+  if (size) return size;
   if (truncated) {
     const { buffer: fullBuffer } = readLeadingBytes(filePath, Infinity);
-    return parseJpegSize(fullBuffer);
+    return readImageSizeFromBytes(fullBuffer);
   }
   return null;
 }

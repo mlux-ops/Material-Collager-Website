@@ -10,9 +10,11 @@
 // needs no separate migration step.
 
 import { env } from "cloudflare:workers";
+import { buildBoards } from "./autoboard/match.ts";
 import { previewBoards, filterRows, type BoardsPreview, type SubsectionFilter } from "./autoboard/preview.ts";
-import { loadSmartsheetRows } from "./autoboard/source.ts";
-import type { LibraryRow } from "./autoboard/types.ts";
+import { emptyGaps, loadSmartsheetRows } from "./autoboard/source.ts";
+import type { Board, Gaps, LibraryRow } from "./autoboard/types.ts";
+import { deleteProjectPhotos, selectedImagesByRow } from "./autoboard-photos.ts";
 
 export type AutoboardProject = {
   id: string;
@@ -203,8 +205,33 @@ export async function getProject(id: string): Promise<AutoboardProjectDetail | n
 
 export async function deleteProject(id: string): Promise<boolean> {
   const DB = await ensureProjectStorage();
+  // Photos first: a project row deleted while its photos remain leaves R2
+  // objects nothing will ever reference again.
+  await deleteProjectPhotos(id);
   const result = await DB.prepare("DELETE FROM autoboard_projects WHERE id = ?").bind(id).run();
   return Boolean(result.meta?.changes);
+}
+
+/**
+ * The real boards, built from the photos a person selected.
+ *
+ * This is the payoff of the preview step and the edge half of buildBoards'
+ * injected-resolver contract: the resolver must be SYNCHRONOUS, so the async
+ * lookup happens once, up front, and what buildBoards receives is a plain Map
+ * read. A row with no selected photo yields no images, so buildBoards records it
+ * in gaps.imagelessItems and leaves the slot empty — exactly as it does on the
+ * CLI when a library folder is empty.
+ */
+export async function buildProjectBoards(
+  project: AutoboardProjectDetail,
+): Promise<{ boards: Board[]; gaps: Gaps }> {
+  const byRow = await selectedImagesByRow(project.id);
+  const gaps = emptyGaps();
+  const { boards } = buildBoards(project.rows, {
+    resolveImages: (rowId) => byRow.get(rowId) ?? [],
+    gaps,
+  });
+  return { boards, gaps };
 }
 
 // Re-reads the sheet with the project's own filter and replaces its rows and

@@ -567,3 +567,246 @@
     transition: none;
   }
 }
+
+/* --- Reference photos --------------------------------------------------- */
+
+.dotNeedsPhoto {
+  border: 2px solid var(--accent);
+}
+
+.photos {
+  display: block;
+  margin-top: 8px;
+}
+
+.photoGrid {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+
+.photoCell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.photoPick {
+  display: block;
+  padding: 0;
+  border: 2px solid var(--line);
+  background: var(--surface-quiet);
+  cursor: pointer;
+  text-align: left;
+}
+
+.photoPick:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+/* Selected is an inverted frame, not a tint: the thumbnail under it is a photo
+   of unknown colour, so a coloured overlay could be invisible on the very
+   images it is meant to mark. */
+.photoPick[aria-pressed="true"] {
+  border-color: var(--ink);
+  background: var(--ink);
+}
+
+.photoPick[aria-pressed="true"] .photoMeta {
+  color: var(--surface);
+}
+
+.photoImage {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: contain;
+  background: var(--surface);
+}
+
+.photoMeta {
+  display: block;
+  padding: 3px 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.photoWarn {
+  color: var(--danger);
+}
+
+.photoPick[aria-pressed="true"] .photoWarn {
+  color: var(--yellow, #f3c85b);
+}
+
+.photoActions {
+  display: flex;
+  gap: 4px;
+}
+
+.photoAction {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  background: var(--surface-quiet);
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.photoAction:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.photoAction:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.photoTools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.photoUrl {
+  flex: 1 1 180px;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  background: var(--surface-quiet);
+  font-size: 11px;
+  color: var(--ink);
+}
+
+.candidates {
+  margin-bottom: 8px;
+  padding: 8px;
+  background: var(--surface-soft);
+}
+
+.candidatesHead {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.candidateList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.candidateButton {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.candidateButton:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+.candidateUrl {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.photoError {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--danger);
+}
+
+/* --- View switch and built boards --------------------------------------- */
+
+.views {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.viewTab {
+  padding: 9px 15px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 550;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.viewTab:hover {
+  color: var(--ink);
+}
+
+.viewTab[aria-selected="true"] {
+  border-bottom-color: var(--ink);
+  color: var(--ink);
+}
+
+.builtGrid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+  gap: 12px;
+}
+
+.builtCell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.builtImage {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  background: var(--surface-quiet);
+}
+
+.builtName {
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.builtSlot {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted);
+}

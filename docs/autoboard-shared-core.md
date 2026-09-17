@@ -194,3 +194,93 @@ everything, not nothing.
   arrival. Colour appears in exactly one place — slot state — which AGENTS.md
   permits as state treatment, and shape and text carry the same distinction so it
   never depends on hue alone.
+
+## Reference photos
+
+A board is a set of reference images, so the preview only becomes a board once
+photos exist. They arrive three ways, all landing in the same review grid:
+
+- **From the sheet's reference link.** That column holds a product *page* far
+  more often than an image, so a reference is resolved in two steps: fetch it,
+  and if what comes back is HTML rather than an image, read the images the page
+  declares about itself (`og:image`, then `twitter:image`, then
+  `link rel="image_src"`). Taken by declaration rather than document order — a
+  product page's `og:image` is its hero shot, while `twitter:image` is often a
+  crop. Deliberately **not** every `<img>` on the page: that is chrome, badges
+  and tracking pixels.
+- **A pasted URL**, resolved the same way.
+- **An uploaded file.**
+
+Nothing collected is used until a person selects it. The CLI rounds of this work
+produced an Energy Guide label, a freezer drawer full of food and a Porcelanosa
+placeholder card among the "best available" scrapes; a person looking was the
+only filter that held.
+
+### The fetch is a server-side SSRF surface
+
+A URL from a Smartsheet cell is untrusted input, and a Worker's `fetch` reaches
+the network from inside the perimeter. `assertFetchableUrl` pins the scheme to
+https and refuses loopback, link-local (including `169.254.169.254`, the cloud
+metadata endpoint), RFC-1918, CGNAT, and `.local`/`.internal` hosts. Because
+`redirect: "follow"` means a redirect has already happened by the time you see
+it, the **final** URL is re-checked before any body is read, and both the HTML
+and image reads are size-capped.
+
+Names that *resolve* into a private range are not caught — that needs the
+resolution the fetch itself performs. The https pin is what makes that
+acceptable: the services worth reaching this way do not answer TLS.
+
+### Storage and identity
+
+Metadata in D1 (`autoboard_photos`), bytes in R2 under
+`autoboard/<projectId>/<rowId>/<photoId>`. Content type is **sniffed from the
+magic bytes**, never trusted from the server's `Content-Type` or a client's
+filename, and dimensions come from the file header. A unique index on
+`(project_id, row_id, sha256)` means the same image offered twice — which a page
+listing one hero shot under both `og:image` and `twitter:image` does constantly —
+is one row, not two.
+
+Dimensions matter beyond bookkeeping: `isLowResolution` flags anything under 600
+px on *either* edge, matching the CLI's `annotateReferenceMeta`, so both sides
+mark the same photos. Like every other gap in this pipeline it is a flag, never
+an exclusion.
+
+### Building the boards
+
+`GET /api/autoboard/projects/[id]` returns `built` alongside the project:
+`buildBoards` run over the selected photos. This is the edge half of the
+injected-resolver contract — the resolver must be **synchronous**, so the async
+lookup happens once, up front, and what `buildBoards` receives is a plain Map
+read over photo API urls rather than filesystem paths. A row with no selected
+photo yields no images, so its slot is empty and the row lands in
+`gaps.imagelessItems`, exactly as it does on the CLI when a library folder is
+empty.
+
+| Route | Does |
+|---|---|
+| `GET /api/autoboard/projects/[id]/photos` | Every photo for the project |
+| `POST …/photos` `{action:"discover", url}` | What a URL offers, without storing |
+| `POST …/photos` `{rowId, url}` | Fetch and store |
+| `POST …/photos` `{rowId, mimeType, dataBase64}` | Store an upload |
+| `PATCH /api/autoboard/photos/[photoId]` | `{status}` — candidate / selected / rejected |
+| `DELETE /api/autoboard/photos/[photoId]` | Remove from D1 and R2 |
+| `GET /api/autoboard/photos/[photoId]` | The bytes, `private` cache, `noindex` |
+
+Vendor product photography is collected for internal design reference. It is
+never committed to the repo, the served bytes carry `X-Robots-Tag: noindex`, and
+it is not cleared for client-facing deliverables.
+
+### One parser, two runtimes
+
+`app/lib/autoboard/image-size.ts` reads dimensions from a PNG/JPEG/WebP header
+with no decoder. It exists because neither side can use the obvious tool: the
+Worker has no sharp, and the CLI's tile index is synchronous so it cannot use
+sharp's async API either. It is written on `Uint8Array`/`DataView` rather than
+`Buffer` — `Buffer` exists on the Worker under `nodejs_compat` but not in the
+browser bundle, and `app/lib` compiles into both.
+
+`scripts/autoboard/lib/tiles.mjs` keeps only the file reading: peek 64 KB, and
+re-read the whole file if that was inconclusive, since a JPEG's SOF can sit past
+a large EXIF segment. `tests/autoboard-image-size.test.mjs` checks every format
+against sharp, because a hand-rolled binary parser rewritten by hand is exactly
+the change that looks right and is wrong on one format.
