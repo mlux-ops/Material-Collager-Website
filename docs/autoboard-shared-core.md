@@ -429,3 +429,31 @@ at fault. `tests/autoboard-seed-web.test.mjs` pins the shape.
 
 A seeded project has no `sheet_id`, so `refresh` refuses it rather than silently
 reading someone else's sheet.
+
+### Type on /review-boards
+
+The page uses the site's live type scale. Measure it off the running app, not
+`globals.css`: the `.generator-shell` block near the end of that file overrides
+the earlier rules, so the source reads nothing like what renders. `.section-kicker`
+is the trap — its source rule is 11px/750 in `--accent-dark` (green), and what
+actually renders is 8.4px/500 in black.
+
+| Role | Rendered |
+|---|---|
+| Label, button, chip, pill, number | 8.4px / w500 / uppercase / ls 0.1575px |
+| Help, sub text | 10px / w400 |
+| Body, control value | 11px / w400 or w650 |
+| Section heading | 14px / w500 |
+| Item title | 14px / w700 |
+
+**Nothing on any page of this app is larger than 14px**, and chrome text is
+black `#000` or muted `#657069` — never the teal. A page here that reaches for a
+22px title and green kickers looks like a different product, which is what the
+first two attempts at this page did.
+
+`docs/generator-design-concept.md` §4 proposes a different scale (11px floor,
+18px headings, 24px board title, 16px inputs to stop iOS zoom-on-focus) and
+calls the current sub-12px type the generator's "most serious defect". It is
+marked **proposal, awaiting approval — nothing here is implemented**, so it is
+not what to match today. If it is ever approved, this page moves with the rest
+of the app, not ahead of it.

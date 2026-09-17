@@ -1,14 +1,28 @@
 /* Review boards — /review-boards
-   Type scale is the site's, not this page's own: 22px page title, 15px section
-   heading, 14px item title, 11px supporting text, 11px controls, 10px buttons,
-   and kickers at 11px/750 with ZERO letter-spacing in --accent-dark (see
-   .studio-header h1, .surface-heading h2, .section-kicker and
-   .surface-actions button in app/globals.css). The compact studio workspace is
-   deliberately dense; a looser scale here reads as a different product.
+   Type is the site's, measured off the LIVE generator, archive and workbench
+   rather than read out of globals.css — the .generator-shell block near the end
+   of that file overrides the earlier rules, so the source reads nothing like
+   what renders. Measured:
+
+     8.4px  w500  uppercase  ls 0.1575px   every label, button, chip, pill
+     10px   w400                            help and sub text
+     11px   w400 / w650                     body / control values
+     14px   w500 / w700                     section heading / item title
+
+   NOTHING on any page of this app is larger than 14px, and nothing is coloured:
+   black #000, muted #657069, white on black. The green --accent-dark belongs to
+   .section-kicker's SOURCE rule, which the generator shell overrides to black —
+   matching the source instead of the render is what made this page look like a
+   different product.
+
+   The 8.4px / 0.1575px pair is a computed value, not a round one: the shell has
+   a 10.5px base with 0.015em tracking and these are its 0.8x step. Written
+   literally so it matches what renders.
+
    Two regions: a projects rail that stays put while you switch between stored
    projects, and a board region that changes under it. Hierarchy comes from
-   type scale, grouping and the slot-state color, not from boxing everything
-   in one-pixel borders (AGENTS.md, generator design rules). */
+   type, grouping and the slot-state colour, not from boxing everything in
+   one-pixel borders (AGENTS.md, generator design rules). */
 
 /* This page scrolls ITSELF rather than relying on the document. globals.css
    sets `body { overflow: hidden }` and only flips it back under 1280px, and
@@ -63,12 +77,14 @@
 .label,
 .gapHead,
 .candidatesHead,
-.boardRoom {
-  font-size: 11px;
-  font-weight: 750;
-  letter-spacing: 0;
+.boardRoom,
+.tallyLabel,
+.noteLabel {
+  font-size: 8.4px;
+  font-weight: 500;
+  letter-spacing: 0.1575px;
   text-transform: uppercase;
-  color: var(--accent-dark);
+  color: var(--ink);
 }
 
 .railTitle {
@@ -77,7 +93,7 @@
 
 .count {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 10px;
   color: var(--muted);
 }
 
@@ -120,9 +136,9 @@
 
 .projectName {
   display: block;
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 1.3;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.35;
 }
 
 .projectMeta {
@@ -135,7 +151,7 @@
 
 .empty {
   padding: 14px 15px;
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.55;
   color: var(--muted);
 }
@@ -199,7 +215,6 @@
   padding: 4px 8px;
   border: 1px solid var(--line);
   background: var(--surface-quiet);
-  font-size: 10px;
   color: var(--ink);
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease;
@@ -230,11 +245,21 @@
 
 .primary,
 .secondary,
+.quiet,
+.chip,
+.photoAction,
+.viewTab {
+  font-size: 8.4px;
+  font-weight: 500;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+}
+
+.primary,
+.secondary,
 .quiet {
   min-height: 30px;
   padding: 5px 9px;
-  font-size: 10px;
-  font-weight: 500;
   cursor: pointer;
   border: 1px solid transparent;
 }
@@ -302,15 +327,15 @@
 
 .mainTitle {
   margin: 0;
-  font-size: 22px;
-  font-weight: 600;
-  line-height: 1.1;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.25;
 }
 
 .source {
   margin: 6px 0 0;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 10px;
   color: var(--muted);
   overflow-wrap: anywhere;
 }
@@ -328,15 +353,13 @@
 }
 
 .tallyValue {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
 
 .tallyLabel {
-  font-size: 11px;
-  color: var(--muted);
   white-space: nowrap;
 }
 
@@ -369,13 +392,13 @@
 }
 
 .boardKind {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .boardFill {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 10px;
   color: var(--muted);
 }
 
@@ -433,7 +456,8 @@
 
 .slotName {
   display: block;
-  font-size: 14px;
+  font-size: 11px;
+  font-weight: 650;
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -445,7 +469,7 @@
 
 .slotMeta {
   display: block;
-  margin-top: 3px;
+  margin-top: 2px;
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--muted);
@@ -470,13 +494,13 @@
 
 .gapsTitle {
   margin: 0 0 4px;
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .gapsIntro {
   margin: 0 0 14px;
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.55;
   color: var(--muted);
   max-width: 78ch;
@@ -504,7 +528,7 @@
 }
 
 .gapItem {
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -520,7 +544,7 @@
   padding: 56px 24px;
   text-align: center;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.6;
 }
 
@@ -557,7 +581,7 @@
   }
 
   .mainTitle {
-    font-size: 18px; /* matches the site's own narrow-viewport h1 step-down */
+    font-size: 14px;
   }
 
   .boards {
@@ -660,7 +684,6 @@
   padding: 4px 8px;
   border: 1px solid var(--line);
   background: var(--surface-quiet);
-  font-size: 10px;
   color: var(--muted);
   cursor: pointer;
 }
@@ -764,8 +787,6 @@
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
   background: transparent;
-  font-size: 11px;
-  font-weight: 600;
   color: var(--muted);
   cursor: pointer;
 }
@@ -805,7 +826,7 @@
 }
 
 .builtName {
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
@@ -851,7 +872,8 @@
   border: 1px solid var(--line);
   background: var(--surface-quiet);
   color: var(--ink);
-  font-size: 10px;
+  font-size: 11px;
+  font-weight: 650;
 }
 
 .noteList {
@@ -871,8 +893,6 @@
 }
 
 .noteLabel {
-  font-family: var(--font-mono);
-  font-size: 10px;
   color: var(--muted);
   overflow-wrap: anywhere;
 }
