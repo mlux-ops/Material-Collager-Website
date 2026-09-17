@@ -137,7 +137,10 @@ const SLOT_MEANING = {
   cabinet_hardware: "A cabinet pull or knob for the vanity casework.",
   light_fixture: "The vanity or wall light fixture.",
   vanity_wood: "The vanity cabinet itself, judged as a wood or casework sample.",
-  main_tile: "The room's primary field tile — the surface that covers the most area.",
+  // Run 1 of this experiment asked for "the surface that covers the most area"
+  // and got the floor tile on two boards, which is a fair reading of that
+  // sentence. The board wants the wall field, so the question now says so.
+  main_tile: "The room's primary WALL field tile — the material covering the shower or tub walls. Not the floor tile, and not the niche accent.",
   accent_tile: "A secondary tile used as a deliberate accent, such as a niche back.",
   countertop: "The vanity countertop material.",
   wall_tile: "The tile on the walls.",
@@ -201,7 +204,13 @@ function questionsForBoard(collageType, rows, slots) {
         `The board is a ${collageType.replaceAll("_", " ")} for this bathroom: one flat-lay image showing the room's selected products and materials.`,
         `Which row in \`rows\` belongs in the board's "${slot}" slot?`,
         SLOT_MEANING[slot] ?? "",
-        "Choose `none` when no row is that product, when the only candidates are rows marked as an alternative substitute, or when the row is a concealed rough-in part or an accessory that does not belong on a presentation board.",
+        // Run 1 left this unsaid and the model read "(product pending)" as
+        // "not a product", declining four slots a placeholder row was written
+        // to hold. Which reading is right is a product decision, and the
+        // pipeline's is: the placeholder holds the slot and shows up
+        // downstream as an open slot with no photo.
+        "A row whose name says the product is still pending is a placeholder the designer wrote for exactly this slot — choose it; it holds the slot open rather than leaving the slot unrepresented.",
+        "Choose `none` when no row refers to that product at all, when the only candidates are rows marked as an alternative substitute, or when the row is a concealed rough-in part or an accessory that does not belong on a presentation board.",
       ].join(" "),
       criteria: { ...options, none: "No row in `rows` is this slot's product." },
     };

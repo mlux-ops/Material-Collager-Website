@@ -500,7 +500,11 @@ async function commandGenerate(values) {
         `  ${entry.variantId}  (${entry.board.items.length} items, ${referenceCount} reference image(s), quality ${entry.renderOptions.quality}, background ${entry.renderOptions.background}, resolution ${outputResolution}, cost unavailable${reason})`,
       );
     }
-    const skipped = boards.length * plan.variants.length - work.length;
+    // Count against the variants this invocation actually asked for, not every
+    // variant in the plan: with --variants 1 the old arithmetic reported the
+    // unrequested variants as renders "already completed", on a run that had
+    // never rendered anything.
+    const skipped = boards.length * variants.length - work.length;
     if (skipped) console.log(`  (${skipped} already completed and unchanged; use --force to re-render anyway)`);
     if (values.qa && !values["no-qa"]) {
       console.log(`  QA: would run against ${baseUrl}/api/qa${values["qa-model"] ? ` (model ${values["qa-model"]})` : ""}`);
