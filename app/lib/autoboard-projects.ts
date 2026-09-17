@@ -22,7 +22,7 @@ import {
 import { deleteProjectBoardState, emptyBoardState, listBoardState, type BoardState } from "./autoboard-board-state.ts";
 import { deleteProjectRenders } from "./autoboard-renders.ts";
 import { previewBoards, filterRows, type BoardsPreview, type SubsectionFilter } from "./autoboard/preview.ts";
-import { emptyGaps, loadSmartsheetRows } from "./autoboard/source.ts";
+import { collectRows, emptyGaps, loadSmartsheetRows } from "./autoboard/source.ts";
 import type { Board, Gaps, LibraryRow } from "./autoboard/types.ts";
 import { deleteProjectPhotos, selectedImagesByRow } from "./autoboard-photos.ts";
 
@@ -199,6 +199,66 @@ export async function createProject(input: {
   return detailFrom(row);
 }
 
+/**
+ * A project from rows supplied directly, rather than read from a sheet.
+ *
+ * This is how a tracked project definition (scripts/autoboard/projects/) gets
+ * onto the web board: those projects have no Smartsheet of their own, which is
+ * the whole reason they exist as files. The rows are normalized and gap-checked
+ * by the SAME collectRows the sheet reader uses, so a hand-supplied row cannot
+ * enter in a shape the sheet path would have rejected.
+ *
+ * `source` is recorded verbatim so a stored project always says where it came
+ * from; refreshProject deliberately does not work on one of these, because
+ * there is no sheet to re-read.
+ */
+export async function createProjectFromRows(input: {
+  name: string;
+  rows: unknown[];
+  source?: string;
+}): Promise<AutoboardProjectDetail> {
+  const DB = await ensureProjectStorage();
+  if (!Array.isArray(input.rows) || !input.rows.length) throw new Error("Give at least one row.");
+
+  const gaps = emptyGaps();
+  const rows = collectRows(input.rows as Record<string, unknown>[], gaps);
+  if (!rows.length) {
+    throw new Error(
+      "None of those rows were usable — each needs an item name, a unit type and a room type.",
+    );
+  }
+  const preview = previewBoards(rows);
+  const rowsJson = JSON.stringify(rows);
+  const previewJson = JSON.stringify(preview);
+  assertStorable(rowsJson, previewJson);
+
+  const now = Date.now();
+  const row: ProjectRow = {
+    id: projectId(),
+    name: input.name.trim() || "Imported project",
+    // No sheet to refresh from. Stored empty rather than faked, so a refresh
+    // fails loudly instead of silently reading someone else's sheet.
+    sheet_id: "",
+    source: input.source?.trim() || "imported rows",
+    filter_json: JSON.stringify({}),
+    rows_json: rowsJson,
+    preview_json: previewJson,
+    created_at: now,
+    updated_at: now,
+  };
+  await DB.prepare(
+    `INSERT INTO autoboard_projects
+       (id, name, sheet_id, source, filter_json, rows_json, preview_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      row.id, row.name, row.sheet_id, row.source, row.filter_json,
+      row.rows_json, row.preview_json, row.created_at, row.updated_at,
+    )
+    .run();
+  return detailFrom(row);
+}
+
 export async function listProjects(): Promise<AutoboardProject[]> {
   const DB = await ensureProjectStorage();
   const result = await DB.prepare(
@@ -302,6 +362,12 @@ export async function refreshProject(id: string): Promise<AutoboardProjectDetail
   const existing = await DB.prepare("SELECT * FROM autoboard_projects WHERE id = ?").bind(id).first<ProjectRow>();
   if (!existing) return null;
 
+  if (!existing.sheet_id) {
+    throw new Error(
+      `"${existing.name}" was built from supplied rows, not a sheet, so there is nothing to re-read. ` +
+        "Seed it again to take a new reading.",
+    );
+  }
   const filter = JSON.parse(existing.filter_json) as SubsectionFilter;
   const { rows, source } = await readSheet(existing.sheet_id, filter);
   const preview = previewBoards(rows);

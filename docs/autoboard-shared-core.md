@@ -394,3 +394,38 @@ first, so "the approved draft" is never ambiguous.
 
 Local development needs `OPENAI_API_KEY` in git-ignored `.dev.vars`; without it
 the render stops at `/api/generate` with "Add an OpenAI API key in Settings".
+
+### Seeding a local board
+
+The web board's projects, photos and renders live in D1 and R2 under
+`.wrangler/state`, which is **per-machine**. A fresh checkout starts empty, so
+the first draft is otherwise an hour of collecting photos for rows whose photos
+are already on disk from `autoboard:scaffold --fetch-images`.
+
+```bash
+npm run dev
+npm run autoboard:seed-web -- --project 651-belmont --select
+```
+
+It reads the project definition and the library root, creates a project from
+those rows, and uploads copies of the library's photos through the app's own
+API. The library root is never written to.
+
+- `--dry-run` lists what it would upload, and how many rows have no photo.
+- `--rooms "Bath 2"` (repeatable) narrows to whole rooms.
+- `--select` picks the first photo per row. Off by default: a selection is a
+  person's decision, and the review grid exists precisely so nothing reaches a
+  render because a script chose it.
+- `--into <projectId>` adds photos to an existing project instead of creating
+  one. Photos dedupe on `(project, row, sha256)`, so re-running is safe.
+- `--per-row 2` is how many of a row's photos to upload.
+
+Rows go to `POST /api/autoboard/projects` as `{ name, rows, source }` — the
+offline half of that endpoint. They are sent **raw** (`roomType`, `itemName`),
+because the server normalizes and gap-checks them with the same `collectRows`
+the sheet reader uses; handing it an already-normalized row drops every one of
+them on the blank-room check, with a message that sounds like the definition is
+at fault. `tests/autoboard-seed-web.test.mjs` pins the shape.
+
+A seeded project has no `sheet_id`, so `refresh` refuses it rather than silently
+reading someone else's sheet.

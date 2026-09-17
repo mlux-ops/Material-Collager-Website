@@ -21,6 +21,7 @@
     "test:release-readiness": "node --test tests/release-readiness.test.mjs",
     "autoboard": "node --experimental-strip-types scripts/autoboard/cli.mjs",
     "autoboard:scaffold": "node scripts/autoboard/scaffold-project.mjs",
+    "autoboard:seed-web": "node --experimental-strip-types scripts/autoboard/seed-web-project.mjs",
     "test:autoboard": "node --experimental-strip-types --test tests/autoboard-*.test.mjs",
     "validate:rights": "node scripts/validate-release-collage-rights.mjs",
     "validate:library": "node scripts/validate-release-library.mjs",

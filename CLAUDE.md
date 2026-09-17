@@ -69,6 +69,14 @@ Server-side URL fetching is an SSRF surface — a sheet cell is untrusted input.
 `app/lib/autoboard/photo-sources.ts` holds the guard; read it before touching
 anything that fetches. See `docs/autoboard-shared-core.md`.
 
+`npm run autoboard:seed-web -- --project 651-belmont [--select]` fills a running
+`/review-boards` from a tracked project definition and the library root the
+scaffold already built — the web board's D1/R2 state is per-machine, so a fresh
+checkout otherwise means collecting a photo for every row by hand before the
+first draft. It reads the library and uploads copies through the app's own API;
+nothing in the library root is touched. A project seeded this way has no sheet
+behind it, so `refresh` refuses it by design.
+
 Projects without a Smartsheet sheet of their own live as tracked definitions in
 `scripts/autoboard/projects/`; `npm run autoboard:scaffold -- --project <id>` turns one
 into the library root (`build_manifest_v2.csv` + `_BUILD_LOG.csv` + photo folders) that
