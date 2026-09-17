@@ -18,6 +18,51 @@ function close(server) {
   return new Promise((resolve) => server.close(resolve));
 }
 
+test("CLI generate --dry-run counts skipped renders against the variants asked for, not the whole plan", async () => {
+  const runId = `run-cli-dryrun-${process.pid}-${Date.now()}`;
+  const runDir = path.join(process.cwd(), "autoboard-runs", runId);
+  const imagePath = path.join(runDir, "faucet.png");
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(imagePath, PNG);
+  // Three variants in the plan, one board, and nothing rendered yet.
+  writeFileSync(path.join(runDir, "plan.json"), JSON.stringify({
+    runId,
+    source: "offline-manifest",
+    variants: ["A", "B", "C"].map((key) => ({
+      key, composition: "editorial", density: "balanced", styling: "materials_only", lighting: "soft_daylight",
+    })),
+    boards: [{
+      id: "dryrun-board",
+      title: "Dry Run Board",
+      unitType: "Penthouse",
+      roomLabel: "Bath 2",
+      collageType: "bathroom_fixture_collage",
+      items: [{ slotId: "vanity_faucet", role: "vanity faucet", required: true, name: "Croma", brand: "Hansgrohe", images: [imagePath] }],
+    }],
+  }, null, 2));
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [
+        "--experimental-strip-types", "scripts/autoboard/cli.mjs", "generate",
+        "--run", runId, "--variants", "1", "--dry-run",
+      ], { cwd: process.cwd(), env: { ...process.env, OPENAI_API_KEY: "test-key" }, stdio: ["ignore", "pipe", "pipe"] });
+      let stdout = "";
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => { stdout += chunk; });
+      child.once("error", reject);
+      child.once("close", (status) => resolve({ status, stdout }));
+    });
+    assert.equal(result.status, 0, result.stdout);
+    assert.match(result.stdout, /DRY RUN — 1 render call\(s\)/);
+    // Nothing has ever been rendered for this run, so claiming completed
+    // renders would be a lie that hides real work from the operator.
+    assert.doesNotMatch(result.stdout, /already completed/);
+  } finally {
+    rmSync(runDir, { recursive: true, force: true });
+  }
+});
+
 test("CLI generate records a single failed request as an error with diagnostics and permits manual rerun", async () => {
   const runId = `run-cli-failure-${process.pid}-${Date.now()}`;
   const runDir = path.join(process.cwd(), "autoboard-runs", runId);

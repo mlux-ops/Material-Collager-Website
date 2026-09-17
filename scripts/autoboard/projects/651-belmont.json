@@ -1,0 +1,606 @@
+{
+  "_readme": "651 Belmont autoboard project definition, transcribed from 'Bathroom Design Recommendations and Product Links' (prepared 2026-09-16). These are PROPOSED design selections, not an approved purchase order or a construction specification — nothing here is quoted, sampled or released. `status` records that: preferred = the current recommendation, alternative = a substitute for the preferred row directly above its group (never an additional material to combine with it), pending = named in the document as an open selection with no product identified. Row order matters: scripts/autoboard/lib/match.mjs assigns a preset slot to the FIRST matching row, so the preferred pick for each slot is listed before its alternatives. Feed this file to scripts/autoboard/scaffold-project.mjs, which writes the library root the autoboard CLI reads (build_manifest_v2.csv + Master_Library_Build/_BUILD_LOG.csv). Tiles are real manifest rows here, unlike the Wieland library — so tile-assignments.json stays Wieland-only and must not gain 651 Belmont keys.",
+  "id": "651-belmont",
+  "name": "651 Belmont",
+  "unitType": "651 Belmont",
+  "libraryRoot": "F:\\My Drive\\651 Belmont - Master Library",
+  "source": "Bathroom Design Recommendations and Product Links, prepared 2026-09-16",
+  "vendors": {
+    "tile": [
+      "ELM Surfaces",
+      "MSI Surfaces",
+      "Porcelanosa"
+    ],
+    "plumbing": [
+      "Kohler"
+    ],
+    "hardware": [
+      "Kohler"
+    ],
+    "lighting": [
+      "Lightology"
+    ]
+  },
+  "rooms": [
+    {
+      "room": "Bath 1",
+      "identity": "Warm stone, walnut and freestanding tub — richest, most material-focused room",
+      "note": "Design assessment only. No product has been selected, and the rendered objects are NOT identified commercial products. Every row below is a placeholder with no SKU and no photo so plan's gaps.md carries the open selection instead of silently dropping the room. Do not copy Bathroom 2 or 3 products into this room.",
+      "items": [
+        {
+          "rowId": "B1-01",
+          "costCode": "09 30 Tiling - M",
+          "name": "Warm large-format mineral wall and floor tile (product pending)",
+          "sku": "",
+          "reference": "",
+          "status": "pending",
+          "photo": "Collection, color and finish pending — ELM, MSI or Porcelanosa."
+        },
+        {
+          "rowId": "B1-02",
+          "costCode": "09 30 Tiling - M",
+          "name": "Subordinate accent tile (product pending)",
+          "sku": "",
+          "reference": "",
+          "status": "pending",
+          "photo": "Keep any accent limited and subordinate to the primary surfaces."
+        },
+        {
+          "rowId": "B1-03",
+          "costCode": "12 30 Casework - M",
+          "name": "Walnut vanity (product pending)",
+          "sku": "",
+          "reference": "",
+          "status": "pending",
+          "photo": "Retain the walnut direction; rendered product not identified."
+        },
+        {
+          "rowId": "B1-04",
+          "costCode": "12 36 Countertops - M",
+          "name": "Warm white cream countertop (product pending)",
+          "sku": "",
+          "reference": "",
+          "status": "pending",
+          "photo": "Quiet warm-white/cream direction; rendered product not identified."
+        },
+        {
+          "rowId": "B1-05",
+          "costCode": "11 45 Plumbing Fixtures - M",
+          "name": "Basin faucet, restrained warm metal (product pending)",
+          "sku": "",
+          "reference": "",
+          "status": "pending",
+          "photo": "Kohler model and finish pending."
+        },
+        {
+          "rowId": "B1-06",
+          "costCode": "11 45 Plumbing Fixtures - M",
+          "name": "Shower trim, coordinated with basin and tub fittings (product pending)",
+          "sku": "",
+          "reference": "",
+          "status": "pending",
+          "photo": "Kohler products pending."
+        },
+        {
+          "rowId": "B1-07",
+          "costCode": "11 45 Plumbing Fixtures - M",
+          "name": "Freestanding tub filler (product pending)",
+          "sku": "",
+          "reference": "",
+          "status": "pending",
+          "photo": "Kohler products pending. No preset slot maps to a tub filler — this row is a record, not a board item."
+        },
+        {
+          "rowId": "B1-08",
+          "costCode": "09 00 Finishes Hardware - M",
+          "name": "Cabinet pull, restrained form (product pending)",
+          "sku": "",
+          "reference": "",
+          "status": "pending",
+          "photo": "Kohler products pending."
+        },
+        {
+          "rowId": "B1-09",
+          "costCode": "26 51 Lighting Fixtures - M",
+          "name": "Slender vertical diffused vanity light (product pending)",
+          "sku": "",
+          "reference": "",
+          "status": "pending",
+          "photo": "Lightology product pending."
+        }
+      ]
+    },
+    {
+      "room": "Bath 2",
+      "identity": "Seafoam tile, light wood and brushed nickel — the main color statement",
+      "note": "Niche sits on the wall not shown in the rendering. Muted green-gray grout, not bright white; MSI requires the Gems pre-scored grooves to be fully grouted. View Caraibi and Seafoam samples together — the niche must read clearly richer, not an almost-matching green.",
+      "items": [
+        {
+          "rowId": "B2-01",
+          "costCode": "09 30 Tiling - M",
+          "name": "ELM Palette Seafoam Wall Tile",
+          "sku": "PALETTE-SEAFOAM-6X6",
+          "reference": "https://www.elmsurfaces.com/product-collection/palette",
+          "imageKey": "elm-palette-seafoam",
+          "status": "preferred",
+          "spec": "6 x 6 in.; glossy ceramic; straight square stack; low-contrast muted green-gray grout",
+          "photo": "Flat field shot of the Seafoam glossy 6x6 from the ELM Palette collection page."
+        },
+        {
+          "rowId": "B2-02",
+          "costCode": "09 30 Tiling - M",
+          "name": "MSI Gems Caraibi Niche Accent Tile",
+          "sku": "NWGGEMCAR5X10G",
+          "reference": "https://www.msisurfaces.com/porcelain-gems/caraibi/",
+          "imageKey": "msi-gems-caraibi",
+          "status": "preferred",
+          "spec": "5 x 10 in.; glossy porcelain; fine linear/slatted face, oriented vertically on the niche back only",
+          "photo": "Vertical fluted face shot from the MSI Gems Caraibi product page."
+        },
+        {
+          "rowId": "B2-03",
+          "costCode": "09 30 Tiling - M",
+          "name": "Porcelanosa Bottega Caliza Floor Tile",
+          "sku": "100324943",
+          "reference": "https://store.porcelanosa.com/us/bottega-caliza-23x23",
+          "imageKey": "porcelanosa-bottega-caliza",
+          "status": "preferred",
+          "spec": "nominal 23 x 23 in.; actual 59.6 x 59.6 cm; porcelain; confirm exact surface finish against the sample",
+          "photo": "Single-tile face shot from the Porcelanosa product page."
+        },
+        {
+          "rowId": "B2-04",
+          "costCode": "11 45 Plumbing Fixtures - M",
+          "name": "Kohler Purist Wall-Mounted Basin Faucet Trim",
+          "sku": "K-T14414-4-BN",
+          "reference": "https://resources.kohler.com/webassets/kpna/catalog/pdf/en/K-T14414-4_spec.pdf",
+          "imageKey": "kohler-K-T14414-4-BN",
+          "status": "preferred",
+          "spec": "Vibrant Brushed Nickel; requires K-410-K rough-in valve, sold separately; trim does not include a drain",
+          "photo": "Product shot in Vibrant Brushed Nickel from kohler.com (the spec PDF is a line drawing, not a usable reference)."
+        },
+        {
+          "rowId": "B2-05",
+          "costCode": "11 45 Plumbing Fixtures - M",
+          "name": "Kohler Purist Tub and Shower Trim",
+          "sku": "K-T14420-4G-BN",
+          "reference": "https://resources.kohler.com/webassets/kpna/catalog/pdf/en/K-T14420-4G_spec_US-CA_Kohler_en.pdf",
+          "imageKey": "kohler-K-T14420-4G-BN",
+          "status": "preferred",
+          "spec": "Vibrant Brushed Nickel; requires a K-11748-series Rite-Temp valve, sold separately",
+          "photo": "Product shot in Vibrant Brushed Nickel from kohler.com."
+        },
+        {
+          "rowId": "B2-06",
+          "costCode": "09 00 Finishes Hardware - M",
+          "name": "Kohler Purist Cabinet Pull",
+          "sku": "K-25498-BN",
+          "reference": "https://techcomm.kohler.com/techcomm/pdf/K-25498_spec_US-CA_Kohler_en.pdf",
+          "imageKey": "kohler-K-25498-BN",
+          "status": "preferred",
+          "spec": "5-in. mounting centers, 7-in. overall length; confirm centers against the cabinetry",
+          "photo": "Product shot in Vibrant Brushed Nickel from kohler.com."
+        },
+        {
+          "rowId": "B2-07",
+          "costCode": "26 51 Lighting Fixtures - M",
+          "name": "Modern Forms Cinch Vanity Light",
+          "sku": "WS-34125-30-BN",
+          "reference": "https://www.lightology.com/index.php?module=prod_detail&option_id=1040837&prod_id=1040833",
+          "imageKey": "modern-forms-cinch-WS-34125-30-BN",
+          "status": "preferred",
+          "spec": "brushed nickel; 24 5/8 in. wide; 3000K; 90 CRI; 1,589 delivered lumens; dimmable, damp-rated",
+          "photo": "Fixture shot from the Lightology product page. Supersedes the Kuzco Rona, dropped as too traditional."
+        },
+        {
+          "rowId": "B2-08",
+          "costCode": "09 00 Finishes Hardware - M",
+          "name": "Kohler Vibrant Brushed Nickel Metal Finish Sample",
+          "sku": "BN",
+          "reference": "https://www.kohler.com/",
+          "imageKey": "kohler-K-14435-BN",
+          "status": "preferred",
+          "spec": "finish suffix BN — the room's single metal identity",
+          "photo": "Clean brushed-nickel finish swatch; a crop of a Purist product shot is acceptable."
+        },
+        {
+          "rowId": "B2-09",
+          "costCode": "09 00 Finishes Hardware - M",
+          "name": "Kohler Purist Towel Bar 18 in",
+          "sku": "K-14435-BN",
+          "reference": "https://techcomm.kohler.com/techcomm/pdf/K-14435_spec_US-CA_Kohler_en.pdf",
+          "imageKey": "kohler-K-14435-BN",
+          "status": "preferred",
+          "photo": "Use only the accessories the actual layout needs. No preset slot maps to a towel bar — record row."
+        },
+        {
+          "rowId": "B2-10",
+          "costCode": "09 00 Finishes Hardware - M",
+          "name": "Kohler Purist Towel Ring",
+          "sku": "K-14441-BN",
+          "reference": "https://resources.kohler.com/onlinecatalog/pdf/K-14441_spec.pdf",
+          "imageKey": "kohler-K-14441-BN",
+          "status": "preferred",
+          "photo": "Record row — no preset slot maps to a towel ring."
+        },
+        {
+          "rowId": "B2-11",
+          "costCode": "09 00 Finishes Hardware - M",
+          "name": "Kohler Purist Toilet Paper Holder, vertical",
+          "sku": "K-14444-BN",
+          "reference": "https://techcomm.kohler.com/techcomm/pdf/K-14444_spec_US-CA_Kohler_en.pdf",
+          "imageKey": "kohler-K-14444-BN",
+          "status": "preferred",
+          "photo": "Record row — sanitaryware-adjacent accessories are excluded from boards by design."
+        },
+        {
+          "rowId": "B2-12",
+          "costCode": "12 30 Casework - M",
+          "name": "Natural-wood vanity (product pending)",
+          "sku": "",
+          "reference": "",
+          "status": "pending",
+          "photo": "Retain the rendered light natural-wood direction; no product identified. (Named without the word 'light' so it reaches the vanity_wood slot rather than the light-fixture exclusion in match.mjs.)"
+        },
+        {
+          "rowId": "B2-13",
+          "costCode": "09 30 Tiling - M",
+          "name": "Niche sill and shelf material (product pending)",
+          "sku": "",
+          "reference": "",
+          "status": "pending",
+          "photo": "Smooth coordinating material; avoid a ridged bottle-support surface. Confirm usable shelf depth and finished edges."
+        },
+        {
+          "rowId": "B2-14",
+          "costCode": "09 30 Tiling - M",
+          "name": "MSI Sande Ivory Floor Tile",
+          "sku": "NSANIVO1224",
+          "reference": "https://www.msisurfaces.com/porcelain-sande/ivory/",
+          "imageKey": "msi-sande-ivory-12x24",
+          "status": "alternative",
+          "substituteFor": "B2-03",
+          "spec": "12 x 24 in.; matte porcelain",
+          "photo": "Choose only for more linear mineral movement than Bottega Caliza."
+        },
+        {
+          "rowId": "B2-15",
+          "costCode": "09 30 Tiling - M",
+          "name": "Porcelanosa Metropolitan Grass Wall Tile",
+          "sku": "100336793",
+          "reference": "https://store.porcelanosa.com/us/metropolitan-grass-8x8",
+          "imageKey": "porcelanosa-metropolitan-grass",
+          "status": "alternative",
+          "substituteFor": "B2-01",
+          "spec": "nominal 8 x 8 in.; actual 20 x 20 cm; ceramic wall tile",
+          "photo": "Finish and specific shower-wall application need confirmation before substitution."
+        },
+        {
+          "rowId": "B2-16",
+          "costCode": "09 30 Tiling - M",
+          "name": "MSI Convex Olive Niche Accent Tile",
+          "sku": "NWGCONOLI2X10G-N",
+          "reference": "https://www.msisurfaces.com/ceramic-convex/olive/",
+          "imageKey": "msi-convex-olive",
+          "status": "alternative",
+          "substituteFor": "B2-02",
+          "spec": "2 x 10 in.; glossy ceramic; pronounced wavy three-dimensional surface",
+          "photo": "Sample against Seafoam before substitution."
+        },
+        {
+          "rowId": "B2-17",
+          "costCode": "26 51 Lighting Fixtures - M",
+          "name": "Visual Comfort Modern Banda Vanity Light, Matte White",
+          "sku": "700BCBND24W-LED930",
+          "reference": "https://www.lightology.com/index.php?module=prod_detail&option_id=1205059&prod_id=812957",
+          "imageKey": "visual-comfort-banda-700BCBND24W",
+          "status": "alternative",
+          "substituteFor": "B2-07",
+          "spec": "24 in. wide; 3000K; 90 CRI; 791 delivered lumens; white hardware recedes against the wall",
+          "photo": "Lower output than Cinch — supplementary room lighting matters more."
+        },
+        {
+          "rowId": "B2-18",
+          "costCode": "26 51 Lighting Fixtures - M",
+          "name": "Sonneman Stiletto Vanity Light, Satin White",
+          "sku": "2340.03-DIM",
+          "reference": "https://www.lightology.com/index.php?module=prod_detail&prod_id=210031",
+          "imageKey": "sonneman-stiletto-2340.03",
+          "status": "alternative",
+          "substituteFor": "B2-07",
+          "spec": "23 3/4 in. long; 3000K; 90 CRI; 664 delivered lumens; horizontal installation allowed",
+          "photo": "Spec sheet: https://sonnemanlight.com/media/spec_sheets/2340_03-DIM_spec_sheet.pdf"
+        }
+      ]
+    },
+    {
+      "room": "Bath 3",
+      "identity": "Warm pale tile, black niche and matte-black fixtures — the crispest, most architectural room",
+      "note": "The dark slim tile in the rendering is INSIDE a niche; the earlier advice to remove it as a wall stripe was withdrawn. Grounded is a terracotta/clay-look collection — Alabaster was chosen for its pale character, not an orange terracotta effect. ELM Vivid Ligne Noir is the matte relief (204221E), distinct from ordinary Noir. Do not combine all three neutral tile routes.",
+      "items": [
+        {
+          "rowId": "B3-01",
+          "costCode": "09 30 Tiling - M",
+          "name": "ELM Grounded Alabaster Shower Wall Tile",
+          "sku": "GROUNDED-ALABASTER-12X24",
+          "reference": "https://www.elmsurfaces.com/product/grounded-alabaster",
+          "imageKey": "elm-grounded-alabaster-12x24",
+          "status": "preferred",
+          "spec": "12 x 24 in.; matte porcelain; plain field, horizontal straight stack, no contrasting strip",
+          "photo": "Field shot from the ELM Grounded Alabaster product page."
+        },
+        {
+          "rowId": "B3-02",
+          "costCode": "09 30 Tiling - M",
+          "name": "ELM Vivid Ligne Noir Niche Accent Tile",
+          "sku": "204221E",
+          "reference": "https://www.elmsurfaces.com/product-collection/vivid",
+          "imageKey": "elm-vivid-ligne-noir",
+          "status": "preferred",
+          "spec": "nominal 3 x 10 in. (actual 2.75 x 9.66 in.); matte ceramic relief; vertical stack, aligned joints, dark charcoal grout",
+          "photo": "Relief face shot. Catalog: https://assets-global.website-files.com/6508c8490fee3dfe75080d5e/6508c8490fee3dfe75083b55_ELM%20SURFACES%20-%20VIVID.pdf"
+        },
+        {
+          "rowId": "B3-03",
+          "costCode": "09 30 Tiling - M",
+          "name": "ELM Grounded Alabaster Floor Tile",
+          "sku": "GROUNDED-ALABASTER-12X24",
+          "reference": "https://www.elmsurfaces.com/product/grounded-alabaster",
+          "imageKey": "elm-grounded-alabaster-12x24",
+          "status": "preferred",
+          "spec": "12 x 24 in.; matte; continues the pale color family onto the main floor",
+          "photo": "Same product as B3-01 — reuse the field shot."
+        },
+        {
+          "rowId": "B3-04",
+          "costCode": "09 30 Tiling - M",
+          "name": "ELM Grounded Alabaster Shower Floor Mosaic",
+          "sku": "GROUNDED-ALABASTER-2X2",
+          "reference": "https://www.elmsurfaces.com/product/grounded-alabaster",
+          "imageKey": "elm-grounded-alabaster-2x2",
+          "status": "preferred",
+          "spec": "coordinating 2 x 2 in. mosaic; replaces the geometric patterned shower floor",
+          "photo": "Mosaic sheet shot. Confirm the exact mosaic's shower-floor suitability."
+        },
+        {
+          "rowId": "B3-05",
+          "costCode": "11 45 Plumbing Fixtures - M",
+          "name": "Kohler Purist Widespread Basin Faucet",
+          "sku": "K-14406-4-BL",
+          "reference": "https://techcomm.kohler.com/techcomm/pdf/K-14406-4_spec_US-CA_Kohler_en.pdf",
+          "imageKey": "kohler-K-14406-4-BL",
+          "status": "preferred",
+          "spec": "matte black; deck-mounted, preserving the rendered arrangement; confirm basin compatibility",
+          "photo": "Product shot in Matte Black from kohler.com."
+        },
+        {
+          "rowId": "B3-06",
+          "costCode": "11 45 Plumbing Fixtures - M",
+          "name": "Kohler Purist Showerhead and Handshower Kit",
+          "sku": "K-22181-G-BL",
+          "reference": "https://techcomm.kohler.com/techcomm/pdf/K-22181-G_spec_US-CA_Kohler_en.pdf",
+          "imageKey": "kohler-K-22181-G-BL",
+          "status": "preferred",
+          "spec": "matte black; includes showerhead, handshower, 60-in. hose, shower arm with diverter, 30-in. slidebar, Purist valve trim",
+          "photo": "Kit shot in Matte Black from kohler.com."
+        },
+        {
+          "rowId": "B3-07",
+          "costCode": "11 45 Plumbing Fixtures - M",
+          "name": "Kohler Rite-Temp shower valve (product pending)",
+          "sku": "",
+          "reference": "https://techcomm.kohler.com/techcomm/pdf/K-22181-G_spec_US-CA_Kohler_en.pdf",
+          "status": "pending",
+          "photo": "K-8304-series valve/cartridge kit or the specified K-8300/K-8305 combination; final selection depends on the installation. Concealed part — record row, never a board item."
+        },
+        {
+          "rowId": "B3-08",
+          "costCode": "09 00 Finishes Hardware - M",
+          "name": "Kohler Purist Cabinet Pull",
+          "sku": "K-25498-BL",
+          "reference": "https://techcomm.kohler.com/techcomm/pdf/K-25498_spec_US-CA_Kohler_en.pdf",
+          "imageKey": "kohler-K-25498-BL",
+          "status": "preferred",
+          "spec": "matte black; 5-in. mounting centers, 7-in. overall length; only if the cabinetry needs pulls",
+          "photo": "Product shot in Matte Black from kohler.com."
+        },
+        {
+          "rowId": "B3-09",
+          "costCode": "26 51 Lighting Fixtures - M",
+          "name": "Visual Comfort Modern Banda Vanity Light, Matte Black",
+          "sku": "700BCBND24B-LED930",
+          "reference": "https://www.lightology.com/index.php?module=prod_detail&option_id=812955&prod_id=812957",
+          "imageKey": "visual-comfort-banda-700BCBND24B",
+          "status": "preferred",
+          "spec": "24 in. W x 5 in. H x 3.1 in. projection; 3000K; 90 CRI; 791 delivered lumens; dimmable, damp-rated",
+          "photo": "Fixture shot from the Lightology product page. Confirm final width against the mirror."
+        },
+        {
+          "rowId": "B3-10",
+          "costCode": "09 00 Finishes Hardware - M",
+          "name": "Kohler Matte Black Metal Finish Sample",
+          "sku": "BL",
+          "reference": "https://www.kohler.com/",
+          "imageKey": "kohler-K-14435-BL",
+          "status": "preferred",
+          "spec": "finish suffix BL — the room's single metal identity",
+          "photo": "Clean matte-black finish swatch; a crop of a Purist product shot is acceptable."
+        },
+        {
+          "rowId": "B3-11",
+          "costCode": "09 00 Finishes Hardware - M",
+          "name": "Kohler Purist Towel Bar 18 in",
+          "sku": "K-14435-BL",
+          "reference": "https://techcomm.kohler.com/techcomm/pdf/K-14435_spec_US-CA_Kohler_en.pdf",
+          "imageKey": "kohler-K-14435-BL",
+          "status": "preferred",
+          "photo": "Record row — no preset slot maps to a towel bar."
+        },
+        {
+          "rowId": "B3-12",
+          "costCode": "09 00 Finishes Hardware - M",
+          "name": "Kohler Purist Toilet Paper Holder, vertical",
+          "sku": "K-14444-BL",
+          "reference": "https://techcomm.kohler.com/techcomm/pdf/K-14444_spec_US-CA_Kohler_en.pdf",
+          "imageKey": "kohler-K-14444-BL",
+          "status": "preferred",
+          "photo": "Record row."
+        },
+        {
+          "rowId": "B3-13",
+          "costCode": "08 80 Glazing - M",
+          "name": "Shower glass hinges and pull, matte black (product pending)",
+          "sku": "",
+          "reference": "",
+          "status": "pending",
+          "photo": "Must suit the actual enclosure. Kohler's cabinet/bathroom accessories are not glass hardware."
+        },
+        {
+          "rowId": "B3-14",
+          "costCode": "12 30 Casework - M",
+          "name": "White vanity (product pending)",
+          "sku": "",
+          "reference": "",
+          "status": "pending",
+          "photo": "Retain the rendered white vanity; no product identified."
+        },
+        {
+          "rowId": "B3-15",
+          "costCode": "12 36 Countertops - M",
+          "name": "Quiet white countertop (product pending)",
+          "sku": "",
+          "reference": "",
+          "status": "pending",
+          "photo": "Confirm the undertone against the Grounded Alabaster field and the white sanitaryware."
+        },
+        {
+          "rowId": "B3-16",
+          "costCode": "09 30 Tiling - M",
+          "name": "MSI Sande Ivory Wall and Floor Tile",
+          "sku": "NSANIVO1224",
+          "reference": "https://www.msisurfaces.com/porcelain-sande/ivory/",
+          "imageKey": "msi-sande-ivory-12x24",
+          "status": "alternative",
+          "substituteFor": "B3-01",
+          "spec": "matte 12 x 24 in.; more linear stone-like movement; stronger material connection to Bathroom 1",
+          "photo": "Field shot from the MSI Sande Ivory product page."
+        },
+        {
+          "rowId": "B3-17",
+          "costCode": "09 30 Tiling - M",
+          "name": "MSI Sande Ivory Shower Floor Mosaic",
+          "sku": "NSANIVO2X2",
+          "reference": "https://www.msisurfaces.com/porcelain-sande/ivory/",
+          "imageKey": "msi-sande-ivory-2x2",
+          "status": "alternative",
+          "substituteFor": "B3-04",
+          "spec": "matte 2 x 2 in.; the coordinating mosaic for the Sande route",
+          "photo": "Exact shower-floor approval remains to be confirmed."
+        },
+        {
+          "rowId": "B3-18",
+          "costCode": "09 30 Tiling - M",
+          "name": "Porcelanosa Bottega Caliza Floor Tile",
+          "sku": "100324943",
+          "reference": "https://store.porcelanosa.com/us/bottega-caliza-23x23",
+          "imageKey": "porcelanosa-bottega-caliza",
+          "status": "alternative",
+          "substituteFor": "B3-03",
+          "spec": "nominal 23 x 23 in.; main bathroom floor only; repeats Bathroom 2's proposed floor",
+          "photo": "No matching shower mosaic was verified for this route."
+        },
+        {
+          "rowId": "B3-19",
+          "costCode": "09 30 Tiling - M",
+          "name": "ELM Vivid Noir Glossy Niche Accent Tile",
+          "sku": "204201E",
+          "reference": "https://www.elmsurfaces.com/product-collection/vivid",
+          "imageKey": "elm-vivid-noir-glossy",
+          "status": "alternative",
+          "substituteFor": "B3-02",
+          "spec": "nominal 3 x 10 in.; glossy ceramic; reflected highlights, more luminous dark recess",
+          "photo": "Choose instead of the matte Ligne relief, not alongside it."
+        }
+      ]
+    },
+    {
+      "room": "Kitchen",
+      "identity": "Penthouse (unit 3) kitchen — Thermador Pro Harmony suite, panel-ready",
+      "note": "Transcribed 2026-09-17 from the live Smartsheet FINISH DATABASE: 651 Belmont (sheet 6391628162879364), Unit Type = Penthouse, Cost Code = 11 30 Appliances - T&M. Only rows NOT flagged AGENT IGNORE are carried: the sheet holds many superseded duplicates of the same appliances. Each row keeps its Smartsheet row id. Three further live Penthouse appliance rows sit in the Laundry room — LG washer WM4000HBSS, LG gas dryer DLGX4001BSS and the Thermador T18IW905SP wine column — and are deliberately not here: no board type maps to Laundry. One data discrepancy carried as-is rather than silently corrected: K-04’s SKU reads MC30WPSS, which no manufacturer sells; the product is MC30WP (see that row’s photo note).",
+      "items": [
+        {
+          "rowId": "K-01",
+          "costCode": "11 30 Appliances - T&M",
+          "name": "Thermador Freedom Collection 23.1 Cu. Ft. Built-In French Door Refrigerator 42-Inch Wide in Custom Panel",
+          "sku": "T42IT100NP",
+          "reference": "https://www.fergusonhome.com/thermador-t42it100np/s1982063",
+          "imageKey": "thermador-T42IT100NP",
+          "status": "preferred",
+          "spec": "42 in. built-in French door, custom panel ready",
+          "smartsheetRowId": "6174293163048836",
+          "photo": "Vendor product shot. Panel-ready units photograph as a custom wood panel, so prefer the stainless/pro shot where the vendor offers both."
+        },
+        {
+          "rowId": "K-02",
+          "costCode": "11 30 Appliances - T&M",
+          "name": "Thermador Professional Series 48 In. Stainless Steel Gas Pro Harmony Range With Griddle",
+          "sku": "PRG486WDHSS",
+          "reference": "https://www.fergusonhome.com/thermador-prg486wdh/s1655751",
+          "imageKey": "thermador-PRG486WDHSS",
+          "status": "preferred",
+          "spec": "48 in. gas range, 6 burners plus griddle, stainless",
+          "smartsheetRowId": "3922493349363588",
+          "photo": "Vendor product shot. Panel-ready units photograph as a custom wood panel, so prefer the stainless/pro shot where the vendor offers both."
+        },
+        {
+          "rowId": "K-03",
+          "costCode": "11 30 Appliances - T&M",
+          "name": "Zephyr Monsoon II 48\" Stainless Steel Hood Insert",
+          "sku": "AK9346BS",
+          "reference": "https://www.fergusonhome.com/zephyr-ak9346b/s1745799",
+          "imageKey": "zephyr-AK9346BS",
+          "status": "preferred",
+          "spec": "48 in. hood insert, stainless",
+          "smartsheetRowId": "1107743582257028",
+          "photo": "Vendor product shot. Panel-ready units photograph as a custom wood panel, so prefer the stainless/pro shot where the vendor offers both."
+        },
+        {
+          "rowId": "K-04",
+          "costCode": "11 30 Appliances - T&M",
+          "name": "Thermador ADA Professional Series 30\" Gray Glass On Stainless Steel Speed Oven",
+          "sku": "MC30WPSS",
+          "reference": "https://www.fergusonhome.com/product/summary/1655894",
+          "imageKey": "thermador-MC30WP",
+          "status": "preferred",
+          "spec": "30 in. speed oven, gray glass on stainless",
+          "smartsheetRowId": "5449229062832004",
+          "photo": "Thermador Professional Series 30 in. speed oven, gray glass on stainless. NOTE: the sheet SKU \"MC30WPSS\" is not a manufacturer model — Thermador sells this as MC30WP, and the sheet appends SS for stainless. Evidence: this row’s own Reference resolves to Ferguson product id 1655894, and another row in the same sheet gives that id as /thermador-mc30wp/s1655894. Hunt MC30WP; MC30WS is the Masterpiece line, a different unit."
+        },
+        {
+          "rowId": "K-05",
+          "costCode": "11 30 Appliances - T&M",
+          "name": "Thermador Emerald 5-Program Dishwasher 24 Inch, Panel Ready",
+          "sku": "DWHD640EPR",
+          "reference": "https://www.fergusonhome.com/thermador-dwhd640epr/s2015633",
+          "imageKey": "thermador-DWHD640EPR",
+          "status": "preferred",
+          "spec": "24 in. panel-ready dishwasher",
+          "smartsheetRowId": "8426092976734084",
+          "photo": "Vendor product shot. Panel-ready units photograph as a custom wood panel, so prefer the stainless/pro shot where the vendor offers both."
+        },
+        {
+          "rowId": "K-06",
+          "costCode": "11 30 Appliances - T&M",
+          "name": "Thermador 30\" Custom Panel Warming Drawer",
+          "sku": "WD30W",
+          "reference": "https://www.fergusonhome.com/thermador-wd30w/s1655875",
+          "imageKey": "thermador-WD30W",
+          "status": "preferred",
+          "spec": "30 in. warming drawer, custom panel",
+          "smartsheetRowId": "5611343209627524",
+          "photo": "Vendor product shot. Panel-ready units photograph as a custom wood panel, so prefer the stainless/pro shot where the vendor offers both."
+        }
+      ]
+    }
+  ]
+}

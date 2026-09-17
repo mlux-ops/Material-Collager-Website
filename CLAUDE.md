@@ -49,6 +49,15 @@ Subcommands: `plan`, `generate`, `redraft`, `confirm`, `finalize`, `batch-finali
 override). Its render-workflow POST endpoints require `Content-Type: application/json`
 as a CSRF defense.
 
+Projects without a Smartsheet sheet of their own live as tracked definitions in
+`scripts/autoboard/projects/`; `npm run autoboard:scaffold -- --project <id>` turns one
+into the library root (`build_manifest_v2.csv` + `_BUILD_LOG.csv` + photo folders) that
+`plan --offline --library-root` reads, and `--fetch-images` pulls each item's vendor
+reference photos from the project's `<id>-images.json` (URLs only — the image files are
+third-party product photography and are never committed). 651 Belmont is the first — see
+`docs/autoboard-651-belmont.md`, which also covers running its review board on port 4791
+alongside Wieland's on 4790.
+
 ## Architecture
 
 | Path | Role |

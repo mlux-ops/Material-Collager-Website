@@ -1,0 +1,782 @@
+{
+  "_readme": "Vendor reference photographs for scripts/autoboard/projects/651-belmont.json, one entry per imageKey. URLs only: the image files are third-party vendor product photography, fetched into the library root for internal design reference and deliberately NOT committed to this repository. Every URL here was downloaded and looked at before it was recorded — wrong-finish, watermarked, annotated, placeholder and wrong-format shots were rejected, so an empty `files` list means no usable photo is published, not that nobody looked. `sha256` is the digest of the reviewed file (absent where the host re-encodes per request — see digestUnstable); scaffold-project.mjs --fetch-images reports when a vendor has re-published an asset since. Re-verify before reusing these for anything a client sees.",
+  "verifiedAt": "2026-09-17",
+  "images": {
+    "elm-grounded-alabaster-12x24": {
+      "product": "ELM Grounded Alabaster Shower Wall Tile",
+      "sku": "GROUNDED-ALABASTER-12X24",
+      "vendorPage": "https://www.elmsurfaces.com/product/grounded-alabaster",
+      "note": "VERIFIED: MILE_stone images ARE the Grounded collection (confirmed on product page). Only ONE plain flat 12x24 Alabaster photo exists on the page. Other 12x24 variants served are Grip (textured) and Flute (relief). No second plain flat-face image found.",
+      "files": [
+        {
+          "url": "https://cdn.prod.website-files.com/6508c8490fee3dfe75080d5e/683121c7d0e2d6b0a03e21f9_MILE_stone_Earthen_Alabaster_12x24_01.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 308445,
+          "width": 2400,
+          "height": 1200,
+          "sha256": "e1714e5288fcbb5cdd32842817e85c861de194180da43fb1a4bd5eaf2a314ff9",
+          "source": "Grounded Alabaster product page - main image"
+        }
+      ]
+    },
+    "elm-grounded-alabaster-2x2": {
+      "product": "ELM Grounded Alabaster Shower Floor Mosaic",
+      "sku": "GROUNDED-ALABASTER-2X2",
+      "vendorPage": "https://www.elmsurfaces.com/product/grounded-alabaster",
+      "note": "CHECKED: Grounded product page lists '2 x 2 Mosaic' as available size but serves no dedicated product photo. Catalog PDF exists but is not an image file. No mosaic-specific photo found on ELM website.",
+      "files": []
+    },
+    "elm-palette-seafoam": {
+      "product": "ELM Palette Seafoam Wall Tile",
+      "sku": "PALETTE-SEAFOAM-6X6",
+      "vendorPage": "https://www.elmsurfaces.com/product-collection/palette",
+      "note": "Two photos of the glossy ceramic wall tile face showing the seafoam color",
+      "files": [
+        {
+          "url": "https://cdn.prod.website-files.com/6508c8490fee3dfe75080d5e/67ae649e40adf97492c2dc75_palette-seafoam%202.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 1003835,
+          "width": 2068,
+          "height": 1449,
+          "sha256": "e3767d1e6a8038c2fccce4009f86c4e5b4b12ff301040782081250868cf2eb35",
+          "source": "Palette collection page"
+        },
+        {
+          "url": "https://cdn.prod.website-files.com/6508c8490fee3dfe75080d5e/67ae649e0d09347f5c01263e_palette-seafoam.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 529508,
+          "width": 1726,
+          "height": 1737,
+          "sha256": "476f83f91a715a6ffb2111ac2280b65165d326d92a77825e27b74a05ba606712",
+          "source": "Palette Seafoam product page"
+        }
+      ]
+    },
+    "elm-vivid-ligne-noir": {
+      "product": "ELM Vivid Ligne Noir Niche Accent Tile",
+      "sku": "204221E",
+      "vendorPage": "https://www.elmsurfaces.com/product-collection/vivid",
+      "note": "Matte fluted relief, vertical. The vendor photo is styled with a fruit bowl, cropped out here. The second ELM frame for this product was dropped: it is mostly the GLOSSY Noir wall with a hand holding a Ligne sample, so it reads as the wrong product.",
+      "files": [
+        {
+          "url": "https://cdn.prod.website-files.com/6508c8490fee3dfe75080d5e/67b400c2739c890c37f35d5c_ligne-noir3.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 1267727,
+          "width": 1218,
+          "height": 2461,
+          "sha256": "63d0c66c7915a7d810da704f579355011908dd57f71daea03cd621dfb96c1168",
+          "source": "Ligne Noir product page",
+          "crop": {
+            "left": 0,
+            "top": 0,
+            "width": 1218,
+            "height": 1450
+          },
+          "cropReason": "removes the fruit bowl and pedestal at the bottom of the vendor photo"
+        }
+      ]
+    },
+    "elm-vivid-noir-glossy": {
+      "product": "ELM Vivid Noir Glossy Niche Accent Tile",
+      "sku": "204201E",
+      "vendorPage": "https://www.elmsurfaces.com/product-collection/vivid",
+      "note": "Glossy stacked field. Both vendor frames are styled scenes, cropped here to the tile wall alone.",
+      "files": [
+        {
+          "url": "https://cdn.prod.website-files.com/6508c8490fee3dfe75080d5e/67b40232d0d3b89c28609deb_noir-vivid.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 1295724,
+          "width": 1570,
+          "height": 1909,
+          "sha256": "01cc8f764bfe2b2597359d28cbd1086d29f891f99f333102df7a78950b44c1f7",
+          "source": "Noir Vivid product page",
+          "crop": {
+            "left": 550,
+            "top": 0,
+            "width": 1020,
+            "height": 1050
+          },
+          "cropReason": "removes the dried stem, vase, books and camera styled at the left of the frame"
+        },
+        {
+          "url": "https://cdn.prod.website-files.com/6508c8490fee3dfe75080d5e/67b40232d0d3b89c28609de7_noir-vivid2.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 992585,
+          "width": 1410,
+          "height": 2127,
+          "sha256": "0dcdfa611d14f0c4a10618a5f72f341cd8f48511704ffd79f4b9299a9865f950",
+          "source": "Noir Vivid product page gallery",
+          "crop": {
+            "left": 0,
+            "top": 0,
+            "width": 776,
+            "height": 1170
+          },
+          "cropReason": "removes the hand holding a sample tile at the right of the frame"
+        }
+      ]
+    },
+    "kohler-K-14406-4-BL": {
+      "product": "Kohler Purist Widespread Basin Faucet",
+      "sku": "K-14406-4-BL",
+      "vendorPage": "https://techcomm.kohler.com/techcomm/pdf/K-14406-4_spec_US-CA_Kohler_en.pdf",
+      "note": "Purist widespread deck-mounted bathroom sink faucet with low lever handles and low gooseneck spout in Matte Black finish (BL). EPA WaterSense certified. Product shots with plain background, no text or dimension callouts.",
+      "files": [
+        {
+          "url": "https://images.thdstatic.com/productImages/04900c5f-f607-4c60-a947-1fb61e004cfa/svn/matte-black-kohler-widespread-bathroom-faucets-k-14406-4-bl-76_1000.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 14286,
+          "width": 1000,
+          "height": 1000,
+          "source": "Home Depot product page",
+          "digestUnstable": "images.thdstatic.com re-encodes on the fly — repeat downloads of the same URL differ in bytes, so this file carries no digest to check against"
+        },
+        {
+          "url": "https://images.thdstatic.com/productImages/dfafedec-a822-4431-9a77-0abe045310c2/svn/matte-black-kohler-widespread-bathroom-faucets-k-14406-4-bl-64_1000.jpg",
+          "kind": "iso",
+          "contentType": "image/jpeg",
+          "bytes": 16974,
+          "width": 1000,
+          "height": 1000,
+          "source": "Home Depot product page",
+          "digestUnstable": "images.thdstatic.com re-encodes on the fly — repeat downloads of the same URL differ in bytes, so this file carries no digest to check against"
+        }
+      ]
+    },
+    "kohler-K-14435-BL": {
+      "product": "Kohler Matte Black Metal Finish Sample",
+      "sku": "BL",
+      "vendorPage": "https://www.kohler.com/",
+      "note": "Matte Black finish 18-inch towel bar on plain white background. First image: front view mounted on circular end plates. Second image: detail/alternate angle showing matte black finish. Second view dropped on visual review: Complete the Space marketing graphic (text overlay) (https://images.thdstatic.com/productImages/5a010ebc-7a29-4e68-ab56-7a271f4aeed0/svn/matte-black-towel-bars-k-14435-bl-e1_1000.jpg).",
+      "files": [
+        {
+          "url": "https://images.thdstatic.com/productImages/d4065193-5e5a-4473-bbec-b88d7b65b2c4/svn/matte-black-towel-bars-k-14435-bl-64_1000.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 8979,
+          "width": 1000,
+          "height": 1000,
+          "source": "The Home Depot",
+          "digestUnstable": "images.thdstatic.com re-encodes on the fly — repeat downloads of the same URL differ in bytes, so this file carries no digest to check against"
+        }
+      ]
+    },
+    "kohler-K-14435-BN": {
+      "product": "Kohler Vibrant Brushed Nickel Metal Finish Sample",
+      "sku": "BN",
+      "vendorPage": "https://www.kohler.com/",
+      "note": "Vibrant Brushed Nickel finish 18-inch towel bar on plain white background. First image: front view mounted on circular end plates. Second image: detail/alternate angle showing finish and mounting.",
+      "files": [
+        {
+          "url": "https://images.thdstatic.com/productImages/b720e805-d91f-4252-8c8d-cb8cf30e2a8f/svn/vibrant-brushed-nickel-kohler-towel-bars-k-14435-bn-64_1000.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 9017,
+          "width": 1000,
+          "height": 1000,
+          "source": "The Home Depot",
+          "digestUnstable": "images.thdstatic.com re-encodes on the fly — repeat downloads of the same URL differ in bytes, so this file carries no digest to check against"
+        },
+        {
+          "url": "https://images.thdstatic.com/productImages/9297aece-e688-4bf4-be36-66c255c53b5c/svn/vibrant-brushed-nickel-kohler-towel-bars-k-14435-bn-e1_1000.jpg",
+          "kind": "detail",
+          "contentType": "image/jpeg",
+          "bytes": 64742,
+          "width": 1000,
+          "height": 1000,
+          "source": "The Home Depot",
+          "digestUnstable": "images.thdstatic.com re-encodes on the fly — repeat downloads of the same URL differ in bytes, so this file carries no digest to check against"
+        }
+      ]
+    },
+    "kohler-K-14441-BN": {
+      "product": "Kohler Purist Towel Ring",
+      "sku": "K-14441-BN",
+      "vendorPage": "https://resources.kohler.com/onlinecatalog/pdf/K-14441_spec.pdf",
+      "note": "Vibrant Brushed Nickel finish towel ring on plain white background. First image: front view. Second image: detail/alternate angle showing brushed nickel finish surface characteristics. Second view dropped on visual review: What is in the Box graphic (text overlay) (https://images.thdstatic.com/productImages/288c92ef-cd89-4835-a19f-275396f913b1/svn/vibrant-brushed-nickel-kohler-towel-rings-k-14441-bn-e1_1000.jpg).",
+      "files": [
+        {
+          "url": "https://images.thdstatic.com/productImages/bd56bed4-8962-4e20-af90-f0fe8302af6b/svn/vibrant-brushed-nickel-kohler-towel-rings-k-14441-bn-64_1000.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 16505,
+          "width": 1000,
+          "height": 1000,
+          "source": "The Home Depot",
+          "digestUnstable": "images.thdstatic.com re-encodes on the fly — repeat downloads of the same URL differ in bytes, so this file carries no digest to check against"
+        }
+      ]
+    },
+    "kohler-K-14444-BL": {
+      "product": "Kohler Purist Toilet Paper Holder, vertical",
+      "sku": "K-14444-BL",
+      "vendorPage": "https://techcomm.kohler.com/techcomm/pdf/K-14444_spec_US-CA_Kohler_en.pdf",
+      "note": "Matte Black finish vertical toilet tissue holder on plain white background. Recessed single-post design showing matte black finish.",
+      "files": [
+        {
+          "url": "https://images.thdstatic.com/productImages/c6fb56c8-9de0-43cc-80ed-984f3e244a06/svn/matte-black-kohler-toilet-paper-holders-k-14444-bl-64_1000.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 11253,
+          "width": 1000,
+          "height": 1000,
+          "source": "The Home Depot",
+          "digestUnstable": "images.thdstatic.com re-encodes on the fly — repeat downloads of the same URL differ in bytes, so this file carries no digest to check against"
+        }
+      ]
+    },
+    "kohler-K-14444-BN": {
+      "product": "Kohler Purist Toilet Paper Holder, vertical",
+      "sku": "K-14444-BN",
+      "vendorPage": "https://techcomm.kohler.com/techcomm/pdf/K-14444_spec_US-CA_Kohler_en.pdf",
+      "note": "Vibrant Brushed Nickel finish vertical toilet tissue holder on plain white background. First image: front view. Second image: detail/alternate angle showing brushed nickel finish and post design. Second view dropped on visual review: 150-Year Legacy brand image of a chrome sink (text overlay, wrong product) (https://images.thdstatic.com/productImages/34f93677-1216-4dcb-b844-203abd3a5b74/svn/vibrant-brushed-nickel-kohler-toilet-paper-holders-k-14444-bn-e1_1000.jpg).",
+      "files": [
+        {
+          "url": "https://images.thdstatic.com/productImages/b90a686a-305c-4d0e-a299-5b12f85d5510/svn/vibrant-brushed-nickel-kohler-toilet-paper-holders-k-14444-bn-64_1000.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 11828,
+          "width": 1000,
+          "height": 1000,
+          "source": "The Home Depot",
+          "digestUnstable": "images.thdstatic.com re-encodes on the fly — repeat downloads of the same URL differ in bytes, so this file carries no digest to check against"
+        }
+      ]
+    },
+    "kohler-K-22181-G-BL": {
+      "product": "Kohler Purist Showerhead and Handshower Kit",
+      "sku": "K-22181-G-BL",
+      "vendorPage": "https://techcomm.kohler.com/techcomm/pdf/K-22181-G_spec_US-CA_Kohler_en.pdf",
+      "note": "Purist Essentials performance showering package with multifunction showerhead, handshower, 60-inch handshower hose, 30-inch slidebar kit, and Rite-Temp valve trim in Matte Black finish (BL). Features 1.75 gpm flow rate with MasterClean sprayface and three spray experiences. Product shots with plain background, no text.",
+      "files": [
+        {
+          "url": "https://www.kbauthority.com/images/W/152/K-22181-G-BL_Kohler_Matte_Black.jpg",
+          "kind": "iso",
+          "contentType": "image/jpeg",
+          "bytes": 17669,
+          "width": 1200,
+          "height": 1200,
+          "sha256": "b08344a06fac7e4631bbe2e4ab4394f2c80eb9d7e9e6fcacfa2b19d34d74ce7f",
+          "source": "Kitchen and Bath Authority product page"
+        },
+        {
+          "url": "https://images.thdstatic.com/productImages/160a3d1d-5a91-55cc-a801-a994affcd104/svn/matte-black-kohler-shower-head-slide-bars-22181-g-bl-e1_1000.jpg",
+          "kind": "iso",
+          "contentType": "image/jpeg",
+          "bytes": 15792,
+          "width": 1000,
+          "height": 1000,
+          "source": "Home Depot product page",
+          "digestUnstable": "images.thdstatic.com re-encodes on the fly — repeat downloads of the same URL differ in bytes, so this file carries no digest to check against"
+        }
+      ]
+    },
+    "kohler-K-25498-BL": {
+      "product": "Kohler Purist Cabinet Pull",
+      "sku": "K-25498-BL",
+      "vendorPage": "https://techcomm.kohler.com/techcomm/pdf/K-25498_spec_US-CA_Kohler_en.pdf",
+      "note": "Matte Black finish cabinet pull on plain white background. Clean product shot showing the 5-inch pull design.",
+      "files": [
+        {
+          "url": "https://images.thdstatic.com/productImages/d2d0a218-2f94-45d9-b506-3d4fb42545b5/svn/kohler-drawer-pulls-25498-bl-64_1000.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 6247,
+          "width": 1000,
+          "height": 1000,
+          "source": "The Home Depot",
+          "digestUnstable": "images.thdstatic.com re-encodes on the fly — repeat downloads of the same URL differ in bytes, so this file carries no digest to check against"
+        }
+      ]
+    },
+    "kohler-K-25498-BN": {
+      "product": "Kohler Purist Cabinet Pull",
+      "sku": "K-25498-BN",
+      "vendorPage": "https://techcomm.kohler.com/techcomm/pdf/K-25498_spec_US-CA_Kohler_en.pdf",
+      "note": "Vibrant Brushed Nickel cabinet pull on plain white background. Product photograph showing 5-inch pull design with brushed nickel finish.",
+      "files": [
+        {
+          "url": "https://www.kbauthority.com/images/W/356/K-25498-BN_Kohler_Vibrant_Brushed_Nickel.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 11775,
+          "width": 1200,
+          "height": 1200,
+          "sha256": "056e75bc73704d5e8336dc6c377fd7fdc3f1c69c4c2740c394458facd8f78c5d",
+          "source": "kbauthority.com"
+        }
+      ]
+    },
+    "kohler-K-T14414-4-BN": {
+      "product": "Kohler Purist Wall-Mounted Basin Faucet Trim",
+      "sku": "K-T14414-4-BN",
+      "vendorPage": "https://resources.kohler.com/webassets/kpna/catalog/pdf/en/K-T14414-4_spec.pdf",
+      "note": "Purist wall-mounted bathroom sink faucet trim with lever handles in Vibrant Brushed Nickel finish (BN). Product shots with plain background, no text or callouts.",
+      "files": [
+        {
+          "url": "https://images.thdstatic.com/productImages/93978308-6451-4103-a1a7-7a86b49cac7e/svn/vibrant-brushed-nickel-kohler-sink-trim-kits-k-t14414-4-bn-64_1000.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 14965,
+          "width": 1000,
+          "height": 1000,
+          "source": "Home Depot product page",
+          "digestUnstable": "images.thdstatic.com re-encodes on the fly — repeat downloads of the same URL differ in bytes, so this file carries no digest to check against"
+        },
+        {
+          "url": "https://images.thdstatic.com/productImages/1c299e89-7a93-4c98-92fd-df20c4aa0c7b/svn/vibrant-brushed-nickel-kohler-sink-trim-kits-k-t14414-4-bn-e1_600.jpg",
+          "kind": "iso",
+          "contentType": "image/jpeg",
+          "bytes": 17156,
+          "width": 600,
+          "height": 600,
+          "source": "Home Depot product page",
+          "digestUnstable": "images.thdstatic.com re-encodes on the fly — repeat downloads of the same URL differ in bytes, so this file carries no digest to check against"
+        }
+      ]
+    },
+    "kohler-K-T14420-4G-BN": {
+      "product": "Kohler Purist Tub and Shower Trim",
+      "sku": "K-T14420-4G-BN",
+      "vendorPage": "https://resources.kohler.com/webassets/kpna/catalog/pdf/en/K-T14420-4G_spec_US-CA_Kohler_en.pdf",
+      "note": "Purist Rite-Temp bath and shower trim kit with lever handle and 1.75 gpm showerhead in Vibrant Brushed Nickel finish (BN). Only one image available in correct finish from accessible retailers. Product shot with plain background.",
+      "files": [
+        {
+          "url": "https://www.kbauthority.com/images/W/357/K-T14420-4G-BN_Kohler_Vibrant_Brushed_Nickel.jpg",
+          "kind": "iso",
+          "contentType": "image/jpeg",
+          "bytes": 18515,
+          "width": 1200,
+          "height": 1200,
+          "sha256": "531c535f807321714018bb60d8cfc004f3bcd62e7b9eff279698b5298b3b0067",
+          "source": "Kitchen and Bath Authority product page"
+        }
+      ]
+    },
+    "modern-forms-cinch-WS-34125-30-BN": {
+      "product": "Modern Forms Cinch Vanity Light",
+      "sku": "WS-34125-30-BN",
+      "vendorPage": "https://www.lightology.com/index.php?module=prod_detail&option_id=1040837&prod_id=1040833",
+      "note": "Brushed nickel finish, clean product shots on plain background from Lightology original-resolution library.",
+      "files": [
+        {
+          "url": "https://www.lightology.com/img/prod/original/1040836.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 57139,
+          "width": 1581,
+          "height": 1581,
+          "sha256": "3634b54c8ed6e7506407efe10918a2ac99746148bbd3e9af99f78c649bd5d9f0",
+          "source": "Lightology product page"
+        },
+        {
+          "url": "https://www.lightology.com/img/prod/original/1040833.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 40760,
+          "width": 1272,
+          "height": 1272,
+          "sha256": "7c929bd7b0cf2a826980f788283e97b2b4fc67c4ef1ffddbb568ff7f6289fd0e",
+          "source": "Lightology product page"
+        }
+      ]
+    },
+    "msi-convex-olive": {
+      "product": "MSI Convex Olive Niche Accent Tile",
+      "sku": "NWGCONOLI2X10G-N",
+      "vendorPage": "https://www.msisurfaces.com/ceramic-convex/olive/",
+      "note": "Glossy ceramic with wavy three-dimensional convex face. Isometric view emphasizes the 3D texture; variation shot shows color consistency.",
+      "files": [
+        {
+          "url": "https://cdn.msisurfaces.com/images/porcelainceramic/iso/convex-olive-iso.jpg",
+          "kind": "iso",
+          "contentType": "image/jpeg",
+          "bytes": 112124,
+          "width": 805,
+          "height": 805,
+          "sha256": "027f23e8fe03a1e070f128e011b211574efeccc7aa27e4a66a92c4694410d99e",
+          "source": "cdn.msisurfaces.com/images/porcelainceramic/iso"
+        },
+        {
+          "url": "https://cdn.msisurfaces.com/images/porcelainceramic/variation/convex-olive-variation.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 86751,
+          "width": 805,
+          "height": 805,
+          "sha256": "f840a7f682e237e63e0639e826882a2aa0f337092630b803bb90f8d6c1ebd222",
+          "source": "cdn.msisurfaces.com/images/porcelainceramic/variation"
+        }
+      ]
+    },
+    "msi-gems-caraibi": {
+      "product": "MSI Gems Caraibi Niche Accent Tile",
+      "sku": "NWGGEMCAR5X10G",
+      "vendorPage": "https://www.msisurfaces.com/porcelain-gems/caraibi/",
+      "note": "Glossy porcelain with fluted/slatted vertical relief. Flat face shot and isometric view showing the 3D texture.",
+      "files": [
+        {
+          "url": "https://cdn.msisurfaces.com/images/porcelainceramic/gems-caraibi.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 200193,
+          "width": 805,
+          "height": 805,
+          "sha256": "05910d6fe1af5322ee9fd55d77e202091d0e2c3725758e26d68fe94d2f652ad9",
+          "source": "cdn.msisurfaces.com/images/porcelainceramic"
+        },
+        {
+          "url": "https://cdn.msisurfaces.com/images/porcelainceramic/iso/gems-caraibi-iso.jpg",
+          "kind": "iso",
+          "contentType": "image/jpeg",
+          "bytes": 219656,
+          "width": 805,
+          "height": 805,
+          "sha256": "1e67d492e72cfb896b7f1ba5165d6a3b00e396dda8ec8f8d9b070f25841ffb1c",
+          "source": "cdn.msisurfaces.com/images/porcelainceramic/iso"
+        }
+      ]
+    },
+    "msi-sande-ivory-12x24": {
+      "product": "MSI Sande Ivory Floor Tile",
+      "sku": "NSANIVO1224",
+      "vendorPage": "https://www.msisurfaces.com/porcelain-sande/ivory/",
+      "note": "Matte porcelain with linear pattern. Flat face and isometric views of the tile.",
+      "files": [
+        {
+          "url": "https://cdn.msisurfaces.com/images/porcelainceramic/ivory-sande-porcelain.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 65216,
+          "width": 805,
+          "height": 805,
+          "sha256": "7803d697d8e73a59e0edc64561b6a500a6b0ea59d50d3256915ceab48351fea9",
+          "source": "cdn.msisurfaces.com/images/porcelainceramic"
+        },
+        {
+          "url": "https://cdn.msisurfaces.com/images/porcelainceramic/iso/ivory-sande-porcelain-iso.jpg",
+          "kind": "iso",
+          "contentType": "image/jpeg",
+          "bytes": 72860,
+          "width": 805,
+          "height": 805,
+          "sha256": "ca603d9f9d4c7b4e81e7a2801d96a074144a9505bd649367b7b219b9765fde5f",
+          "source": "cdn.msisurfaces.com/images/porcelainceramic/iso"
+        }
+      ]
+    },
+    "msi-sande-ivory-2x2": {
+      "product": "MSI Sande Ivory Shower Floor Mosaic",
+      "sku": "NSANIVO2X2",
+      "vendorPage": "https://www.msisurfaces.com/porcelain-sande/ivory/",
+      "note": "Mosaic 2x2 SQUARE matte porcelain (NSANIVO2X2) with linear pattern. Single face shot; no alternative views of the square mosaic exist (hexagon variant is a different product).",
+      "files": [
+        {
+          "url": "https://cdn.msisurfaces.com/images/porcelainceramic/ivory-sande-2x2.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 38836,
+          "width": 805,
+          "height": 805,
+          "sha256": "7c8ae6cf828cd3664a0391bdf1aed96016d3ffd39cfeeee585b8f9f742053ae0",
+          "source": "cdn.msisurfaces.com/images/porcelainceramic"
+        }
+      ]
+    },
+    "porcelanosa-bottega-caliza": {
+      "product": "Porcelanosa Bottega Caliza Floor Tile",
+      "sku": "100324943",
+      "vendorPage": "https://store.porcelanosa.com/us/bottega-caliza-23x23",
+      "note": "Warm pale limestone-look neutral porcelain floor tile (Bottega Caliza 23x23, SKU 100324943). Two genuine frames: _T.jpg is flat tile face; _01.jpg is room scene detail (real photo, not ideal but acceptable).",
+      "files": [
+        {
+          "url": "https://media-prod.porcelanosa.com/media/catalog/product/1/0/100324943_T.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 110053,
+          "width": 1920,
+          "height": 1440,
+          "sha256": "0e78af1e595430e7296727baffdd474e4943dc503b4ee0111a553fbf99dbe8a9",
+          "source": "media-prod.porcelanosa.com (product main view, flat tile face)"
+        },
+        {
+          "url": "https://media-prod.porcelanosa.com/media/catalog/product/1/0/100324943_01.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 91890,
+          "width": 986,
+          "height": 737,
+          "sha256": "5710512a0f814f52bbfcb41605869b3a727388f162fef34f53ab2af6ca79fb0b",
+          "source": "media-prod.porcelanosa.com (gallery detail, living room application)"
+        }
+      ]
+    },
+    "porcelanosa-metropolitan-grass": {
+      "product": "Porcelanosa Metropolitan Grass Wall Tile",
+      "sku": "100336793",
+      "vendorPage": "https://store.porcelanosa.com/us/metropolitan-grass-8x8",
+      "note": "Green ceramic wall tile (Metropolitan Grass 8x8, SKU 100336793). Only one genuine frame exists on CDN: _T.jpg (1920x1440, four green 8x8 tiles shown together). Exhaustive search tested: _01 through _04 variants, _T suffixes, naming patterns (_detail, _crop, _close, _installed, _application, _use, _spec, _sample), and size suffixes (_L, _XL, _FULL, _LARGE, _1920, _2000, _2500) — all returned 33.8 KB placeholder. Second image would be the grey PORCELANOSA card (fallback), so excluded per spec.",
+      "files": [
+        {
+          "url": "https://media-prod.porcelanosa.com/media/catalog/product/1/0/100336793_T.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 59579,
+          "width": 1920,
+          "height": 1440,
+          "sha256": "dd3fa0446852688223c269364f120e6d5acad552e74c330498b50cac09980d17",
+          "source": "media-prod.porcelanosa.com (product main view, tile face)"
+        }
+      ]
+    },
+    "sonneman-stiletto-2340.03": {
+      "product": "Sonneman Stiletto Vanity Light, Satin White",
+      "sku": "2340.03-DIM",
+      "vendorPage": "https://www.lightology.com/index.php?module=prod_detail&prod_id=210031",
+      "note": "Satin white finish, clean product shots from Lightology original-resolution library.",
+      "files": [
+        {
+          "url": "https://www.lightology.com/img/prod/original/210031.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 45232,
+          "width": 1200,
+          "height": 1200,
+          "sha256": "6efa3b2b50f515f033b08e780594645c7f5596a767b50692ac600a48b1f5404b",
+          "source": "Lightology product page"
+        },
+        {
+          "url": "https://www.lightology.com/img/prod/original/210032.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 42718,
+          "width": 1200,
+          "height": 1200,
+          "sha256": "9f25e86d24a34cf92a022b386b2b8ea7754f4bcc81cb107500aaf5405164447c",
+          "source": "Lightology product page"
+        }
+      ]
+    },
+    "thermador-DWHD640EPR": {
+      "product": "Thermador Emerald 5-Program Dishwasher 24 Inch, Panel Ready",
+      "sku": "DWHD640EPR",
+      "vendorPage": "https://www.fergusonhome.com/thermador-dwhd640epr/s2015633",
+      "note": "Panel-ready unit: the front shot shows it wearing a wood panel, the second shows the control panel with the door slightly open. Replaces a 493x700 dealer shot the pipeline flagged as low resolution.",
+      "files": [
+        {
+          "url": "https://media3.bsh-group.com/Product_Shots/23595467_DWHD640EPR-Thermador-Emerald-Dishwasher-Front_def.webp",
+          "kind": "face",
+          "contentType": "image/webp",
+          "bytes": 348610,
+          "width": 1942,
+          "height": 2709,
+          "sha256": "c286c7c735f714992aebedce31a282cea5a17b9d7d71febf5c1d1e8927626a5c",
+          "source": "media3.bsh-group.com — Thermador/BSH official product shots"
+        },
+        {
+          "url": "https://media3.bsh-group.com/Product_Shots/23595468_DWHD640EPR-Thermador-Emerald-Dishwasher-Slightly-Open-Control-Panel_def.webp",
+          "kind": "angle",
+          "contentType": "image/webp",
+          "bytes": 254354,
+          "width": 2288,
+          "height": 2703,
+          "sha256": "cc9d23df1eef59b57f2c91857073432754b88f4be5d6ba3f39d50eaccfd70407",
+          "source": "media3.bsh-group.com — Thermador/BSH official product shots"
+        }
+      ]
+    },
+    "thermador-MC30WP": {
+      "product": "Thermador ADA Professional Series 30\" Gray Glass On Stainless Steel Speed Oven",
+      "sku": "MC30WPSS",
+      "vendorPage": "https://www.fergusonhome.com/product/summary/1655894",
+      "note": "Model MC30WP confirmed: Thermador Professional Series 30-inch speed oven with gray glass on stainless steel. The 'SS' in the original reference row indicates stainless steel finish. Product photos showing the unit with controls and glass panel configuration.",
+      "files": [
+        {
+          "url": "https://www.biancos.com/files/image/attachment/10129/MC30WP.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 100036,
+          "width": 800,
+          "height": 600,
+          "sha256": "f02e6bc26e2f60ec6463c71590c31243c93ecd9fb21de5295c1ef77fba9b0591",
+          "source": "Bianco's Appliances"
+        },
+        {
+          "url": "https://linqcdn.avbportal.com/images/1f3a91d1-68e9-481c-9756-12e5ca1ade3f.jpg",
+          "kind": "iso",
+          "contentType": "image/jpeg",
+          "bytes": 492257,
+          "width": 854,
+          "height": 590,
+          "sha256": "cd73fa3e4df4d91bf1eb79666ea8142f64768ea7c025e01f4983c1e5ba7bb09e",
+          "source": "Albert Lee Appliances"
+        }
+      ]
+    },
+    "thermador-PRG486WDHSS": {
+      "product": "Thermador Professional Series 48 In. Stainless Steel Gas Pro Harmony Range With Griddle",
+      "sku": "PRG486WDHSS",
+      "vendorPage": "https://www.fergusonhome.com/thermador-prg486wdh/s1655751",
+      "note": "Model PRG486WDHSS confirmed: 48-inch Professional/Pro Harmony gas range with griddle, stainless steel. Product photos showing full range with burners and griddle configuration.",
+      "files": [
+        {
+          "url": "https://images.plessers.com/photos/p/00168/1680889.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 1123481,
+          "width": 3536,
+          "height": 2416,
+          "sha256": "1b18ca1d29ffb7776896dbb81c9edca57c898a49cf7ce9710b2342add379e075",
+          "source": "Plesser's Appliances"
+        },
+        {
+          "url": "https://images.plessers.com/photos/p/00065/654396.webp",
+          "kind": "iso",
+          "contentType": "image/webp",
+          "bytes": 603412,
+          "width": 2635,
+          "height": 2180,
+          "sha256": "83be40630e3db0ef94403302298499360a1687b67cbbc33625fa03caeab5292e",
+          "source": "Plesser's Appliances"
+        }
+      ]
+    },
+    "thermador-T42IT100NP": {
+      "product": "Thermador Freedom Collection 23.1 Cu. Ft. Built-In French Door Refrigerator 42-Inch Wide in Custom Panel",
+      "sku": "T42IT100NP",
+      "vendorPage": "https://www.fergusonhome.com/thermador-t42it100np/s1982063",
+      "note": "Model T42IT100NP confirmed: 42-inch built-in French door refrigerator, custom panel ready. Product photos showing stainless steel unit with controls and door configuration on plain background.",
+      "files": [
+        {
+          "url": "https://images.plessers.com/photos/p/00116/1163010.webp",
+          "kind": "iso",
+          "contentType": "image/webp",
+          "bytes": 109090,
+          "width": 1033,
+          "height": 2048,
+          "sha256": "588e6c58a7c517aed5188f7d02de096f78bcee12a1d04197c80c661f31ae9b5b",
+          "source": "Plesser's Appliances"
+        },
+        {
+          "url": "https://images.plessers.com/photos/p/00247/2473292.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 43853,
+          "width": 505,
+          "height": 1012,
+          "sha256": "26eef6b48fbf975d8256c5d5fa4d5924fc0f55e6db0ce78467be3e358a3d2591",
+          "source": "Plesser's Appliances"
+        }
+      ]
+    },
+    "thermador-WD30W": {
+      "product": "Thermador 30\" Custom Panel Warming Drawer",
+      "sku": "WD30W",
+      "vendorPage": "https://www.fergusonhome.com/thermador-wd30w/s1655875",
+      "note": "Model WD30W confirmed: 30-inch custom panel warming drawer with SoftClose. Product photos showing the stainless steel frame and drawer front on plain background (panel-ready unit).",
+      "files": [
+        {
+          "url": "https://images.plessers.com/photos/p/00067/675264.webp",
+          "kind": "iso",
+          "contentType": "image/webp",
+          "bytes": 362686,
+          "width": 3503,
+          "height": 1098,
+          "sha256": "f016af0dab324d90586841a57764385095e5dd7b455247ffbb8020dd9d3428f2",
+          "source": "Plesser's Appliances"
+        },
+        {
+          "url": "https://images.plessers.com/photos/p/00067/674143.webp",
+          "kind": "face",
+          "contentType": "image/webp",
+          "bytes": 42206,
+          "width": 3446,
+          "height": 1328,
+          "sha256": "07a3d004a790c553be1dfec70f5c2597373cfd54a0e7201b8f5c0e6d53cc174b",
+          "source": "Plesser's Appliances"
+        }
+      ]
+    },
+    "visual-comfort-banda-700BCBND24B": {
+      "product": "Visual Comfort Modern Banda Vanity Light, Matte Black",
+      "sku": "700BCBND24B-LED930",
+      "vendorPage": "https://www.lightology.com/index.php?module=prod_detail&option_id=812955&prod_id=812957",
+      "note": "Matte black finish, model-specific detail photo and main product shot from Lightology. Distinct from white finish.",
+      "files": [
+        {
+          "url": "https://www.lightology.com/img/prod/original/vcmod-700BCBND24B-LED930-add1.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 538151,
+          "width": 2000,
+          "height": 2000,
+          "sha256": "4dca4fb75f2ccf693488999d4bb8d3d53c5fad11d8625ea3b3d827459d4fa6c2",
+          "source": "Lightology product page"
+        },
+        {
+          "url": "https://www.lightology.com/img/prod/original/812955.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 116291,
+          "width": 2000,
+          "height": 2000,
+          "sha256": "3386606e8f790d498e9cbb5174b3b3228afc83b03dbeecfeae7939d6034d8b84",
+          "source": "Lightology product page"
+        }
+      ]
+    },
+    "visual-comfort-banda-700BCBND24W": {
+      "product": "Visual Comfort Modern Banda Vanity Light, Matte White",
+      "sku": "700BCBND24W-LED930",
+      "vendorPage": "https://www.lightology.com/index.php?module=prod_detail&option_id=1205059&prod_id=812957",
+      "note": "Matte white finish, model-specific detail photo and main product shot from Lightology.",
+      "files": [
+        {
+          "url": "https://www.lightology.com/img/prod/original/vcmod-700BCBND24W-LED930-add1.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 252430,
+          "width": 2000,
+          "height": 2000,
+          "sha256": "d4a401e6b4f06bd9b9d9f55c2155ef29ed43a847e9cd23af70215ac3a734e9c0",
+          "source": "Lightology product page"
+        },
+        {
+          "url": "https://www.lightology.com/img/prod/original/1205059.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 86830,
+          "width": 2000,
+          "height": 2000,
+          "sha256": "2676b15f9904e97779ea1b6fc5f79983e6e63a39d866e89ff862dcf8b8d502c3",
+          "source": "Lightology product page"
+        }
+      ]
+    },
+    "zephyr-AK9346BS": {
+      "product": "Zephyr Monsoon II 48\" Stainless Steel Hood Insert",
+      "sku": "AK9346BS",
+      "vendorPage": "https://www.fergusonhome.com/zephyr-ak9346b/s1745799",
+      "note": "One photograph only — the two vendor URLs for this insert return byte-identical files. A second hunt for a larger shot returned only kitchen room scenes (one of them a white custom hood ENCLOSURE, not this stainless insert), so the 745x482 product shot stands and gaps.md flags it as low resolution.",
+      "files": [
+        {
+          "url": "https://images.plessers.com/photos/p/00089/890946.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 43744,
+          "width": 745,
+          "height": 482,
+          "sha256": "ae648f948c319ab34edce2c6c89076dae28947130642b996582d58fba4ee0fab",
+          "source": "Plesser's Appliances"
+        }
+      ]
+    }
+  }
+}

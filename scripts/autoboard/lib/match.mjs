@@ -68,7 +68,14 @@ const SLOT_RULES = {
   },
   appliance_collage: {
     refrigerator: [{ any: [/refrigerator/i, /\bfridge\b/i] }],
-    cooktop: [{ any: [/cooktop/i, /cook top/i, /range top/i, /induction/i] }],
+    // A pro range is the kitchen's cooking appliance, so it takes the cooktop
+    // slot. `none` keeps the range HOOD out of it: "Zephyr Monsoon II 48 Hood
+    // Insert" and "range hood" both contain "range" for a regex, and the hood
+    // has its own slot two lines down.
+    cooktop: [
+      { any: [/cooktop/i, /cook top/i, /range top/i, /induction/i] },
+      { any: [/\brange\b/i], none: [/hood/i, /microwave/i] },
+    ],
     range_hood: [{ any: [/\bhood\b/i] }],
     oven: [{ any: [/\boven\b/i] }],
     dishwasher: [{ any: [/dishwasher/i] }],
@@ -84,6 +91,12 @@ const SLOT_RULES = {
     ],
     vanity_wood: [{ any: [/vanity/i], none: [/faucet/i, /light/i, /top/i] }],
     main_tile: [{ any: [/tile/i], none: [/accent/i, /mosaic/i] }],
+    // Deliberately narrower than the tile board's accent rule (/accent/i,
+    // /mosaic/i): on a FIXTURE board this competes with the tile-assignment
+    // path below, so it only claims a row that names itself a tile. A
+    // library whose tiles are photos rather than rows (Wieland) still gets
+    // its accent from tile-assignments.json exactly as before.
+    accent_tile: [{ any: [/accent tile/i, /mosaic tile/i] }],
     countertop: [{ any: [/countertop/i, /counter top/i, /quartz/i, /marble/i, /granite/i] }],
   },
   bathroom_tile_collage: {
@@ -145,18 +158,46 @@ export function extractTier(itemName) {
   return { name: itemName.slice(match[0].length), tier: match[1].toLowerCase() };
 }
 
+// A row a project marked as a substitute for another row (source.mjs's
+// normalizedStatus). It may never win a slot automatically: an alternative
+// replaces the preferred product only when a person decides it does, and a
+// substitute that slips into a slot silently renders a material nobody chose.
+// Measured on 651 Belmont: with the rows named as the recommendations document
+// names them the regexes fill 28 of 30 slots correctly, but reword each row the
+// way another person would write the same schedule line and 7 of the 13 lost
+// slots go to an alternative rather than going empty — a wrong board with a
+// clean gaps.md (artifacts/typesafe-experiments/RESULTS.md, arm 3). The review
+// UI still lists these rows for manual selection; only auto-assignment skips
+// them.
+const SUBSTITUTE_STATUS = "alternative";
+
+export function isSubstitute(row) {
+  return row.status === SUBSTITUTE_STATUS;
+}
+
 // Assign a room's rows to a board type's preset slots, in preset order.
 // The first matching row (by source order) wins a slot; other matches are
-// recorded as alternates but stay available for later slots.
+// recorded as alternates but stay available for later slots. Substitutes are
+// held back and returned separately, so a caller can report which slot each one
+// was kept out of.
 export function assignSlots(rows, collageType) {
   const presets = ITEM_PRESETS[collageType] ?? [];
   const assignedRowIds = new Set();
   const filled = [];
   const conflicts = [];
+  const substitutes = [];
+  const heldBack = new Set();
   for (const preset of presets) {
-    const candidates = rows.filter(
-      (row) => !assignedRowIds.has(row.rowId) && slotMatches(collageType, preset.id, row),
-    );
+    const candidates = [];
+    for (const row of rows) {
+      if (assignedRowIds.has(row.rowId) || !slotMatches(collageType, preset.id, row)) continue;
+      if (isSubstitute(row)) {
+        substitutes.push({ slotId: preset.id, collageType, rowId: row.rowId, itemName: row.itemName, sku: row.sku });
+        heldBack.add(row.rowId);
+        continue;
+      }
+      candidates.push(row);
+    }
     if (!candidates.length) continue;
     const [winner, ...alternates] = candidates;
     assignedRowIds.add(winner.rowId);
@@ -170,8 +211,11 @@ export function assignSlots(rows, collageType) {
       });
     }
   }
-  const unmapped = rows.filter((row) => !assignedRowIds.has(row.rowId));
-  return { filled, unmapped, conflicts };
+  // A held-back substitute is reported as a substitute, not as an unmapped
+  // row, so each row shows up in exactly one section of gaps.md. One that
+  // matched no slot at all stays unmapped like any other row.
+  const unmapped = rows.filter((row) => !assignedRowIds.has(row.rowId) && !heldBack.has(row.rowId));
+  return { filled, unmapped, conflicts, substitutes };
 }
 
 // ---------------------------------------------------------------------------
@@ -313,11 +357,19 @@ export function buildBoards(rows, options) {
     }
 
     const mappedRowIds = new Set();
+    // Held back from a slot on at least one of this room's boards. Reported as
+    // a substitute below, so the unmapped sweep at the end of this loop leaves
+    // it alone and no row appears in two sections of gaps.md.
+    const heldBackRowIds = new Set();
     for (const collageType of boardTypes) {
-      const { filled, conflicts } = assignSlots(group.rows, collageType);
+      const { filled, conflicts, substitutes } = assignSlots(group.rows, collageType);
       gaps.slotConflicts.push(
         ...conflicts.map((conflict) => ({ ...conflict, unitType: group.unitType, roomLabel: group.roomLabel })),
       );
+      gaps.substituteCandidates?.push(
+        ...substitutes.map((substitute) => ({ ...substitute, unitType: group.unitType, roomLabel: group.roomLabel })),
+      );
+      for (const substitute of substitutes) heldBackRowIds.add(substitute.rowId);
 
       if (collageType === "bathroom_tile_collage") {
         const tileSlots = filled.filter((slot) => TILE_GATE_SLOTS.includes(slot.preset.id)).length;
@@ -371,6 +423,11 @@ export function buildBoards(rows, options) {
         for (const [slotId, codeField] of [["main_tile", "mainTile"], ["accent_tile", "accentTile"]]) {
           const preset = (ITEM_PRESETS[collageType] ?? []).find((entry) => entry.id === slotId);
           if (!preset) continue;
+          // A library that carries its tiles as real rows (see
+          // scripts/autoboard/projects/) has already filled this slot through
+          // assignSlots; adding the assignment's tile on top would put two
+          // items on the same slot id and the app's validator rejects that.
+          if (items.some((item) => item.slotId === slotId)) continue;
           const code = assignment?.[codeField];
           // No push here for a missing assignment — the generic unfilled-slot
           // loop below already reports every preset absent from `items`,
@@ -469,7 +526,7 @@ export function buildBoards(rows, options) {
     }
 
     for (const row of group.rows) {
-      if (!mappedRowIds.has(row.rowId)) {
+      if (!mappedRowIds.has(row.rowId) && !heldBackRowIds.has(row.rowId)) {
         gaps.unmappedItems.push({
           unitType: group.unitType,
           roomLabel: group.roomLabel,

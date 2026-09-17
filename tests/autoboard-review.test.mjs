@@ -84,6 +84,22 @@ test("libraryOptionsForSlot lists every tile code for a tile slot", () => {
   assert.deepEqual(options.map((option) => option.code).sort(), ["AT1", "WT1"]);
 });
 
+test("libraryOptionsForSlot falls back to room rows for a tile slot when the library has no tile photos", () => {
+  // 651 Belmont carries its tiles as manifest rows, so Tile/tiles/ is empty.
+  // Without this the board's tile slots would be the only ones a reviewer
+  // could not correct.
+  const roomIndex = buildRoomIndex([
+    row({ rowId: "1", itemName: "ELM Palette Seafoam Wall Tile" }),
+    row({ rowId: "2", itemName: "Porcelanosa Bottega Caliza Floor Tile" }),
+  ]);
+  const options = libraryOptionsForSlot({
+    board: board([]), slotId: "main_tile", roomIndex, tileIndex: new Map(),
+    resolveImages: (rowId) => [`/fake/${rowId}.png`],
+  });
+  assert.deepEqual(options.map((option) => option.rowId), ["1", "2"]);
+  assert.ok(options.every((option) => option.kind === "row"));
+});
+
 test("libraryOptionsForSlot lists every room row for a regular slot, including ones with no photo yet", () => {
   const roomIndex = buildRoomIndex([
     row({ rowId: "1", itemName: "Brizo Faucet" }),
@@ -706,6 +722,36 @@ test("POST /api/render validates and enqueues; status exposes queue, stale flags
   } finally { await s.cleanup(); }
 });
 
+test("a render's image URL carries a per-render token, so a reused path cannot serve the replaced picture", async () => {
+  // Render ids restart at 0001 after /api/render-reset, so the next draft
+  // lands on the path its deleted predecessor used. /render-image answers with
+  // Cache-Control: max-age=3600, so a URL keyed only by path made the board
+  // show the old render for an hour — the new draft looked identical to the
+  // one it replaced.
+  const results = { candidates: {}, finals: {} };
+  const boardId = "penthouse-bath-2-fixture";
+  const reusedPath = `boards/${boardId}/drafts/d-0001.png`;
+  recordDraft(results, boardId, { variant: "A", index: 1, path: reusedPath, jobId: "j1", durationMs: 1, selectionHash: "h", instruction: "", itemNotes: {} });
+  const s = await startScratchServer({ results });
+  try {
+    mkdirSync(path.join(s.runDir, "boards", boardId, "drafts"), { recursive: true });
+    writeFileSync(path.join(s.runDir, "boards", boardId, "drafts", "d-0001.png"), PNG_BYTES);
+    const draft = (await s.get("/api/render-status")).json.renders[boardId].drafts[0];
+    assert.match(draft.url, /^\/render-image\?path=/);
+    assert.ok(draft.url.includes(`v=${encodeURIComponent(draft.createdAt)}`), draft.url);
+    // The token has to come from the record, not the path, or two renders at
+    // the same path would share a URL again.
+    assert.ok(draft.createdAt, "a draft record must carry createdAt for the token to vary");
+    assert.notEqual(
+      draft.url,
+      `/render-image?path=${encodeURIComponent(reusedPath)}&v=${encodeURIComponent("1970-01-01T00:00:00.000Z")}`,
+    );
+    // The extra parameter must not disturb the path lookup or its guard.
+    assert.equal((await s.get(`${draft.url}`)).status, 200);
+    assert.equal((await s.get(`/render-image?path=${encodeURIComponent("../plan.json")}&v=1`)).status, 404);
+  } finally { await s.cleanup(); }
+});
+
 test("render-status marks drafts stale when the selection hash moved, and cancel works", async () => {
   const results = { candidates: {}, finals: {} };
   recordDraft(results, "penthouse-bath-2-fixture", { variant: "A", index: 1, path: "boards/penthouse-bath-2-fixture/drafts/d-0001.png", jobId: "j", durationMs: 1, selectionHash: "old", instruction: "", itemNotes: {} });
@@ -714,7 +760,10 @@ test("render-status marks drafts stale when the selection hash moved, and cancel
   try {
     const draft = (await s.get("/api/render-status")).json.renders[s.boardId].drafts[0];
     assert.equal(draft.stale, true);
-    assert.equal(draft.url, "/render-image?path=" + encodeURIComponent(`boards/${s.boardId}/drafts/d-0001.png`));
+    assert.equal(
+      draft.url,
+      "/render-image?path=" + encodeURIComponent(`boards/${s.boardId}/drafts/d-0001.png`) + "&v=" + encodeURIComponent(draft.createdAt),
+    );
     await s.post("/api/render", { boardId: s.boardId, kind: "draft", variant: "A", count: 1 });
     const b = await s.post("/api/render", { boardId: s.boardId, kind: "draft", variant: "A", count: 1, background: "transparent" });
     assert.equal(b.json.position, 2);

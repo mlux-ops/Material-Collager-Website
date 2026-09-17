@@ -333,7 +333,16 @@ async function commandPlan(values) {
     const slots = board.items.map((item) => item.slotId).join(", ");
     const mergedNote = board.aliases && board.aliases.length ? `  ("${board.title}")` : "";
     console.log(`  ${board.id}  [${board.items.length} slots: ${slots}]${mergedNote}`);
-    if (board.items.some((item) => item.slotId === "main_tile" || item.slotId === "accent_tile")) {
+    // Only a tile that CAME FROM tile-assignments.json carries the schedule's
+    // HOLD status. Those are the tile items with no manifest row behind them
+    // (match.mjs builds them from the tile photo index); a project whose tiles
+    // are ordinary rows with vendor SKUs — see scripts/autoboard/projects/ —
+    // fills the same slots and must not be tarred with the Wieland schedule.
+    if (
+      board.items.some(
+        (item) => (item.slotId === "main_tile" || item.slotId === "accent_tile") && item.rowId === null,
+      )
+    ) {
       boardsWithProvisionalTiles++;
     }
   }
@@ -363,6 +372,8 @@ function gapsMarkdown(runId, source, gaps) {
       `- ${gap.unitType} / ${gap.roomLabel} / ${gap.collageType} / ${gap.slotId}: ${gap.itemName} (row ${gap.rowId}, SKU ${gap.sku || "—"})`],
     ["Preset slots left unfilled", gaps.unfilledSlots, (gap) =>
       `- ${gap.unitType} / ${gap.roomLabel} / ${gap.collageType} / ${gap.slotId}: ${gap.reason}`],
+    ["Substitutes held back from a slot (choose one in the review board to use it)", gaps.substituteCandidates ?? [], (gap) =>
+      `- ${gap.unitType} / ${gap.roomLabel} / ${gap.collageType} / ${gap.slotId}: ${gap.itemName} (row ${gap.rowId}, SKU ${gap.sku || "—"}) is marked as an alternative, so it never fills a slot automatically`],
     ["Library items not mapped to any slot", gaps.unmappedItems, (gap) =>
       `- ${gap.unitType} / ${gap.roomLabel}: ${gap.itemName} (row ${gap.rowId}, ${gap.costCode})`],
     ["Low-resolution references (flagged, not excluded)", gaps.lowResolutionReferences ?? [], (gap) =>
@@ -489,7 +500,11 @@ async function commandGenerate(values) {
         `  ${entry.variantId}  (${entry.board.items.length} items, ${referenceCount} reference image(s), quality ${entry.renderOptions.quality}, background ${entry.renderOptions.background}, resolution ${outputResolution}, cost unavailable${reason})`,
       );
     }
-    const skipped = boards.length * plan.variants.length - work.length;
+    // Count against the variants this invocation actually asked for, not every
+    // variant in the plan: with --variants 1 the old arithmetic reported the
+    // unrequested variants as renders "already completed", on a run that had
+    // never rendered anything.
+    const skipped = boards.length * variants.length - work.length;
     if (skipped) console.log(`  (${skipped} already completed and unchanged; use --force to re-render anyway)`);
     if (values.qa && !values["no-qa"]) {
       console.log(`  QA: would run against ${baseUrl}/api/qa${values["qa-model"] ? ` (model ${values["qa-model"]})` : ""}`);
