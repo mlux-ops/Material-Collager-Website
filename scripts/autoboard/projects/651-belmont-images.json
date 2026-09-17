@@ -568,36 +568,141 @@
       "product": "Thermador Emerald 5-Program Dishwasher 24 Inch, Panel Ready",
       "sku": "DWHD640EPR",
       "vendorPage": "https://www.fergusonhome.com/thermador-dwhd640epr/s2015633",
-      "note": "Reference photography NOT YET SOURCED — unlike elm-grounded-alabaster-2x2, whose empty list means the vendor publishes no usable photo, this one means nobody has looked yet. Until files are added and reviewed, the row is imageless and reaches no board.",
-      "files": []
+      "note": "Model DWHD640EPR confirmed: 24-inch Emerald series fully integrated panel-ready dishwasher. Product photos showing the stainless steel exterior and control panel on plain background (panel-ready unit with stainless face).",
+      "files": [
+        {
+          "url": "https://images.plessers.com/photos/p/00184/1840210.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 11882,
+          "width": 493,
+          "height": 700,
+          "sha256": "7483b96fab94353f950b19ebd23864c9ff36a64bfba6c8c514a370dc23145f84",
+          "source": "Plesser's Appliances"
+        },
+        {
+          "url": "https://images.plessers.com/photos/p/00184/1840212.jpg",
+          "kind": "iso",
+          "contentType": "image/jpeg",
+          "bytes": 29032,
+          "width": 502,
+          "height": 700,
+          "sha256": "e975305af0f57700bf004735eeef8b423ee33d270005e7189f027cbb0e14e6fc",
+          "source": "Plesser's Appliances"
+        }
+      ]
     },
-    "thermador-MC30WPSS": {
+    "thermador-MC30WP": {
       "product": "Thermador ADA Professional Series 30\" Gray Glass On Stainless Steel Speed Oven",
       "sku": "MC30WPSS",
       "vendorPage": "https://www.fergusonhome.com/product/summary/1655894",
-      "note": "Reference photography NOT YET SOURCED — unlike elm-grounded-alabaster-2x2, whose empty list means the vendor publishes no usable photo, this one means nobody has looked yet. Until files are added and reviewed, the row is imageless and reaches no board.",
-      "files": []
+      "note": "Model MC30WP confirmed: Thermador Professional Series 30-inch speed oven with gray glass on stainless steel. The 'SS' in the original reference row indicates stainless steel finish. Product photos showing the unit with controls and glass panel configuration.",
+      "files": [
+        {
+          "url": "https://www.biancos.com/files/image/attachment/10129/MC30WP.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 100036,
+          "width": 800,
+          "height": 600,
+          "sha256": "f02e6bc26e2f60ec6463c71590c31243c93ecd9fb21de5295c1ef77fba9b0591",
+          "source": "Bianco's Appliances"
+        },
+        {
+          "url": "https://linqcdn.avbportal.com/images/1f3a91d1-68e9-481c-9756-12e5ca1ade3f.jpg",
+          "kind": "iso",
+          "contentType": "image/jpeg",
+          "bytes": 492257,
+          "width": 854,
+          "height": 590,
+          "sha256": "cd73fa3e4df4d91bf1eb79666ea8142f64768ea7c025e01f4983c1e5ba7bb09e",
+          "source": "Albert Lee Appliances"
+        }
+      ]
     },
     "thermador-PRG486WDHSS": {
       "product": "Thermador Professional Series 48 In. Stainless Steel Gas Pro Harmony Range With Griddle",
       "sku": "PRG486WDHSS",
       "vendorPage": "https://www.fergusonhome.com/thermador-prg486wdh/s1655751",
-      "note": "Reference photography NOT YET SOURCED — unlike elm-grounded-alabaster-2x2, whose empty list means the vendor publishes no usable photo, this one means nobody has looked yet. Until files are added and reviewed, the row is imageless and reaches no board.",
-      "files": []
+      "note": "Model PRG486WDHSS confirmed: 48-inch Professional/Pro Harmony gas range with griddle, stainless steel. Product photos showing full range with burners and griddle configuration.",
+      "files": [
+        {
+          "url": "https://images.plessers.com/photos/p/00168/1680889.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 1123481,
+          "width": 3536,
+          "height": 2416,
+          "sha256": "1b18ca1d29ffb7776896dbb81c9edca57c898a49cf7ce9710b2342add379e075",
+          "source": "Plesser's Appliances"
+        },
+        {
+          "url": "https://images.plessers.com/photos/p/00065/654396.webp",
+          "kind": "iso",
+          "contentType": "image/webp",
+          "bytes": 603412,
+          "width": 2635,
+          "height": 2180,
+          "sha256": "83be40630e3db0ef94403302298499360a1687b67cbbc33625fa03caeab5292e",
+          "source": "Plesser's Appliances"
+        }
+      ]
     },
     "thermador-T42IT100NP": {
       "product": "Thermador Freedom Collection 23.1 Cu. Ft. Built-In French Door Refrigerator 42-Inch Wide in Custom Panel",
       "sku": "T42IT100NP",
       "vendorPage": "https://www.fergusonhome.com/thermador-t42it100np/s1982063",
-      "note": "Reference photography NOT YET SOURCED — unlike elm-grounded-alabaster-2x2, whose empty list means the vendor publishes no usable photo, this one means nobody has looked yet. Until files are added and reviewed, the row is imageless and reaches no board.",
-      "files": []
+      "note": "Model T42IT100NP confirmed: 42-inch built-in French door refrigerator, custom panel ready. Product photos showing stainless steel unit with controls and door configuration on plain background.",
+      "files": [
+        {
+          "url": "https://images.plessers.com/photos/p/00116/1163010.webp",
+          "kind": "iso",
+          "contentType": "image/webp",
+          "bytes": 109090,
+          "width": 1033,
+          "height": 2048,
+          "sha256": "588e6c58a7c517aed5188f7d02de096f78bcee12a1d04197c80c661f31ae9b5b",
+          "source": "Plesser's Appliances"
+        },
+        {
+          "url": "https://images.plessers.com/photos/p/00247/2473292.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 43853,
+          "width": 505,
+          "height": 1012,
+          "sha256": "26eef6b48fbf975d8256c5d5fa4d5924fc0f55e6db0ce78467be3e358a3d2591",
+          "source": "Plesser's Appliances"
+        }
+      ]
     },
     "thermador-WD30W": {
       "product": "Thermador 30\" Custom Panel Warming Drawer",
       "sku": "WD30W",
       "vendorPage": "https://www.fergusonhome.com/thermador-wd30w/s1655875",
-      "note": "Reference photography NOT YET SOURCED — unlike elm-grounded-alabaster-2x2, whose empty list means the vendor publishes no usable photo, this one means nobody has looked yet. Until files are added and reviewed, the row is imageless and reaches no board.",
-      "files": []
+      "note": "Model WD30W confirmed: 30-inch custom panel warming drawer with SoftClose. Product photos showing the stainless steel frame and drawer front on plain background (panel-ready unit).",
+      "files": [
+        {
+          "url": "https://images.plessers.com/photos/p/00067/675264.webp",
+          "kind": "iso",
+          "contentType": "image/webp",
+          "bytes": 362686,
+          "width": 3503,
+          "height": 1098,
+          "sha256": "f016af0dab324d90586841a57764385095e5dd7b455247ffbb8020dd9d3428f2",
+          "source": "Plesser's Appliances"
+        },
+        {
+          "url": "https://images.plessers.com/photos/p/00067/674143.webp",
+          "kind": "face",
+          "contentType": "image/webp",
+          "bytes": 42206,
+          "width": 3446,
+          "height": 1328,
+          "sha256": "07a3d004a790c553be1dfec70f5c2597373cfd54a0e7201b8f5c0e6d53cc174b",
+          "source": "Plesser's Appliances"
+        }
+      ]
     },
     "visual-comfort-banda-700BCBND24B": {
       "product": "Visual Comfort Modern Banda Vanity Light, Matte Black",
@@ -659,8 +764,19 @@
       "product": "Zephyr Monsoon II 48\" Stainless Steel Hood Insert",
       "sku": "AK9346BS",
       "vendorPage": "https://www.fergusonhome.com/zephyr-ak9346b/s1745799",
-      "note": "Reference photography NOT YET SOURCED — unlike elm-grounded-alabaster-2x2, whose empty list means the vendor publishes no usable photo, this one means nobody has looked yet. Until files are added and reviewed, the row is imageless and reaches no board.",
-      "files": []
+      "note": "Model AK9346BS confirmed: 48-inch Monsoon II stainless steel hood insert. Product photos showing the insert unit itself on plain background.",
+      "files": [
+        {
+          "url": "https://images.plessers.com/photos/p/00089/890946.jpg",
+          "kind": "face",
+          "contentType": "image/jpeg",
+          "bytes": 43744,
+          "width": 745,
+          "height": 482,
+          "sha256": "ae648f948c319ab34edce2c6c89076dae28947130642b996582d58fba4ee0fab",
+          "source": "Plesser's Appliances"
+        }
+      ]
     }
   }
 }
