@@ -1,27 +1,648 @@
 {
   "model": "jev-latest",
-  "ranAt": "2026-09-17T03:58:08.918Z",
+  "ranAt": "2026-09-17T04:26:43.231Z",
   "threshold": 0.5,
-  "cases": [],
+  "cases": [
+    {
+      "imageKey": "elm-grounded-alabaster-12x24",
+      "sku": "GROUNDED-ALABASTER-12X24",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "683121c7d0e2d6b0a03e21f9_MILE_stone_Earthen_Alabaster_12x24_01.jpg",
+          "finish": null,
+          "variant": 0.85,
+          "flagged": false,
+          "reason": ""
+        },
+        {
+          "id": "R4",
+          "label": "reject",
+          "evidence": "metadata",
+          "filename": "68313647a51c5bd5e0c9a9c8_MILE_stone_Earthen_Alabaster_12x24_Flute_03.jpg",
+          "finish": null,
+          "variant": 0.04,
+          "flagged": true,
+          "reason": "fluted relief variant offered for the plain flat field tile"
+        }
+      ]
+    },
+    {
+      "imageKey": "elm-palette-seafoam",
+      "sku": "PALETTE-SEAFOAM-6X6",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "67ae649e40adf97492c2dc75_palette-seafoam%202.jpg",
+          "finish": null,
+          "variant": 0.73,
+          "flagged": false,
+          "reason": ""
+        },
+        {
+          "id": "A2",
+          "label": "accept",
+          "evidence": "",
+          "filename": "67ae649e0d09347f5c01263e_palette-seafoam.jpg",
+          "finish": null,
+          "variant": 0.72,
+          "flagged": false,
+          "reason": ""
+        }
+      ]
+    },
+    {
+      "imageKey": "elm-vivid-ligne-noir",
+      "sku": "204221E",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "67b400c2739c890c37f35d5c_ligne-noir3.jpg",
+          "finish": null,
+          "variant": 0.67,
+          "flagged": false,
+          "reason": ""
+        }
+      ]
+    },
+    {
+      "imageKey": "elm-vivid-noir-glossy",
+      "sku": "204201E",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "67b40232d0d3b89c28609deb_noir-vivid.jpg",
+          "finish": null,
+          "variant": 0.74,
+          "flagged": false,
+          "reason": ""
+        },
+        {
+          "id": "A2",
+          "label": "accept",
+          "evidence": "",
+          "filename": "67b40232d0d3b89c28609de7_noir-vivid2.jpg",
+          "finish": null,
+          "variant": 0.76,
+          "flagged": false,
+          "reason": ""
+        }
+      ]
+    },
+    {
+      "imageKey": "kohler-K-14406-4-BL",
+      "sku": "K-14406-4-BL",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "matte-black-kohler-widespread-bathroom-faucets-k-14406-4-bl-76_1000.jpg",
+          "finish": 0.92,
+          "variant": 0.9,
+          "flagged": false,
+          "reason": ""
+        },
+        {
+          "id": "A2",
+          "label": "accept",
+          "evidence": "",
+          "filename": "matte-black-kohler-widespread-bathroom-faucets-k-14406-4-bl-64_1000.jpg",
+          "finish": 0.92,
+          "variant": 0.9,
+          "flagged": false,
+          "reason": ""
+        },
+        {
+          "id": "R3",
+          "label": "reject",
+          "evidence": "pixels",
+          "filename": "matte-black-kohler-widespread-bathroom-faucets-k-14406-4-bl-1f_1000.jpg",
+          "finish": 0.8,
+          "variant": 0.53,
+          "flagged": false,
+          "reason": "dimension callouts printed on the image"
+        }
+      ]
+    },
+    {
+      "imageKey": "kohler-K-14435-BL",
+      "sku": "BL",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "matte-black-towel-bars-k-14435-bl-64_1000.jpg",
+          "finish": null,
+          "variant": 0.77,
+          "flagged": false,
+          "reason": ""
+        },
+        {
+          "id": "R6",
+          "label": "reject",
+          "evidence": "pixels",
+          "filename": "matte-black-towel-bars-k-14435-bl-e1_1000.jpg",
+          "finish": null,
+          "variant": 0.51,
+          "flagged": false,
+          "reason": "\"Complete the Space\" marketing graphic with text"
+        }
+      ]
+    },
+    {
+      "imageKey": "kohler-K-14435-BN",
+      "sku": "BN",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "vibrant-brushed-nickel-kohler-towel-bars-k-14435-bn-64_1000.jpg",
+          "finish": null,
+          "variant": 0.69,
+          "flagged": false,
+          "reason": ""
+        },
+        {
+          "id": "A2",
+          "label": "accept",
+          "evidence": "",
+          "filename": "vibrant-brushed-nickel-kohler-towel-bars-k-14435-bn-e1_1000.jpg",
+          "finish": null,
+          "variant": 0.73,
+          "flagged": false,
+          "reason": ""
+        }
+      ]
+    },
+    {
+      "imageKey": "kohler-K-14441-BN",
+      "sku": "K-14441-BN",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "vibrant-brushed-nickel-kohler-towel-rings-k-14441-bn-64_1000.jpg",
+          "finish": 0.94,
+          "variant": 0.88,
+          "flagged": false,
+          "reason": ""
+        },
+        {
+          "id": "R7",
+          "label": "reject",
+          "evidence": "pixels",
+          "filename": "vibrant-brushed-nickel-kohler-towel-rings-k-14441-bn-e1_1000.jpg",
+          "finish": 0.69,
+          "variant": 0.66,
+          "flagged": false,
+          "reason": "\"What's in the Box\" graphic with text"
+        }
+      ]
+    },
+    {
+      "imageKey": "kohler-K-14444-BL",
+      "sku": "K-14444-BL",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "matte-black-kohler-toilet-paper-holders-k-14444-bl-64_1000.jpg",
+          "finish": 0.92,
+          "variant": 0.84,
+          "flagged": false,
+          "reason": ""
+        }
+      ]
+    },
+    {
+      "imageKey": "kohler-K-14444-BN",
+      "sku": "K-14444-BN",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "vibrant-brushed-nickel-kohler-toilet-paper-holders-k-14444-bn-64_1000.jpg",
+          "finish": 0.93,
+          "variant": 0.85,
+          "flagged": false,
+          "reason": ""
+        },
+        {
+          "id": "R8",
+          "label": "reject",
+          "evidence": "pixels",
+          "filename": "vibrant-brushed-nickel-kohler-toilet-paper-holders-k-14444-bn-e1_1000.jpg",
+          "finish": 0.22,
+          "variant": 0.34,
+          "flagged": true,
+          "reason": "brand image of a chrome sink, not the product"
+        }
+      ]
+    },
+    {
+      "imageKey": "kohler-K-22181-G-BL",
+      "sku": "K-22181-G-BL",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "K-22181-G-BL_Kohler_Matte_Black.jpg",
+          "finish": 0.95,
+          "variant": 0.9,
+          "flagged": false,
+          "reason": ""
+        },
+        {
+          "id": "A2",
+          "label": "accept",
+          "evidence": "",
+          "filename": "matte-black-kohler-shower-head-slide-bars-22181-g-bl-e1_1000.jpg",
+          "finish": 0.93,
+          "variant": 0.88,
+          "flagged": false,
+          "reason": ""
+        },
+        {
+          "id": "R2",
+          "label": "reject",
+          "evidence": "metadata",
+          "filename": "K-22181-G.jpg",
+          "finish": 0.04,
+          "variant": 0.12,
+          "flagged": true,
+          "reason": "chrome product shot offered for a Matte Black row"
+        }
+      ]
+    },
+    {
+      "imageKey": "kohler-K-25498-BL",
+      "sku": "K-25498-BL",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "kohler-drawer-pulls-25498-bl-64_1000.jpg",
+          "finish": 0.88,
+          "variant": 0.78,
+          "flagged": false,
+          "reason": ""
+        }
+      ]
+    },
+    {
+      "imageKey": "kohler-K-25498-BN",
+      "sku": "K-25498-BN",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "K-25498-BN_Kohler_Vibrant_Brushed_Nickel.jpg",
+          "finish": 0.92,
+          "variant": 0.84,
+          "flagged": false,
+          "reason": ""
+        }
+      ]
+    },
+    {
+      "imageKey": "kohler-K-T14414-4-BN",
+      "sku": "K-T14414-4-BN",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "vibrant-brushed-nickel-kohler-sink-trim-kits-k-t14414-4-bn-64_1000.jpg",
+          "finish": 0.91,
+          "variant": 0.87,
+          "flagged": false,
+          "reason": ""
+        },
+        {
+          "id": "A2",
+          "label": "accept",
+          "evidence": "",
+          "filename": "vibrant-brushed-nickel-kohler-sink-trim-kits-k-t14414-4-bn-e1_600.jpg",
+          "finish": 0.91,
+          "variant": 0.88,
+          "flagged": false,
+          "reason": ""
+        }
+      ]
+    },
+    {
+      "imageKey": "kohler-K-T14420-4G-BN",
+      "sku": "K-T14420-4G-BN",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "K-T14420-4G-BN_Kohler_Vibrant_Brushed_Nickel.jpg",
+          "finish": 0.95,
+          "variant": 0.91,
+          "flagged": false,
+          "reason": ""
+        },
+        {
+          "id": "R1",
+          "label": "reject",
+          "evidence": "metadata",
+          "filename": "K-T14420-4G.jpg",
+          "finish": 0.05,
+          "variant": 0.14,
+          "flagged": true,
+          "reason": "chrome product shot offered for a Vibrant Brushed Nickel row"
+        }
+      ]
+    },
+    {
+      "imageKey": "modern-forms-cinch-WS-34125-30-BN",
+      "sku": "WS-34125-30-BN",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "1040836.jpg",
+          "finish": 0.23,
+          "variant": 0.52,
+          "flagged": true,
+          "reason": ""
+        },
+        {
+          "id": "A2",
+          "label": "accept",
+          "evidence": "",
+          "filename": "1040833.jpg",
+          "finish": 0.38,
+          "variant": 0.75,
+          "flagged": true,
+          "reason": ""
+        }
+      ]
+    },
+    {
+      "imageKey": "msi-convex-olive",
+      "sku": "NWGCONOLI2X10G-N",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "convex-olive-iso.jpg",
+          "finish": null,
+          "variant": 0.77,
+          "flagged": false,
+          "reason": ""
+        },
+        {
+          "id": "A2",
+          "label": "accept",
+          "evidence": "",
+          "filename": "convex-olive-variation.jpg",
+          "finish": null,
+          "variant": 0.79,
+          "flagged": false,
+          "reason": ""
+        }
+      ]
+    },
+    {
+      "imageKey": "msi-gems-caraibi",
+      "sku": "NWGGEMCAR5X10G",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "gems-caraibi.jpg",
+          "finish": null,
+          "variant": 0.6,
+          "flagged": false,
+          "reason": ""
+        },
+        {
+          "id": "A2",
+          "label": "accept",
+          "evidence": "",
+          "filename": "gems-caraibi-iso.jpg",
+          "finish": null,
+          "variant": 0.65,
+          "flagged": false,
+          "reason": ""
+        }
+      ]
+    },
+    {
+      "imageKey": "msi-sande-ivory-12x24",
+      "sku": "NSANIVO1224",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "ivory-sande-porcelain.jpg",
+          "finish": null,
+          "variant": 0.76,
+          "flagged": false,
+          "reason": ""
+        },
+        {
+          "id": "A2",
+          "label": "accept",
+          "evidence": "",
+          "filename": "ivory-sande-porcelain-iso.jpg",
+          "finish": null,
+          "variant": 0.74,
+          "flagged": false,
+          "reason": ""
+        }
+      ]
+    },
+    {
+      "imageKey": "msi-sande-ivory-2x2",
+      "sku": "NSANIVO2X2",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "ivory-sande-2x2.jpg",
+          "finish": null,
+          "variant": 0.79,
+          "flagged": false,
+          "reason": ""
+        }
+      ]
+    },
+    {
+      "imageKey": "porcelanosa-bottega-caliza",
+      "sku": "100324943",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "100324943_T.jpg",
+          "finish": null,
+          "variant": 0.72,
+          "flagged": false,
+          "reason": ""
+        },
+        {
+          "id": "A2",
+          "label": "accept",
+          "evidence": "",
+          "filename": "100324943_01.jpg",
+          "finish": null,
+          "variant": 0.7,
+          "flagged": false,
+          "reason": ""
+        }
+      ]
+    },
+    {
+      "imageKey": "porcelanosa-metropolitan-grass",
+      "sku": "100336793",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "100336793_T.jpg",
+          "finish": null,
+          "variant": 0.78,
+          "flagged": false,
+          "reason": ""
+        },
+        {
+          "id": "R5",
+          "label": "reject",
+          "evidence": "pixels",
+          "filename": "100336793_01.jpg",
+          "finish": null,
+          "variant": 0.41,
+          "flagged": true,
+          "reason": "CDN placeholder card (grey PORCELANOSA logo) served at HTTP 200"
+        }
+      ]
+    },
+    {
+      "imageKey": "sonneman-stiletto-2340.03",
+      "sku": "2340.03-DIM",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "210031.jpg",
+          "finish": null,
+          "variant": 0.73,
+          "flagged": false,
+          "reason": ""
+        },
+        {
+          "id": "A2",
+          "label": "accept",
+          "evidence": "",
+          "filename": "210032.jpg",
+          "finish": null,
+          "variant": 0.4,
+          "flagged": true,
+          "reason": ""
+        }
+      ]
+    },
+    {
+      "imageKey": "visual-comfort-banda-700BCBND24B",
+      "sku": "700BCBND24B-LED930",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "vcmod-700BCBND24B-LED930-add1.jpg",
+          "finish": null,
+          "variant": 0.82,
+          "flagged": false,
+          "reason": ""
+        },
+        {
+          "id": "A2",
+          "label": "accept",
+          "evidence": "",
+          "filename": "812955.jpg",
+          "finish": null,
+          "variant": 0.69,
+          "flagged": false,
+          "reason": ""
+        }
+      ]
+    },
+    {
+      "imageKey": "visual-comfort-banda-700BCBND24W",
+      "sku": "700BCBND24W-LED930",
+      "judged": [
+        {
+          "id": "A1",
+          "label": "accept",
+          "evidence": "",
+          "filename": "vcmod-700BCBND24W-LED930-add1.jpg",
+          "finish": null,
+          "variant": 0.84,
+          "flagged": false,
+          "reason": ""
+        },
+        {
+          "id": "A2",
+          "label": "accept",
+          "evidence": "",
+          "filename": "1205059.jpg",
+          "finish": null,
+          "variant": 0.67,
+          "flagged": false,
+          "reason": ""
+        }
+      ]
+    }
+  ],
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "requests": 0,
-    "latencyMs": 0
+    "input_tokens": 25247,
+    "output_tokens": 1288,
+    "requests": 25,
+    "latencyMs": 4439
   },
   "counts": {
     "accept": 39,
     "reject": 8,
-    "flaggedAccept": 0,
-    "flaggedReject": 0,
+    "flaggedAccept": 3,
+    "flaggedReject": 5,
     "byEvidence": {
       "metadata": {
         "total": 3,
-        "flagged": 0
+        "flagged": 3
       },
       "pixels": {
         "total": 5,
-        "flagged": 0
+        "flagged": 2
       }
     }
   }

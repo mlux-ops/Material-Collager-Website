@@ -118,11 +118,18 @@ function candidateMeta(url, file = {}) {
   };
 }
 
-function questionsFor(candidates) {
+// Run 1 asked the finish question about every product, including tiles and
+// light fixtures whose SKU carries no finish suffix at all. For those the
+// honest answer is "the filename does not say", a Noul returns ~0.2-0.4 for it,
+// and the policy code below read that as a failure: 11 of 39 good references
+// were flagged, every one of them a product with no required finish. The
+// question is only meaningful where a finish is specified, so it is now only
+// asked there.
+function questionsFor(candidates, { hasRequiredFinish }) {
   const questions = {};
   candidates.forEach((candidate, index) => {
     const at = `candidates[${index}]`;
-    questions[`finish_${candidate.id}`] = {
+    if (hasRequiredFinish) questions[`finish_${candidate.id}`] = {
       type: "noul",
       instructions: `\`product\` names the exact product and, where it has one, the finish that product must be shown in. Does the file at \`${at}\` appear to show that product in that finish?`,
       criteria: {
@@ -212,7 +219,7 @@ async function main() {
     if (!apiKey) continue;
     const response = await ask({
       state: stateFor(testCase.product, testCase.candidates),
-      questions: questionsFor(testCase.candidates),
+      questions: questionsFor(testCase.candidates, { hasRequiredFinish: Boolean(requiredFinish(testCase.product.sku)) }),
       apiKey,
     });
     const judged = testCase.candidates.map((candidate) => {
