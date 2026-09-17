@@ -62,9 +62,9 @@ function pixelCountOf(filePath) {
   return size ? size.width * size.height : null;
 }
 
-export function resolveTileCode(index, code) {
-  return index.get(code.trim().toUpperCase()) ?? null;
-}
+// Re-exported from the shared core: buildBoards needs this lookup and must not
+// import back into scripts/, so the implementation lives beside it.
+export { resolveTileCode } from "../../../app/lib/autoboard/tiles.ts";
 
 // --- Header-only image size reading -----------------------------------
 //

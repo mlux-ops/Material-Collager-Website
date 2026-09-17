@@ -45,6 +45,13 @@ Board-generation pipeline in `scripts/autoboard/`, run as `npm run autoboard -- 
 Subcommands: `plan`, `generate`, `redraft`, `confirm`, `finalize`, `batch-finalize`,
 `batch-status`, `review`.
 
+The slot rules and board assembly live in `app/lib/autoboard/`, not in
+`scripts/autoboard/lib/`; the `.mjs` files there re-export them, so existing
+imports are unchanged. Anything under `app/lib/autoboard/` must avoid `node:`
+builtins, the `@/` alias and extensionless imports — `docs/autoboard-shared-core.md`
+has the rules and the reasons, and `tests/autoboard-parity.test.mjs` enforces
+them (nothing else does).
+
 `review` starts a dependency-free `node:http` review UI on **port 4790** (`--port` to
 override). Its render-workflow POST endpoints require `Content-Type: application/json`
 as a CSRF defense.
@@ -63,6 +70,7 @@ alongside Wieland's on 4790.
 | Path | Role |
 |---|---|
 | `app/` | The live Next.js App Router source — pages, `app/api/*` handlers, `app/lib/*`, `app/components/*` |
+| `app/lib/autoboard/` | Board-building rules shared by the CLI and the web review board — see `docs/autoboard-shared-core.md` before adding to it |
 | `worker/` | Cloudflare Worker entry (`index.ts`, per `wrangler.jsonc` `main`); gates on Access JWT, then delegates to vinext's app-router entry |
 | `src/material_collager/` | Legacy Python CLI, superseded by the web app but still shipped |
 | `db/` | Drizzle schema over D1; tables are created lazily |
@@ -99,7 +107,15 @@ secret set separately (`wrangler secret put`), and locally lives in git-ignored
 - Dev, build, and start all run through `vinext`, not `next` directly. Reaching for
   `npx next dev` will not work.
 - Tests need `node --experimental-strip-types`. That strips types only — no enums,
-  namespaces, or decorators in anything a test imports.
+  namespaces, decorators, or constructor parameter properties in anything a test
+  imports. `tsconfig.json` sets `erasableSyntaxOnly` so `npm run typecheck`
+  rejects them; without it both `tsc` and `eslint` accept all four and only
+  `node --test` fails. It also sets `verbatimModuleSyntax`, because a
+  value-position import of a type is a link-time `SyntaxError` that neither gate
+  can see.
+- `npm run typecheck` is not a pass/fail gate: 32 errors pre-date this tree
+  (Cloudflare ambient types, workbench, scene-lab). The usable criterion is that
+  a change adds none.
 - Request bodies cap at 32 MB (`next.config.ts` `serverActions.bodySizeLimit`), applied
   to route handlers too. Large reference sets must use the chunked transport rather
   than one request.
