@@ -53,8 +53,9 @@ test("scaffold writes a manifest the offline loader accepts", async () => {
     assert.equal(rows.length, summary.itemCount);
     assert.deepEqual(gaps, { ...emptyGaps() });
     assert.deepEqual([...new Set(rows.map((row) => row.unitType))], ["651 Belmont"]);
-    // "Bath 1" survives normalizeRoomLabel unchanged, so board types resolve.
-    assert.deepEqual([...new Set(rows.map((row) => row.roomLabel))].sort(), ["Bath 1", "Bath 2", "Bath 3"]);
+    // "Bath 1" survives normalizeRoomLabel unchanged, so board types resolve,
+    // and "Kitchen" carries the Penthouse appliances read from Smartsheet.
+    assert.deepEqual([...new Set(rows.map((row) => row.roomLabel))].sort(), ["Bath 1", "Bath 2", "Bath 3", "Kitchen"]);
 
     const seafoam = rows.find((row) => row.sku === "PALETTE-SEAFOAM-6X6");
     assert.equal(seafoam.roomLabel, "Bath 2");

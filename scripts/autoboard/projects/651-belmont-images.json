@@ -564,6 +564,41 @@
         }
       ]
     },
+    "thermador-DWHD640EPR": {
+      "product": "Thermador Emerald 5-Program Dishwasher 24 Inch, Panel Ready",
+      "sku": "DWHD640EPR",
+      "vendorPage": "https://www.fergusonhome.com/thermador-dwhd640epr/s2015633",
+      "note": "Reference photography NOT YET SOURCED — unlike elm-grounded-alabaster-2x2, whose empty list means the vendor publishes no usable photo, this one means nobody has looked yet. Until files are added and reviewed, the row is imageless and reaches no board.",
+      "files": []
+    },
+    "thermador-MC30WPSS": {
+      "product": "Thermador ADA Professional Series 30\" Gray Glass On Stainless Steel Speed Oven",
+      "sku": "MC30WPSS",
+      "vendorPage": "https://www.fergusonhome.com/product/summary/1655894",
+      "note": "Reference photography NOT YET SOURCED — unlike elm-grounded-alabaster-2x2, whose empty list means the vendor publishes no usable photo, this one means nobody has looked yet. Until files are added and reviewed, the row is imageless and reaches no board.",
+      "files": []
+    },
+    "thermador-PRG486WDHSS": {
+      "product": "Thermador Professional Series 48 In. Stainless Steel Gas Pro Harmony Range With Griddle",
+      "sku": "PRG486WDHSS",
+      "vendorPage": "https://www.fergusonhome.com/thermador-prg486wdh/s1655751",
+      "note": "Reference photography NOT YET SOURCED — unlike elm-grounded-alabaster-2x2, whose empty list means the vendor publishes no usable photo, this one means nobody has looked yet. Until files are added and reviewed, the row is imageless and reaches no board.",
+      "files": []
+    },
+    "thermador-T42IT100NP": {
+      "product": "Thermador Freedom Collection 23.1 Cu. Ft. Built-In French Door Refrigerator 42-Inch Wide in Custom Panel",
+      "sku": "T42IT100NP",
+      "vendorPage": "https://www.fergusonhome.com/thermador-t42it100np/s1982063",
+      "note": "Reference photography NOT YET SOURCED — unlike elm-grounded-alabaster-2x2, whose empty list means the vendor publishes no usable photo, this one means nobody has looked yet. Until files are added and reviewed, the row is imageless and reaches no board.",
+      "files": []
+    },
+    "thermador-WD30W": {
+      "product": "Thermador 30\" Custom Panel Warming Drawer",
+      "sku": "WD30W",
+      "vendorPage": "https://www.fergusonhome.com/thermador-wd30w/s1655875",
+      "note": "Reference photography NOT YET SOURCED — unlike elm-grounded-alabaster-2x2, whose empty list means the vendor publishes no usable photo, this one means nobody has looked yet. Until files are added and reviewed, the row is imageless and reaches no board.",
+      "files": []
+    },
     "visual-comfort-banda-700BCBND24B": {
       "product": "Visual Comfort Modern Banda Vanity Light, Matte Black",
       "sku": "700BCBND24B-LED930",
@@ -619,6 +654,13 @@
           "source": "Lightology product page"
         }
       ]
+    },
+    "zephyr-AK9346BS": {
+      "product": "Zephyr Monsoon II 48\" Stainless Steel Hood Insert",
+      "sku": "AK9346BS",
+      "vendorPage": "https://www.fergusonhome.com/zephyr-ak9346b/s1745799",
+      "note": "Reference photography NOT YET SOURCED — unlike elm-grounded-alabaster-2x2, whose empty list means the vendor publishes no usable photo, this one means nobody has looked yet. Until files are added and reviewed, the row is imageless and reaches no board.",
+      "files": []
     }
   }
 }

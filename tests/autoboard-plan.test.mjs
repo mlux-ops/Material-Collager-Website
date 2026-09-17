@@ -176,6 +176,21 @@ test("assignSlots maps kitchen appliances", () => {
   assert.deepEqual(unmapped.map((entry) => entry.rowId), ["24"]); // washer/dryer has no preset slot
 });
 
+test("a pro range fills cooktop while the range hood keeps its own slot", () => {
+  const rows = [
+    row({ rowId: "80", roomLabel: "Kitchen", costCode: "11 30 Appliances - T&M", itemName: "Thermador Professional Series 48 In. Stainless Steel Gas Pro Harmony Range With Griddle" }),
+    row({ rowId: "81", roomLabel: "Kitchen", costCode: "11 30 Appliances - T&M", itemName: "Zephyr Monsoon II 48\" Stainless Steel Hood Insert" }),
+    row({ rowId: "82", roomLabel: "Kitchen", costCode: "11 30 Appliances - T&M", itemName: "Thermador Masterpiece 36 Inch Wide Range Hood Insert" }),
+  ];
+  const { filled } = assignSlots(rows, "appliance_collage");
+  const bySlot = Object.fromEntries(filled.map((slot) => [slot.preset.id, slot.row.rowId]));
+  assert.equal(bySlot.cooktop, "80");
+  assert.equal(bySlot.range_hood, "81");
+  // "Range Hood Insert" contains "range" but must never read as the cooktop.
+  const hoodOnly = assignSlots([rows[2]], "appliance_collage");
+  assert.deepEqual(hoodOnly.filled.map((slot) => slot.preset.id), ["range_hood"]);
+});
+
 test("buildBoards builds a fixture board, skips tile board without a tile scheme, and reports gaps", () => {
   const rows = [
     row({ rowId: "1", itemName: "Brizo Odin Lavatory Faucet" }),

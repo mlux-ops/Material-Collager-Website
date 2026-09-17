@@ -68,7 +68,14 @@ const SLOT_RULES = {
   },
   appliance_collage: {
     refrigerator: [{ any: [/refrigerator/i, /\bfridge\b/i] }],
-    cooktop: [{ any: [/cooktop/i, /cook top/i, /range top/i, /induction/i] }],
+    // A pro range is the kitchen's cooking appliance, so it takes the cooktop
+    // slot. `none` keeps the range HOOD out of it: "Zephyr Monsoon II 48 Hood
+    // Insert" and "range hood" both contain "range" for a regex, and the hood
+    // has its own slot two lines down.
+    cooktop: [
+      { any: [/cooktop/i, /cook top/i, /range top/i, /induction/i] },
+      { any: [/\brange\b/i], none: [/hood/i, /microwave/i] },
+    ],
     range_hood: [{ any: [/\bhood\b/i] }],
     oven: [{ any: [/\boven\b/i] }],
     dishwasher: [{ any: [/dishwasher/i] }],
