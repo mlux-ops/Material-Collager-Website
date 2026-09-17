@@ -22,6 +22,7 @@
 // place are never touched. Re-run it after adding photos: _BUILD_LOG.csv's
 // matched_files and the checklist's counts are rebuilt from what is on disk.
 
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -211,6 +212,103 @@ export async function scaffoldProject({ definition, root, dryRun = false }) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Reference photos. A project definition names a product; <project>-images.json
+// says which vendor photographs stand for it. The files themselves are never
+// committed — they are vendor product photography, fetched into the library
+// root for internal design reference only.
+// ---------------------------------------------------------------------------
+
+const EXTENSION_BY_TYPE = {
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+  "image/avif": ".avif",
+};
+
+export async function loadImageManifest(project, projectsDir = PROJECTS_DIR) {
+  const base = project.endsWith(".json") ? project.replace(/\.json$/, "") : path.join(projectsDir, project);
+  const file = `${base}-images.json`;
+  if (!existsSync(file)) return { images: {} };
+  const manifest = JSON.parse(await readFile(file, "utf8"));
+  return { images: manifest.images ?? {}, verifiedAt: manifest.verifiedAt, file };
+}
+
+// Node's fetch ignores HTTP_PROXY/HTTPS_PROXY unless NODE_USE_ENV_PROXY is set,
+// which matters only in sandboxes that require a proxy — a normal workstation
+// needs nothing.
+async function defaultDownload(url) {
+  const response = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, redirect: "follow" });
+  const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim();
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  if (!contentType.startsWith("image/")) throw new Error(`content-type ${contentType || "unknown"} is not an image`);
+  return { buffer: Buffer.from(await response.arrayBuffer()), contentType };
+}
+
+// A vendor's best photo of a material sometimes carries styling props — a bowl
+// of fruit, a dried stem, a hand holding a sample. The collage prompt forbids
+// props ("every visible object must come from a reference image"), so a
+// manifest entry may carry a crop that keeps only the material. sharp is
+// imported lazily: a project with no crops needs nothing beyond node.
+async function cropBuffer(buffer, crop) {
+  const { default: sharp } = await import("sharp");
+  return sharp(buffer)
+    .extract({ left: crop.left, top: crop.top, width: crop.width, height: crop.height })
+    .toBuffer();
+}
+
+export async function fetchReferenceImages({
+  definition,
+  manifest,
+  root,
+  force = false,
+  download = defaultDownload,
+  log = () => {},
+}) {
+  const libraryRoot = path.resolve(root ?? definition.libraryRoot ?? ".");
+  const summary = { downloaded: 0, skipped: 0, failures: [], drifted: [], withoutImages: [] };
+  for (const room of definition.rooms) {
+    for (const item of room.items ?? []) {
+      if (!item.imageKey) continue;
+      const entry = manifest.images?.[item.imageKey];
+      const files = entry?.files ?? [];
+      if (!files.length) {
+        summary.withoutImages.push({ rowId: item.rowId, imageKey: item.imageKey, reason: entry?.note ?? "not in the image manifest" });
+        continue;
+      }
+      const folder = path.join(libraryRoot, ...folderFor(room, item).split("/"));
+      mkdirSync(folder, { recursive: true });
+      for (const [index, file] of files.entries()) {
+        const extension = EXTENSION_BY_TYPE[file.contentType] ?? path.extname(new URL(file.url).pathname) ?? ".jpg";
+        const name = `${item.rowId}-${index + 1}-${file.kind ?? "ref"}${extension}`;
+        const target = path.join(folder, name);
+        if (existsSync(target) && !force) {
+          summary.skipped += 1;
+          continue;
+        }
+        try {
+          const { buffer } = await download(file.url);
+          // The manifest records the hash of the file that was reviewed. A
+          // mismatch means the vendor re-published the asset, so the picture
+          // in the board may no longer be the one that was checked.
+          const digest = createHash("sha256").update(buffer).digest("hex");
+          if (file.sha256 && digest !== file.sha256) {
+            summary.drifted.push({ rowId: item.rowId, url: file.url, expected: file.sha256, actual: digest });
+          }
+          const written = file.crop ? await cropBuffer(buffer, file.crop) : buffer;
+          writeFileSync(target, written);
+          summary.downloaded += 1;
+          log(`  ${item.rowId}  ${name}  ${(written.length / 1024).toFixed(0)} KB${file.crop ? " (cropped)" : ""}`);
+        } catch (error) {
+          summary.failures.push({ rowId: item.rowId, url: file.url, error: error.message });
+          log(`  ${item.rowId}  FAILED ${file.url} — ${error.message}`);
+        }
+      }
+    }
+  }
+  return summary;
+}
+
 function parseArgs(argv) {
   const args = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -222,6 +320,10 @@ function parseArgs(argv) {
       index += 1;
     } else if (value === "--dry-run") {
       args.dryRun = true;
+    } else if (value === "--fetch-images") {
+      args.fetchImages = true;
+    } else if (value === "--force") {
+      args.force = true;
     } else if (value === "--help" || value === "-h") {
       args.help = true;
     } else {
@@ -232,10 +334,14 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Usage: node scripts/autoboard/scaffold-project.mjs --project <id> [--root <path>] [--dry-run]
+  console.log(`Usage: node scripts/autoboard/scaffold-project.mjs --project <id> [--root <path>]
+                                                 [--fetch-images [--force]] [--dry-run]
 
   --project <id>   A definition under scripts/autoboard/projects/ (e.g. 651-belmont), or a path to one.
   --root <path>    Library root to write into. Defaults to the definition's libraryRoot.
+  --fetch-images   Download each item's vendor reference photos from <project>-images.json
+                   into its folder, then refresh the build log. Existing files are kept.
+  --force          With --fetch-images, re-download photos that are already on disk.
   --dry-run        Report what would be written without creating anything.
 
 Then:
@@ -257,6 +363,31 @@ export async function runScaffoldCli(argv = process.argv.slice(2)) {
   }
   try {
     const definition = await loadProjectDefinition(args.project);
+    // Folders first, then photos, then the manifest/build log — so the build
+    // log is written once, already knowing about everything just downloaded.
+    if (args.fetchImages && !args.dryRun) {
+      await scaffoldProject({ definition, root: args.root });
+      const manifest = await loadImageManifest(args.project);
+      console.log(`Fetching reference photos${manifest.verifiedAt ? ` (manifest verified ${manifest.verifiedAt})` : ""}:`);
+      const fetched = await fetchReferenceImages({
+        definition,
+        manifest,
+        root: args.root,
+        force: args.force,
+        log: (line) => console.log(line),
+      });
+      console.log(`\n  downloaded ${fetched.downloaded}, kept ${fetched.skipped} already on disk`);
+      for (const missing of fetched.withoutImages) {
+        console.log(`  no photo published for ${missing.rowId} (${missing.imageKey}) — ${missing.reason}`);
+      }
+      for (const drift of fetched.drifted) {
+        console.log(`  CHANGED SINCE REVIEW: ${drift.rowId} ${drift.url} — look at it before rendering`);
+      }
+      for (const failure of fetched.failures) {
+        console.log(`  FAILED ${failure.rowId} ${failure.url} — ${failure.error}`);
+      }
+      console.log("");
+    }
     const summary = await scaffoldProject({ definition, root: args.root, dryRun: args.dryRun });
     console.log(`${summary.dryRun ? "Would scaffold" : "Scaffolded"} ${definition.name} into ${summary.libraryRoot}`);
     for (const file of summary.written) console.log(`  ${summary.dryRun ? "would write" : "wrote"} ${file}`);

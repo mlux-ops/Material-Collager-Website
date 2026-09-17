@@ -3,13 +3,23 @@
   "id": "651-belmont",
   "name": "651 Belmont",
   "unitType": "651 Belmont",
-  "libraryRoot": "H:\\Games\\651 Belmont - Master Library",
+  "libraryRoot": "F:\\My Drive\\651 Belmont - Master Library",
   "source": "Bathroom Design Recommendations and Product Links, prepared 2026-09-16",
   "vendors": {
-    "tile": ["ELM Surfaces", "MSI Surfaces", "Porcelanosa"],
-    "plumbing": ["Kohler"],
-    "hardware": ["Kohler"],
-    "lighting": ["Lightology"]
+    "tile": [
+      "ELM Surfaces",
+      "MSI Surfaces",
+      "Porcelanosa"
+    ],
+    "plumbing": [
+      "Kohler"
+    ],
+    "hardware": [
+      "Kohler"
+    ],
+    "lighting": [
+      "Lightology"
+    ]
   },
   "rooms": [
     {
@@ -111,6 +121,7 @@
           "name": "ELM Palette Seafoam Wall Tile",
           "sku": "PALETTE-SEAFOAM-6X6",
           "reference": "https://www.elmsurfaces.com/product-collection/palette",
+          "imageKey": "elm-palette-seafoam",
           "status": "preferred",
           "spec": "6 x 6 in.; glossy ceramic; straight square stack; low-contrast muted green-gray grout",
           "photo": "Flat field shot of the Seafoam glossy 6x6 from the ELM Palette collection page."
@@ -121,6 +132,7 @@
           "name": "MSI Gems Caraibi Niche Accent Tile",
           "sku": "NWGGEMCAR5X10G",
           "reference": "https://www.msisurfaces.com/porcelain-gems/caraibi/",
+          "imageKey": "msi-gems-caraibi",
           "status": "preferred",
           "spec": "5 x 10 in.; glossy porcelain; fine linear/slatted face, oriented vertically on the niche back only",
           "photo": "Vertical fluted face shot from the MSI Gems Caraibi product page."
@@ -131,6 +143,7 @@
           "name": "Porcelanosa Bottega Caliza Floor Tile",
           "sku": "100324943",
           "reference": "https://store.porcelanosa.com/us/bottega-caliza-23x23",
+          "imageKey": "porcelanosa-bottega-caliza",
           "status": "preferred",
           "spec": "nominal 23 x 23 in.; actual 59.6 x 59.6 cm; porcelain; confirm exact surface finish against the sample",
           "photo": "Single-tile face shot from the Porcelanosa product page."
@@ -141,6 +154,7 @@
           "name": "Kohler Purist Wall-Mounted Basin Faucet Trim",
           "sku": "K-T14414-4-BN",
           "reference": "https://resources.kohler.com/webassets/kpna/catalog/pdf/en/K-T14414-4_spec.pdf",
+          "imageKey": "kohler-K-T14414-4-BN",
           "status": "preferred",
           "spec": "Vibrant Brushed Nickel; requires K-410-K rough-in valve, sold separately; trim does not include a drain",
           "photo": "Product shot in Vibrant Brushed Nickel from kohler.com (the spec PDF is a line drawing, not a usable reference)."
@@ -151,6 +165,7 @@
           "name": "Kohler Purist Tub and Shower Trim",
           "sku": "K-T14420-4G-BN",
           "reference": "https://resources.kohler.com/webassets/kpna/catalog/pdf/en/K-T14420-4G_spec_US-CA_Kohler_en.pdf",
+          "imageKey": "kohler-K-T14420-4G-BN",
           "status": "preferred",
           "spec": "Vibrant Brushed Nickel; requires a K-11748-series Rite-Temp valve, sold separately",
           "photo": "Product shot in Vibrant Brushed Nickel from kohler.com."
@@ -161,6 +176,7 @@
           "name": "Kohler Purist Cabinet Pull",
           "sku": "K-25498-BN",
           "reference": "https://techcomm.kohler.com/techcomm/pdf/K-25498_spec_US-CA_Kohler_en.pdf",
+          "imageKey": "kohler-K-25498-BN",
           "status": "preferred",
           "spec": "5-in. mounting centers, 7-in. overall length; confirm centers against the cabinetry",
           "photo": "Product shot in Vibrant Brushed Nickel from kohler.com."
@@ -171,6 +187,7 @@
           "name": "Modern Forms Cinch Vanity Light",
           "sku": "WS-34125-30-BN",
           "reference": "https://www.lightology.com/index.php?module=prod_detail&option_id=1040837&prod_id=1040833",
+          "imageKey": "modern-forms-cinch-WS-34125-30-BN",
           "status": "preferred",
           "spec": "brushed nickel; 24 5/8 in. wide; 3000K; 90 CRI; 1,589 delivered lumens; dimmable, damp-rated",
           "photo": "Fixture shot from the Lightology product page. Supersedes the Kuzco Rona, dropped as too traditional."
@@ -181,6 +198,7 @@
           "name": "Kohler Vibrant Brushed Nickel Metal Finish Sample",
           "sku": "BN",
           "reference": "https://www.kohler.com/",
+          "imageKey": "kohler-K-14435-BN",
           "status": "preferred",
           "spec": "finish suffix BN — the room's single metal identity",
           "photo": "Clean brushed-nickel finish swatch; a crop of a Purist product shot is acceptable."
@@ -191,6 +209,7 @@
           "name": "Kohler Purist Towel Bar 18 in",
           "sku": "K-14435-BN",
           "reference": "https://techcomm.kohler.com/techcomm/pdf/K-14435_spec_US-CA_Kohler_en.pdf",
+          "imageKey": "kohler-K-14435-BN",
           "status": "preferred",
           "photo": "Use only the accessories the actual layout needs. No preset slot maps to a towel bar — record row."
         },
@@ -200,6 +219,7 @@
           "name": "Kohler Purist Towel Ring",
           "sku": "K-14441-BN",
           "reference": "https://resources.kohler.com/onlinecatalog/pdf/K-14441_spec.pdf",
+          "imageKey": "kohler-K-14441-BN",
           "status": "preferred",
           "photo": "Record row — no preset slot maps to a towel ring."
         },
@@ -209,6 +229,7 @@
           "name": "Kohler Purist Toilet Paper Holder, vertical",
           "sku": "K-14444-BN",
           "reference": "https://techcomm.kohler.com/techcomm/pdf/K-14444_spec_US-CA_Kohler_en.pdf",
+          "imageKey": "kohler-K-14444-BN",
           "status": "preferred",
           "photo": "Record row — sanitaryware-adjacent accessories are excluded from boards by design."
         },
@@ -236,6 +257,7 @@
           "name": "MSI Sande Ivory Floor Tile",
           "sku": "NSANIVO1224",
           "reference": "https://www.msisurfaces.com/porcelain-sande/ivory/",
+          "imageKey": "msi-sande-ivory-12x24",
           "status": "alternative",
           "substituteFor": "B2-03",
           "spec": "12 x 24 in.; matte porcelain",
@@ -247,6 +269,7 @@
           "name": "Porcelanosa Metropolitan Grass Wall Tile",
           "sku": "100336793",
           "reference": "https://store.porcelanosa.com/us/metropolitan-grass-8x8",
+          "imageKey": "porcelanosa-metropolitan-grass",
           "status": "alternative",
           "substituteFor": "B2-01",
           "spec": "nominal 8 x 8 in.; actual 20 x 20 cm; ceramic wall tile",
@@ -258,6 +281,7 @@
           "name": "MSI Convex Olive Niche Accent Tile",
           "sku": "NWGCONOLI2X10G-N",
           "reference": "https://www.msisurfaces.com/ceramic-convex/olive/",
+          "imageKey": "msi-convex-olive",
           "status": "alternative",
           "substituteFor": "B2-02",
           "spec": "2 x 10 in.; glossy ceramic; pronounced wavy three-dimensional surface",
@@ -269,6 +293,7 @@
           "name": "Visual Comfort Modern Banda Vanity Light, Matte White",
           "sku": "700BCBND24W-LED930",
           "reference": "https://www.lightology.com/index.php?module=prod_detail&option_id=1205059&prod_id=812957",
+          "imageKey": "visual-comfort-banda-700BCBND24W",
           "status": "alternative",
           "substituteFor": "B2-07",
           "spec": "24 in. wide; 3000K; 90 CRI; 791 delivered lumens; white hardware recedes against the wall",
@@ -280,6 +305,7 @@
           "name": "Sonneman Stiletto Vanity Light, Satin White",
           "sku": "2340.03-DIM",
           "reference": "https://www.lightology.com/index.php?module=prod_detail&prod_id=210031",
+          "imageKey": "sonneman-stiletto-2340.03",
           "status": "alternative",
           "substituteFor": "B2-07",
           "spec": "23 3/4 in. long; 3000K; 90 CRI; 664 delivered lumens; horizontal installation allowed",
@@ -298,6 +324,7 @@
           "name": "ELM Grounded Alabaster Shower Wall Tile",
           "sku": "GROUNDED-ALABASTER-12X24",
           "reference": "https://www.elmsurfaces.com/product/grounded-alabaster",
+          "imageKey": "elm-grounded-alabaster-12x24",
           "status": "preferred",
           "spec": "12 x 24 in.; matte porcelain; plain field, horizontal straight stack, no contrasting strip",
           "photo": "Field shot from the ELM Grounded Alabaster product page."
@@ -308,6 +335,7 @@
           "name": "ELM Vivid Ligne Noir Niche Accent Tile",
           "sku": "204221E",
           "reference": "https://www.elmsurfaces.com/product-collection/vivid",
+          "imageKey": "elm-vivid-ligne-noir",
           "status": "preferred",
           "spec": "nominal 3 x 10 in. (actual 2.75 x 9.66 in.); matte ceramic relief; vertical stack, aligned joints, dark charcoal grout",
           "photo": "Relief face shot. Catalog: https://assets-global.website-files.com/6508c8490fee3dfe75080d5e/6508c8490fee3dfe75083b55_ELM%20SURFACES%20-%20VIVID.pdf"
@@ -318,6 +346,7 @@
           "name": "ELM Grounded Alabaster Floor Tile",
           "sku": "GROUNDED-ALABASTER-12X24",
           "reference": "https://www.elmsurfaces.com/product/grounded-alabaster",
+          "imageKey": "elm-grounded-alabaster-12x24",
           "status": "preferred",
           "spec": "12 x 24 in.; matte; continues the pale color family onto the main floor",
           "photo": "Same product as B3-01 — reuse the field shot."
@@ -328,6 +357,7 @@
           "name": "ELM Grounded Alabaster Shower Floor Mosaic",
           "sku": "GROUNDED-ALABASTER-2X2",
           "reference": "https://www.elmsurfaces.com/product/grounded-alabaster",
+          "imageKey": "elm-grounded-alabaster-2x2",
           "status": "preferred",
           "spec": "coordinating 2 x 2 in. mosaic; replaces the geometric patterned shower floor",
           "photo": "Mosaic sheet shot. Confirm the exact mosaic's shower-floor suitability."
@@ -338,6 +368,7 @@
           "name": "Kohler Purist Widespread Basin Faucet",
           "sku": "K-14406-4-BL",
           "reference": "https://techcomm.kohler.com/techcomm/pdf/K-14406-4_spec_US-CA_Kohler_en.pdf",
+          "imageKey": "kohler-K-14406-4-BL",
           "status": "preferred",
           "spec": "matte black; deck-mounted, preserving the rendered arrangement; confirm basin compatibility",
           "photo": "Product shot in Matte Black from kohler.com."
@@ -348,6 +379,7 @@
           "name": "Kohler Purist Showerhead and Handshower Kit",
           "sku": "K-22181-G-BL",
           "reference": "https://techcomm.kohler.com/techcomm/pdf/K-22181-G_spec_US-CA_Kohler_en.pdf",
+          "imageKey": "kohler-K-22181-G-BL",
           "status": "preferred",
           "spec": "matte black; includes showerhead, handshower, 60-in. hose, shower arm with diverter, 30-in. slidebar, Purist valve trim",
           "photo": "Kit shot in Matte Black from kohler.com."
@@ -367,6 +399,7 @@
           "name": "Kohler Purist Cabinet Pull",
           "sku": "K-25498-BL",
           "reference": "https://techcomm.kohler.com/techcomm/pdf/K-25498_spec_US-CA_Kohler_en.pdf",
+          "imageKey": "kohler-K-25498-BL",
           "status": "preferred",
           "spec": "matte black; 5-in. mounting centers, 7-in. overall length; only if the cabinetry needs pulls",
           "photo": "Product shot in Matte Black from kohler.com."
@@ -377,6 +410,7 @@
           "name": "Visual Comfort Modern Banda Vanity Light, Matte Black",
           "sku": "700BCBND24B-LED930",
           "reference": "https://www.lightology.com/index.php?module=prod_detail&option_id=812955&prod_id=812957",
+          "imageKey": "visual-comfort-banda-700BCBND24B",
           "status": "preferred",
           "spec": "24 in. W x 5 in. H x 3.1 in. projection; 3000K; 90 CRI; 791 delivered lumens; dimmable, damp-rated",
           "photo": "Fixture shot from the Lightology product page. Confirm final width against the mirror."
@@ -387,6 +421,7 @@
           "name": "Kohler Matte Black Metal Finish Sample",
           "sku": "BL",
           "reference": "https://www.kohler.com/",
+          "imageKey": "kohler-K-14435-BL",
           "status": "preferred",
           "spec": "finish suffix BL — the room's single metal identity",
           "photo": "Clean matte-black finish swatch; a crop of a Purist product shot is acceptable."
@@ -397,6 +432,7 @@
           "name": "Kohler Purist Towel Bar 18 in",
           "sku": "K-14435-BL",
           "reference": "https://techcomm.kohler.com/techcomm/pdf/K-14435_spec_US-CA_Kohler_en.pdf",
+          "imageKey": "kohler-K-14435-BL",
           "status": "preferred",
           "photo": "Record row — no preset slot maps to a towel bar."
         },
@@ -406,6 +442,7 @@
           "name": "Kohler Purist Toilet Paper Holder, vertical",
           "sku": "K-14444-BL",
           "reference": "https://techcomm.kohler.com/techcomm/pdf/K-14444_spec_US-CA_Kohler_en.pdf",
+          "imageKey": "kohler-K-14444-BL",
           "status": "preferred",
           "photo": "Record row."
         },
@@ -442,6 +479,7 @@
           "name": "MSI Sande Ivory Wall and Floor Tile",
           "sku": "NSANIVO1224",
           "reference": "https://www.msisurfaces.com/porcelain-sande/ivory/",
+          "imageKey": "msi-sande-ivory-12x24",
           "status": "alternative",
           "substituteFor": "B3-01",
           "spec": "matte 12 x 24 in.; more linear stone-like movement; stronger material connection to Bathroom 1",
@@ -453,6 +491,7 @@
           "name": "MSI Sande Ivory Shower Floor Mosaic",
           "sku": "NSANIVO2X2",
           "reference": "https://www.msisurfaces.com/porcelain-sande/ivory/",
+          "imageKey": "msi-sande-ivory-2x2",
           "status": "alternative",
           "substituteFor": "B3-04",
           "spec": "matte 2 x 2 in.; the coordinating mosaic for the Sande route",
@@ -464,6 +503,7 @@
           "name": "Porcelanosa Bottega Caliza Floor Tile",
           "sku": "100324943",
           "reference": "https://store.porcelanosa.com/us/bottega-caliza-23x23",
+          "imageKey": "porcelanosa-bottega-caliza",
           "status": "alternative",
           "substituteFor": "B3-03",
           "spec": "nominal 23 x 23 in.; main bathroom floor only; repeats Bathroom 2's proposed floor",
@@ -475,6 +515,7 @@
           "name": "ELM Vivid Noir Glossy Niche Accent Tile",
           "sku": "204201E",
           "reference": "https://www.elmsurfaces.com/product-collection/vivid",
+          "imageKey": "elm-vivid-noir-glossy",
           "status": "alternative",
           "substituteFor": "B3-02",
           "spec": "nominal 3 x 10 in.; glossy ceramic; reflected highlights, more luminous dark recess",

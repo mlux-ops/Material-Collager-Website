@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -8,7 +8,13 @@ import { validateCollageRequest } from "../app/lib/collage.ts";
 import { csvObjects, emptyGaps, loadOfflineRows } from "../scripts/autoboard/lib/source.mjs";
 import { buildBoards, loadBuildLog, makeDiskImageResolver } from "../scripts/autoboard/lib/match.mjs";
 import { boardPayload, DEFAULT_VARIANTS } from "../scripts/autoboard/lib/variants.mjs";
-import { folderFor, loadProjectDefinition, scaffoldProject } from "../scripts/autoboard/scaffold-project.mjs";
+import {
+  fetchReferenceImages,
+  folderFor,
+  loadImageManifest,
+  loadProjectDefinition,
+  scaffoldProject,
+} from "../scripts/autoboard/scaffold-project.mjs";
 
 const PNG = Buffer.from(
   "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de0000000c4944415408d763f8cfc0c0c0c40000000704fe07b3ee7e0000000049454e44ae426082",
@@ -180,4 +186,106 @@ test("a dry run reports without writing anything", async () => {
 
 test("loadProjectDefinition rejects an unknown project by name", async () => {
   await assert.rejects(() => loadProjectDefinition("not-a-project"), /No project definition/);
+});
+
+test("every imageKey in the 651 Belmont definition exists in its image manifest", async () => {
+  const definition = await belmont();
+  const manifest = await loadImageManifest("651-belmont");
+  const keys = definition.rooms.flatMap((room) => room.items).filter((item) => item.imageKey);
+  assert.ok(keys.length > 0, "the definition should carry image keys");
+  const unknown = keys.filter((item) => !manifest.images[item.imageKey]);
+  assert.deepEqual(unknown.map((item) => `${item.rowId} -> ${item.imageKey}`), []);
+  // Every selected (non-pending) row must be wired to a key, or its photo can
+  // never be fetched.
+  const unwired = definition.rooms
+    .flatMap((room) => room.items)
+    .filter((item) => (item.status ?? "preferred") !== "pending" && !item.imageKey);
+  assert.deepEqual(unwired.map((item) => item.rowId), []);
+});
+
+test("fetchReferenceImages writes each item's photos and the build log then finds them", async () => {
+  const root = tempRoot();
+  try {
+    const definition = await belmont();
+    await scaffoldProject({ definition, root });
+
+    const manifest = {
+      images: {
+        "elm-palette-seafoam": {
+          files: [
+            { url: "https://example.test/seafoam-a.jpg", kind: "face", contentType: "image/jpeg", sha256: "aaa" },
+            { url: "https://example.test/seafoam-b.jpg", kind: "detail", contentType: "image/jpeg", sha256: "bbb" },
+          ],
+        },
+        "msi-gems-caraibi": { files: [], note: "vendor publishes no usable photo" },
+      },
+    };
+    const requested = [];
+    const download = async (url) => {
+      requested.push(url);
+      return { buffer: PNG, contentType: "image/jpeg" };
+    };
+
+    const first = await fetchReferenceImages({ definition, manifest, root, download });
+    assert.equal(first.downloaded, 2);
+    assert.equal(first.skipped, 0);
+    assert.deepEqual(first.failures, []);
+    // The manifest's recorded digests are deliberately wrong here, so both
+    // downloads must be reported as having changed since review.
+    assert.equal(first.drifted.length, 2);
+    assert.ok(first.withoutImages.some((entry) => entry.imageKey === "msi-gems-caraibi"));
+    assert.equal(requested.length, 2);
+
+    const seafoamRoom = definition.rooms.find((room) => room.room === "Bath 2");
+    const seafoam = seafoamRoom.items.find((item) => item.rowId === "B2-01");
+    const folder = path.join(root, ...folderFor(seafoamRoom, seafoam).split("/"));
+    assert.deepEqual(
+      readdirSync(folder).sort(),
+      ["B2-01-1-face.jpg", "B2-01-2-detail.jpg"],
+    );
+
+    // Re-running keeps what is on disk; --force replaces it.
+    const second = await fetchReferenceImages({ definition, manifest, root, download });
+    assert.equal(second.downloaded, 0);
+    assert.equal(second.skipped, 2);
+    const forced = await fetchReferenceImages({ definition, manifest, root, download, force: true });
+    assert.equal(forced.downloaded, 2);
+
+    // The build log only learns about the files once the scaffold re-runs.
+    await scaffoldProject({ definition, root });
+    const resolve = makeDiskImageResolver(root, loadBuildLog(root));
+    const images = resolve("B2-01", "PALETTE-SEAFOAM-6X6");
+    assert.equal(images.length, 2);
+    assert.equal(path.basename(images[0]), "B2-01-1-face.jpg");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fetchReferenceImages records a download failure instead of throwing", async () => {
+  const root = tempRoot();
+  try {
+    const definition = await belmont();
+    await scaffoldProject({ definition, root });
+    const manifest = {
+      images: {
+        "elm-palette-seafoam": {
+          files: [{ url: "https://example.test/gone.jpg", kind: "face", contentType: "image/jpeg" }],
+        },
+      },
+    };
+    const summary = await fetchReferenceImages({
+      definition,
+      manifest,
+      root,
+      download: async () => {
+        throw new Error("HTTP 404");
+      },
+    });
+    assert.equal(summary.downloaded, 0);
+    assert.deepEqual(summary.failures.map((failure) => failure.rowId), ["B2-01"]);
+    assert.match(summary.failures[0].error, /404/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

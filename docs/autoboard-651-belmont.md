@@ -27,13 +27,13 @@ changes.
 
 ## Setting it up
 
-### 1. Scaffold the library root
+### 1. Scaffold the library root and pull the reference photos
 
 ```bash
-npm run autoboard:scaffold -- --project 651-belmont
+npm run autoboard:scaffold -- --project 651-belmont --fetch-images
 ```
 
-Writes, into `H:\Games\651 Belmont - Master Library` (override with `--root`):
+Writes, into `F:\My Drive\651 Belmont - Master Library` (override with `--root`):
 
 - `build_manifest_v2.csv` — what `plan --offline` reads.
 - `Master_Library_Build/_BUILD_LOG.csv` — the `row_id` → folder join that
@@ -43,30 +43,64 @@ Writes, into `H:\Games\651 Belmont - Master Library` (override with `--root`):
 - `REFERENCE-PHOTOS.md` — the per-item photo checklist, with each product's
   vendor link and what the shot should show.
 
-It never touches photos already in place, so it is safe to re-run. `--dry-run`
-reports without writing.
+`--fetch-images` downloads each product's vendor photographs from
+`scripts/autoboard/projects/651-belmont-images.json` into its folder — 47 files
+across 30 of the 31 selected products — then refreshes the build log so the
+CLI can see them. It never overwrites a photo already on disk (`--force` if you
+want it re-pulled), so it is safe to re-run, and `--dry-run` reports without
+writing. Drop your own photos into any item folder and they are picked up the
+same way.
 
-### 2. Drop in the reference photos
+### 2. Check what is still open
 
-Put each product's photo in the folder `REFERENCE-PHOTOS.md` lists for it — the
-real product shot, not the spec PDF's line drawing. References are sent to the
-image model as images, so their quality is the board's quality.
+The summary line reports how many selected products still need a photo, and
+`REFERENCE-PHOTOS.md` lists every item with its folder, vendor link and the
+shot to look for. Two categories stay empty on purpose:
 
-Then re-run the scaffold so the build log picks them up:
+- Rows marked `pending` — no product has been selected yet. Bathroom 1 is
+  entirely in this state, so it produces no board at all and is reported in
+  `gaps.md` instead.
+- `B3-04`, the ELM Grounded Alabaster 2×2 shower-floor mosaic. ELM lists the
+  size but publishes no photo of it, so the shower-floor slot stays open until
+  someone photographs a sample. Do not substitute the 12×24 field shot: the
+  format is the whole point of that row.
 
-```bash
-npm run autoboard:scaffold -- --project 651-belmont
-```
+### What the photos are, and what was rejected
 
-The summary line reports how many selected products still need a photo.
-Rows marked `pending` have no product selected yet and are expected to stay
-empty — Bathroom 1 is entirely in that state, so it produces no board at all
-and is reported in `gaps.md` instead.
+Every URL in the image manifest was downloaded and looked at before it was
+recorded. Rejected on sight, and worth knowing because the same traps recur:
+
+- **Wrong finish.** A vendor's filename without a finish suffix (`K-T14420-4G.jpg`)
+  is usually the chrome shot. Two of those were caught pretending to be
+  brushed nickel and matte black.
+- **Text baked into the picture.** Dimension callouts, "What's in the Box"
+  graphics, collection marketing. A reference with text in it puts text in the
+  render.
+- **CDN placeholders.** Porcelanosa answers HTTP 200 with a grey PORCELANOSA
+  card when a frame does not exist. Any ~34 KB response from that host is that
+  card, not a tile.
+- **Wrong format or product.** A hexagon mosaic standing in for a 2×2 square,
+  a fluted Alabaster standing in for the flat field tile, a brand photo of a
+  chrome sink standing in for a tissue holder.
+- **Styling props.** Three ELM Vivid frames are styled scenes — a fruit bowl, a
+  dried stem, a hand holding a sample. Those carry a `crop` in the manifest and
+  are cropped to the tile wall on download, because the collage prompt forbids
+  props that are not in a reference.
+
+The manifest records each file's dimensions and a `sha256` of the reviewed
+bytes; the fetch reports `CHANGED SINCE REVIEW` if a vendor re-publishes an
+asset. Home Depot's CDN re-encodes per request, so those entries carry
+`digestUnstable` and no digest.
+
+These are third-party vendor product photographs, fetched for internal design
+reference. They are deliberately not committed to this repository, and they
+are not cleared for a client-facing deliverable — re-verify rights before any
+board leaves the studio.
 
 ### 3. Plan the run
 
 ```bash
-npm run autoboard -- plan --offline --library-root "H:\Games\651 Belmont - Master Library"
+npm run autoboard -- plan --offline --library-root "F:\My Drive\651 Belmont - Master Library"
 ```
 
 Prints a run id (`run-YYYYMMDD-HHMMSS`) and writes
@@ -75,7 +109,11 @@ rendering: it lists every unfilled slot, every item with no photo, and every row
 no slot matched (towel bars, the toilet-paper holders, the Rite-Temp rough
 valve — all excluded from presentation boards by design).
 
-With every selected product photographed, the run plans these boards:
+Each board takes one photo per item. Pass `--images-per-item 2` to send the
+second view too where one exists — it sharpens material reads, and it roughly
+doubles the input-token cost of every render on that board.
+
+The run plans these four boards, 20 references in total:
 
 | Board | Fills |
 |---|---|
@@ -84,8 +122,8 @@ With every selected product photographed, the run plans these boards:
 | `651-belmont-bath-3-fixture` | Purist widespread basin faucet, showerhead/handshower kit, cabinet pull, Banda vanity light, Grounded Alabaster main tile, Ligne Noir accent |
 | `651-belmont-bath-3-tile` | Alabaster wall and floor, Ligne Noir accent, matte-black finish |
 
-Bath 2's `shower_head`, both rooms' `vanity_wood` and `countertop`, and all of
-Bathroom 1 stay open until a product is chosen.
+Bath 2's `shower_head`, both rooms' `vanity_wood` and `countertop`, Bath 3's
+shower-floor mosaic, and all of Bathroom 1 stay open until a product is chosen.
 
 ### 4. Open the review site on its own port
 
@@ -104,8 +142,10 @@ final. Picks and notes save straight into that run's `plan.json` /
 
 ## Changing a selection
 
-Edit `scripts/autoboard/projects/651-belmont.json`, re-run the scaffold, and
-plan a new run. Two rules the file's own `_readme` repeats:
+Edit `scripts/autoboard/projects/651-belmont.json`, add the product's photos to
+`651-belmont-images.json` under a new `imageKey`, re-run the scaffold with
+`--fetch-images`, and plan a new run. Two rules the definition's own `_readme`
+repeats:
 
 - **Row order decides slot ownership.** `match.mjs` gives a preset slot to the
   first matching row, so each slot's preferred pick is listed before its
