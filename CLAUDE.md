@@ -113,9 +113,14 @@ secret set separately (`wrangler secret put`), and locally lives in git-ignored
   `node --test` fails. It also sets `verbatimModuleSyntax`, because a
   value-position import of a type is a link-time `SyntaxError` that neither gate
   can see.
-- `npm run typecheck` is not a pass/fail gate: 32 errors pre-date this tree
-  (Cloudflare ambient types, workbench, scene-lab). The usable criterion is that
-  a change adds none.
+- `npm run typecheck` is not a pass/fail gate: 14 errors pre-date this tree
+  (workbench, scene-lab, `db/index.ts`, and the `examples/` tree). The usable
+  criterion is that a change adds none. Cloudflare's own types come from
+  `@cloudflare/workers-types` via tsconfig `types`; that array also has to list
+  `node`, because naming it at all turns off automatic `@types/*` inclusion.
+  `db/index.ts` still errors because workers-types' generic `Env` has no
+  bindings — the fix is a generated `worker-configuration.d.ts` from
+  `wrangler types`, not a hand-written declaration.
 - Request bodies cap at 32 MB (`next.config.ts` `serverActions.bodySizeLimit`), applied
   to route handlers too. Large reference sets must use the chunked transport rather
   than one request.

@@ -185,6 +185,12 @@ export type SheetCell = {
 
 export type SheetRow = { id: number | string; cells?: SheetCell[] };
 
+export type SheetResponse = {
+  columns?: SheetColumn[];
+  rows?: SheetRow[];
+  version?: number | string;
+};
+
 export function resolveColumnIds(columns: SheetColumn[]): Record<string, number | string> {
   const byTitle = new Map(columns.map((column) => [String(column.title).trim().toLowerCase(), column.id]));
   const resolved: Record<string, number | string> = {};
@@ -235,7 +241,7 @@ export async function loadSmartsheetRows({
     const body = await response.text().catch(() => "");
     throw new Error(`Smartsheet request failed with HTTP ${response.status}: ${body.slice(0, 300)}`);
   }
-  const sheet = await response.json();
+  const sheet = (await response.json()) as SheetResponse;
   const columnIds = resolveColumnIds(sheet.columns ?? []);
   const gaps = emptyGaps();
   const rawRows = (sheet.rows ?? []).map((row: SheetRow) => {
