@@ -166,6 +166,45 @@ Locally it comes from Miniflare's emulated store (`npx wrangler secrets-store
 secret create <store-id> --name SMARTSHEET_ACCESS_TOKEN --scopes workers`), not
 from `.dev.vars` — the binding owns the name. See `docs/DEPLOYING.md`.
 
+## Lighting board (one per unit type)
+
+Besides the per-room boards, `buildBoards` emits one `lighting_collage` board
+per unit type that gathers **every light fixture across the unit's rooms**,
+including rooms no board type maps to, such as a living room. The web preview
+(`previewBoards`) mirrors it, so the picker shows it before any photo exists.
+
+- **Membership** is `isLightFixture(row)`: a luminaire cost code (`26 51`)
+  qualifies a row on its own; otherwise the name has to read as a fixture
+  (pendant, chandelier, sconce, lamp, flush mount, downlight, recessed,
+  "… light fixture / bar / kit", "vanity / ceiling / wall / under-cabinet …
+  light", "lighting"). Bulbs, lamping, controls, "light rail" and budget
+  allowances are excluded, and the global exclusions still apply. This is
+  deliberately broader than the room boards' single `light_fixture` slot,
+  which wants only the one fixture that belongs on a palette.
+- **Order and hero**: by kind in `ITEM_PRESETS.lighting_collage` order
+  (chandelier, pendant, ceiling light, sconce, vanity light, lamp, other), then
+  source order. `heroFor` has no ranking for this type, so the first item — a
+  chandelier or pendant when there is one — is the hero.
+- **Slot ids** are `light_<rowId>` (`light_b2_07`, `light_1844209142501252`),
+  not positions: review state (notes, hero pick) is keyed by slot id, and a
+  positional id would move a note to a different fixture whenever the sheet
+  gained one.
+- **Roles** name the fixture's room, since the board spans them all: "Bath 2
+  vanity light", "Living Room chandelier".
+- **Identity**: `roomLabel` is `LIGHTING_SCOPE_LABEL` ("All Rooms"), so the id
+  is `<unit>-all-rooms-lighting` and the title `<Unit> Lighting Collage`.
+  Twin-unit merge rules key on real rooms and never touch it.
+- **Gaps**: rows the lighting board accounts for — placed, imageless, or a
+  held-back substitute — are left out of `unmappedItems` and out of a skipped
+  room's `itemCount`; a room whose only rows are fixtures is no longer reported
+  as skipped. Substitutes are reported once against `lighting_collage`, in
+  addition to any room board that held them back, per the once-per-slot-per-
+  board-type convention. Imageless fixtures carry the fixture's own room. The
+  16-reference cap and `minSlots` apply as for any board; fixtures dropped for
+  the cap are recorded in `unfilledSlots` with their `rowId` and `itemName`.
+- `ITEM_PRESETS.lighting_collage` exists for the manual generator (every slot
+  optional) and for kind naming; the autoboard core never fills those slots.
+
 ## API
 
 | Route | Does |

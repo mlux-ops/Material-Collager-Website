@@ -36,6 +36,10 @@ test("each board type keeps its own prohibition against inventing unreferenced p
     buildGenerationPrompt(request({ collageType: "appliance_collage" })),
     /Do not add material samples or appliances that are not referenced/,
   );
+  assert.match(
+    buildGenerationPrompt(request({ collageType: "lighting_collage" })),
+    /Do not add fixtures, bulbs, canopies, cords, furniture, or room context that are not referenced/,
+  );
 });
 
 test("a multi-image item names its primary identity view and its supporting views", () => {

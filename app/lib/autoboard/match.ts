@@ -35,6 +35,7 @@ export const BOARD_KIND_LABELS: Record<CollageType, string> = {
   appliance_collage: "Appliance Collage",
   bathroom_fixture_collage: "Fixture Collage",
   bathroom_tile_collage: "Tile Collage",
+  lighting_collage: "Lighting Collage",
 };
 
 const BOARD_KIND_SLUGS: Record<CollageType, string> = {
@@ -42,6 +43,7 @@ const BOARD_KIND_SLUGS: Record<CollageType, string> = {
   appliance_collage: "appliance",
   bathroom_fixture_collage: "fixture",
   bathroom_tile_collage: "tile",
+  lighting_collage: "lighting",
 };
 
 // Canonical on-brand display casing. Smartsheet item names mix ALL CAPS, all
@@ -127,7 +129,55 @@ const SLOT_RULES: Record<CollageType, Record<string, SlotRule[]>> = {
     countertop: [{ any: [/countertop/i, /counter top/i, /quartz/i, /marble/i, /granite/i] }],
     metal_finish: [{ any: [/metal finish/i, /finish sample/i] }],
   },
+  // Kinds, not a roster. The lighting board takes EVERY fixture in a unit (see
+  // lightingFixtures) and uses these only to name each one and to order the
+  // board; a fixture matching none of them is still placed, as a "light
+  // fixture". Membership itself is decided by LIGHT_FIXTURE_RULES below.
+  lighting_collage: {
+    chandelier: [{ any: [/chandelier/i] }],
+    pendant: [{ any: [/pendant/i] }],
+    ceiling_light: [{ any: [/flush[\s-]?mount/i, /ceiling (?:light|fixture|mount)/i, /downlight/i, /recessed/i] }],
+    sconce: [{ any: [/sconce/i] }],
+    vanity_light: [{ any: [/vanity light/i, /vanity fixture/i, /bath bar/i] }],
+    lamp: [{ any: [/\blamp\b/i], none: [/lamping/i] }],
+  },
 };
+
+// What counts as a light fixture for the unit-wide lighting board. Broader
+// than the room boards' single light_fixture slot on purpose: that slot wants
+// the one fixture that belongs on a kitchen or bath palette, this board wants
+// every fixture in the unit. A luminaire cost code (26 51) qualifies a row on
+// its own; otherwise its name has to read as a fixture rather than merely
+// contain "light" — "Light Gray Grout" is a grout. Bulbs, lamping specs,
+// controls and budget lines are not fixtures.
+const LIGHT_FIXTURE_NAME_PATTERNS = [
+  /pendant/i,
+  /chandelier/i,
+  /sconce/i,
+  /\blamp\b/i,
+  /flush[\s-]?mount/i,
+  /downlight/i,
+  /recessed/i,
+  /\blights?\s+(?:fixture|bar|kit)\b/i,
+  /\b(?:vanity|ceiling|wall|island|accent|picture|step|closet|cove|linear|track|under[\s-]?cabinet|surface[\s-]?mount|led)\s+light(?:s|ing)?\b/i,
+  /\blighting\b/i,
+];
+const LIGHT_FIXTURE_EXCLUSIONS = [
+  /\bbulbs?\b/i,
+  /\blamping\b/i,
+  /light rail/i,
+  /lightweight/i,
+  /\bswitch/i,
+  /\bdimmer/i,
+  /transformer/i,
+  /\bdriver\b/i,
+  /allowance/i,
+  /lighting (?:plan|schedule|package)\b/i,
+];
+const LIGHT_FIXTURE_RULES: SlotRule[] = [
+  { cost: "26 51", any: [/./], none: LIGHT_FIXTURE_EXCLUSIONS },
+  { any: LIGHT_FIXTURE_NAME_PATTERNS, none: LIGHT_FIXTURE_EXCLUSIONS },
+];
 
 // Tile boards only exist when the room actually specifies a tile scheme.
 const TILE_GATE_SLOTS = ["wall_tile", "floor_tile", "accent_tile"];
@@ -148,16 +198,42 @@ function ruleMatches(rule: SlotRule, row: LibraryRow): boolean {
   return true;
 }
 
+// Exclusions describe what the item IS, not what it ships with or without —
+// so strip trailing "with ..." accessory clauses ("Faucet with Pop-Up Drain"
+// is a faucet) and "Less ..." omission clauses ("Faucet - Less Drain
+// Assembly" is still a faucet, sold without one; "Linear Shower Drain" with
+// neither clause is a real drain).
+function coreItemName(itemName: string): string {
+  return itemName.replace(/\bwith\b.*$/i, "").replace(/\bless\b.*$/i, "");
+}
+
+function globallyExcluded(row: LibraryRow): boolean {
+  const coreName = coreItemName(row.itemName);
+  return GLOBAL_EXCLUSIONS.some((pattern) => pattern.test(coreName));
+}
+
 function slotMatches(collageType: CollageType, slotId: string, row: LibraryRow): boolean {
-  // Exclusions describe what the item IS, not what it ships with or without —
-  // so strip trailing "with ..." accessory clauses ("Faucet with Pop-Up
-  // Drain" is a faucet) and "Less ..." omission clauses ("Faucet - Less
-  // Drain Assembly" is still a faucet, sold without one; "Linear Shower
-  // Drain" with neither clause is a real drain).
-  const coreName = row.itemName.replace(/\bwith\b.*$/i, "").replace(/\bless\b.*$/i, "");
-  if (GLOBAL_EXCLUSIONS.some((pattern) => pattern.test(coreName))) return false;
+  if (globallyExcluded(row)) return false;
   const rules = SLOT_RULES[collageType]?.[slotId] ?? [];
   return rules.some((rule) => ruleMatches(rule, row));
+}
+
+export function isLightFixture(row: LibraryRow): boolean {
+  if (globallyExcluded(row)) return false;
+  return LIGHT_FIXTURE_RULES.some((rule) => ruleMatches(rule, row));
+}
+
+const LIGHTING_TYPE: CollageType = "lighting_collage";
+
+// A fixture's kind, from the lighting presets in ITEM_PRESETS order. That
+// order doubles as the board's order: a chandelier or pendant is the most
+// visually substantial fixture, so it leads the board and becomes the hero
+// (heroFor has no ranking for this type and falls back to the first item).
+function lightingKind(row: LibraryRow): { rank: number; role: string } {
+  const presets = ITEM_PRESETS[LIGHTING_TYPE] ?? [];
+  const index = presets.findIndex((preset) => slotMatches(LIGHTING_TYPE, preset.id, row));
+  if (index === -1) return { rank: presets.length, role: "light fixture" };
+  return { rank: index, role: presets[index].role };
 }
 
 export function extractBrand(itemName: string): string {
@@ -284,6 +360,172 @@ export function groupRowsByRoom(rows: LibraryRow[]): Map<string, RoomGroup> {
   return roomGroups;
 }
 
+// ---------------------------------------------------------------------------
+// The lighting board: one per unit type, every light fixture in the unit
+// ---------------------------------------------------------------------------
+
+// The room label a unit-wide board carries. It is not a room the sheet knows,
+// so it never collides with a real room's boards, and it keeps boardIdFor's
+// `<unit>-<room>-<kind>` shape: a Penthouse lighting board is
+// `penthouse-all-rooms-lighting`.
+export const LIGHTING_SCOPE_LABEL = "All Rooms";
+
+export type UnitGroup = { unitType: string; rows: LibraryRow[] };
+
+export function groupRowsByUnit(rows: LibraryRow[]): Map<string, UnitGroup> {
+  const groups = new Map<string, UnitGroup>();
+  for (const row of rows) {
+    const key = row.unitType.toLowerCase();
+    if (!groups.has(key)) groups.set(key, { unitType: row.unitType, rows: [] });
+    groups.get(key)!.rows.push(row);
+  }
+  return groups;
+}
+
+export type LightingFixture = { row: LibraryRow; slotId: string; role: string };
+
+// A lighting slot is named after its row, not its position: `light_<rowId>`.
+// Position would renumber every later fixture whenever the sheet gains one,
+// and the review state (notes, hero pick) is keyed by slot id, so a note left
+// on the third fixture would silently move to a different product on the next
+// refresh. Row ids are unique within a sheet, and the id only has to be
+// unique within the board.
+export function lightingSlotId(row: LibraryRow): string {
+  return `light_${String(row.rowId).toLowerCase().replace(/[^a-z0-9]+/g, "_")}`;
+}
+
+// Every light fixture in a unit, in board order: by kind (ITEM_PRESETS order,
+// so chandeliers and pendants lead), then source order within a kind. Each
+// fixture's role names its room, since the board spans them all. Substitutes
+// are held back exactly as assignSlots holds them back, and returned so the
+// caller can report them.
+export function lightingFixtures(rows: LibraryRow[]): { fixtures: LightingFixture[]; substitutes: LibraryRow[] } {
+  const substitutes: LibraryRow[] = [];
+  const ranked: { row: LibraryRow; rank: number; role: string; order: number }[] = [];
+  rows.forEach((row, order) => {
+    if (!isLightFixture(row)) return;
+    if (isSubstitute(row)) {
+      substitutes.push(row);
+      return;
+    }
+    const kind = lightingKind(row);
+    ranked.push({ row, rank: kind.rank, role: `${row.roomLabel} ${kind.role}`, order });
+  });
+  ranked.sort((a, b) => a.rank - b.rank || a.order - b.order);
+  return {
+    fixtures: ranked.map((entry) => ({ row: entry.row, slotId: lightingSlotId(entry.row), role: entry.role })),
+    substitutes,
+  };
+}
+
+type BoardScope = { unitType: string; roomLabel: string; collageType: CollageType };
+
+// Enforce the shared reference cap by trimming extra supporting views first,
+// then dropping trailing items if still over.
+function enforceReferenceCap(items: BoardItem[], scope: BoardScope, gaps: Gaps): void {
+  let totalImages = items.reduce((sum, item) => sum + item.images.length, 0);
+  for (const item of items) {
+    while (totalImages > MAX_PRODUCT_REFERENCES && item.images.length > 1) {
+      item.images.pop();
+      totalImages--;
+    }
+  }
+  while (totalImages > MAX_PRODUCT_REFERENCES && items.length) {
+    const dropped = items.pop()!;
+    totalImages -= dropped.images.length;
+    gaps.unfilledSlots.push({
+      ...scope,
+      slotId: dropped.slotId,
+      rowId: dropped.rowId,
+      itemName: dropped.name,
+      reason: "dropped to stay under the 16-reference cap",
+    });
+  }
+}
+
+// Builds the unit-wide lighting boards and records, in `lightingRowIds`, every
+// row they accounted for — placed, imageless, or held back — so the per-room
+// pass can leave those rows out of its unmapped and skipped-room reports.
+function buildLightingBoards(
+  rows: LibraryRow[],
+  options: BuildBoardsOptions,
+  gaps: Gaps,
+  lightingRowIds: Set<string>,
+): Board[] {
+  const { resolveImages, imagesPerItem = 1, minSlots = 2 } = options;
+  const boards: Board[] = [];
+  for (const unit of groupRowsByUnit(rows).values()) {
+    const scope: BoardScope = { unitType: unit.unitType, roomLabel: LIGHTING_SCOPE_LABEL, collageType: LIGHTING_TYPE };
+    const { fixtures, substitutes } = lightingFixtures(unit.rows);
+    gaps.substituteCandidates?.push(
+      ...substitutes.map((row) => ({
+        slotId: "light_fixture",
+        collageType: LIGHTING_TYPE,
+        rowId: row.rowId,
+        itemName: row.itemName,
+        sku: row.sku,
+        unitType: unit.unitType,
+        roomLabel: row.roomLabel,
+      })),
+    );
+    for (const row of substitutes) lightingRowIds.add(row.rowId);
+
+    const items: BoardItem[] = [];
+    for (const fixture of fixtures) {
+      lightingRowIds.add(fixture.row.rowId);
+      const images = resolveImages(fixture.row.rowId, fixture.row.sku).slice(0, Math.max(1, imagesPerItem));
+      if (!images.length) {
+        // The fixture's own room, not the board's scope label: the reviewer
+        // collecting the photo needs to know where the fixture is.
+        gaps.imagelessItems.push({
+          unitType: unit.unitType,
+          roomLabel: fixture.row.roomLabel,
+          collageType: LIGHTING_TYPE,
+          slotId: fixture.slotId,
+          rowId: fixture.row.rowId,
+          itemName: fixture.row.itemName,
+          sku: fixture.row.sku,
+        });
+        continue;
+      }
+      const { name, tier } = extractTier(fixture.row.itemName);
+      const item: BoardItem = {
+        slotId: fixture.slotId,
+        role: fixture.role,
+        required: true,
+        rowId: fixture.row.rowId,
+        sku: fixture.row.sku,
+        brand: extractBrand(name),
+        name,
+        notes: fixture.row.qty > 1 ? `quantity ${fixture.row.qty}` : "",
+        images,
+      };
+      if (tier) item.tier = tier;
+      items.push(item);
+    }
+
+    enforceReferenceCap(items, scope, gaps);
+
+    if (items.length < minSlots) {
+      if (items.length) {
+        gaps.skippedBoards.push({ ...scope, reason: `only ${items.length} slot(s) filled; minimum is ${minSlots}` });
+      }
+      continue;
+    }
+
+    boards.push({
+      id: boardIdFor(unit.unitType, LIGHTING_SCOPE_LABEL, LIGHTING_TYPE),
+      unitType: unit.unitType,
+      roomLabel: LIGHTING_SCOPE_LABEL,
+      collageType: LIGHTING_TYPE,
+      kindLabel: BOARD_KIND_LABELS[LIGHTING_TYPE],
+      title: `${unit.unitType} ${BOARD_KIND_LABELS[LIGHTING_TYPE]}`,
+      items,
+    });
+  }
+  return boards;
+}
+
 export function buildBoards(rows: LibraryRow[], options: BuildBoardsOptions): { boards: Board[]; gaps: Gaps } {
   const {
     resolveImages,
@@ -304,16 +546,24 @@ export function buildBoards(rows: LibraryRow[], options: BuildBoardsOptions): { 
 
   const roomGroups = groupRowsByRoom(rows);
 
-  const boards: Board[] = [];
+  // The unit-wide lighting boards go first, so the room pass below knows which
+  // rows they already account for: a living-room chandelier is on the unit's
+  // lighting board, not an item stranded in a room no board type maps to.
+  const lightingRowIds = new Set<string>();
+  const boards: Board[] = buildLightingBoards(rows, options, gaps, lightingRowIds);
+
   for (const group of roomGroups.values()) {
     const boardTypes = boardTypesForRoom(group.roomLabel);
     if (!boardTypes.length) {
-      gaps.skippedRooms.push({
-        unitType: group.unitType,
-        roomLabel: group.roomLabel,
-        itemCount: group.rows.length,
-        reason: "no board type maps to this room",
-      });
+      const stranded = group.rows.filter((row) => !lightingRowIds.has(row.rowId));
+      if (stranded.length) {
+        gaps.skippedRooms.push({
+          unitType: group.unitType,
+          roomLabel: group.roomLabel,
+          itemCount: stranded.length,
+          reason: "no board type maps to this room",
+        });
+      }
       continue;
     }
 
@@ -430,26 +680,7 @@ export function buildBoards(rows: LibraryRow[], options: BuildBoardsOptions): { 
         }
       }
 
-      // Enforce the shared reference cap by trimming extra supporting views
-      // first, then dropping trailing optional-slot items if still over.
-      let totalImages = items.reduce((sum, item) => sum + item.images.length, 0);
-      for (const item of items) {
-        while (totalImages > MAX_PRODUCT_REFERENCES && item.images.length > 1) {
-          item.images.pop();
-          totalImages--;
-        }
-      }
-      while (totalImages > MAX_PRODUCT_REFERENCES && items.length) {
-        const dropped = items.pop()!;
-        totalImages -= dropped.images.length;
-        gaps.unfilledSlots.push({
-          unitType: group.unitType,
-          roomLabel: group.roomLabel,
-          collageType,
-          slotId: dropped.slotId,
-          reason: "dropped to stay under the 16-reference cap",
-        });
-      }
+      enforceReferenceCap(items, { unitType: group.unitType, roomLabel: group.roomLabel, collageType }, gaps);
 
       const presets = ITEM_PRESETS[collageType] ?? [];
       const filledIds = new Set(items.map((item) => item.slotId));
@@ -489,7 +720,7 @@ export function buildBoards(rows: LibraryRow[], options: BuildBoardsOptions): { 
     }
 
     for (const row of group.rows) {
-      if (!mappedRowIds.has(row.rowId) && !heldBackRowIds.has(row.rowId)) {
+      if (!mappedRowIds.has(row.rowId) && !heldBackRowIds.has(row.rowId) && !lightingRowIds.has(row.rowId)) {
         gaps.unmappedItems.push({
           unitType: group.unitType,
           roomLabel: group.roomLabel,
