@@ -1,11 +1,17 @@
 // Renders of a review-board board: the draft / confirm / final chain.
 //
-// The request goes through the app's OWN /api/generate rather than calling
-// OpenAI here. That route already holds every rule that matters — payload
-// validation, the final-quality floor, reference counting, usage and cost
-// accounting, the diagnostics the CLI relies on — and a second path to the
-// image API would be a second place for those to drift. It is a same-origin
-// subrequest, which is what a Worker does cheaply.
+// The request goes through the app's OWN /api/generate handler rather than
+// calling OpenAI here. That route already holds every rule that matters —
+// payload validation, the final-quality floor, reference counting, usage and
+// cost accounting, the diagnostics the CLI relies on — and a second path to the
+// image API would be a second place for those to drift.
+//
+// It is called IN-PROCESS, as a function, never fetched over HTTP. A Worker
+// cannot fetch its own hostname (Cloudflare's loop protection answers error
+// 1042), and even if it could, that request would arrive at the Access gate
+// with no JWT. Miniflare allows the self-fetch, which is exactly how a design
+// that only works locally gets shipped. The handler is injected so the chain
+// stays testable without spending on a render.
 //
 // Every render records the two hashes it was made under, so the board can say
 // whether it is still current instead of guessing.
@@ -125,9 +131,17 @@ function photoIdFromUrl(url: string): string {
 }
 
 export type RenderDeps = {
-  /** Injected so the whole chain is testable without spending on a render. */
-  fetchImpl?: typeof fetch;
-  /** Origin of this deployment, for the same-origin subrequest to /api/generate. */
+  /**
+   * The /api/generate route's POST handler, called in-process. Injected (rather
+   * than imported here) so a test can hand in a stub and so this module never
+   * has to know the route's file path.
+   */
+  generate: (request: Request) => Promise<Response>;
+  /**
+   * Origin of the incoming request. Used ONLY to give the constructed Request a
+   * well-formed absolute URL, which the handler parses for query params. No
+   * network request is made to it.
+   */
   origin: string;
 };
 
@@ -147,7 +161,6 @@ export async function renderBoardDraft(
   const DB = await ensureRenderStorage();
   const kind = options.kind ?? "draft";
   const variant = options.variant ?? DEFAULT_VARIANTS[0];
-  const fetchImpl = options.fetchImpl ?? fetch;
 
   if (!board.items.length) throw new Error("This board has no references yet. Choose a photo for at least one slot.");
 
@@ -178,7 +191,9 @@ export async function renderBoardDraft(
     }
   }
 
-  const response = await fetchImpl(`${options.origin}/api/generate`, { method: "POST", body: form });
+  const response = await options.generate(
+    new Request(`${options.origin}/api/generate`, { method: "POST", body: form }),
+  );
   if (!response.ok) {
     const body = await response.text().catch(() => "");
     // The generate route answers JSON with a readable message; pass it straight

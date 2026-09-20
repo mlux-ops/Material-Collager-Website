@@ -368,11 +368,18 @@ mistaken double-click costs one draft rather than a set. The button says what it
 will spend on — a draft's bill is dominated by its reference count, not its
 quality tier (see the cost note in CLAUDE.md).
 
-The request goes through the app's **own** `/api/generate` as a same-origin
-subrequest rather than calling OpenAI from here. That route already holds every
-rule that matters — payload validation, the final-quality floor, reference
-counting, usage and cost accounting, the diagnostics the CLI depends on — and a
-second path to the image API is a second place for those to drift.
+The request goes through the app's **own** `/api/generate` handler, called
+**in-process as a function**, rather than calling OpenAI from here. That route
+already holds every rule that matters — payload validation, the final-quality
+floor, reference counting, usage and cost accounting, the diagnostics the CLI
+depends on — and a second path to the image API is a second place for those to
+drift.
+
+It is not fetched over HTTP. A Worker cannot fetch its own hostname (Cloudflare
+answers error 1042), and the request would reach the Access gate with no JWT.
+Miniflare permits the self-fetch, which is how a design that only works locally
+gets shipped; the first version of this did exactly that and was caught before
+deploy.
 
 Every render records the `selectionHash` and `renderOptionsHash` it was made
 under. The board compares them to its current values, so a render made before
@@ -380,8 +387,8 @@ the board changed is marked **stale** rather than quietly passing as current.
 Picking is exclusive per board and kind: picking another draft releases the
 first, so "the approved draft" is never ambiguous.
 
-`renderBoardDraft` takes an injected `fetchImpl` (the same pattern
-`loadSmartsheetRows` uses) so the chain can be exercised without spending.
+`renderBoardDraft` takes the handler injected (`generate`), so a test can hand
+in a stub and the chain can be exercised without spending.
 
 | Route | Does |
 |---|---|

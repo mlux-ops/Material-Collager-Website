@@ -1,3 +1,4 @@
+import { POST as generate } from "@/app/api/generate/route";
 import { buildProjectBoards, getProject } from "@/app/lib/autoboard-projects";
 import { listRenders, renderBoardDraft } from "@/app/lib/autoboard-renders";
 import { DEFAULT_VARIANTS } from "@/app/lib/autoboard/variants";
@@ -39,6 +40,7 @@ export async function POST(request: Request, context: Context) {
 
     const render = await renderBoardDraft(id, board, board.state.instruction, {
       variant,
+      generate,
       origin: new URL(request.url).origin,
     });
     return Response.json({ ok: true, render }, { status: 201 });

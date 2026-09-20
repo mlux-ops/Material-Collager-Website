@@ -13,14 +13,19 @@
 //
 //   npm run autoboard:seed-web -- --project 651-belmont
 //   npm run autoboard:seed-web -- --project 651-belmont --rooms "Bath 2" --select
+//   npm run autoboard:seed-web -- --project 651-belmont --base-url https://material-collager.mlux-db1.workers.dev
 //
 // Defaults to http://localhost:3000, and to the library root named in the
-// project definition. Run `npm run dev` first.
+// project definition. Run `npm run dev` first. Against the deployed Worker it
+// authenticates the same way the CLI does (scripts/autoboard/lib/access.mjs):
+// a CF_ACCESS_CLIENT_ID/SECRET service token, a CF_ACCESS_TOKEN, or the session
+// cloudflared cached after `cloudflared access login <url>`.
 
 import { existsSync, readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import path from "node:path";
 
+import { resolveAccessHeaders } from "./lib/access.mjs";
 import { loadBuildLog, makeDiskImageResolver } from "./lib/match.mjs";
 
 const MIME_BY_EXTENSION = {
@@ -76,12 +81,23 @@ export function rowsFromDefinition(definition, { rooms = [] } = {}) {
   return rows;
 }
 
-async function api(baseUrl, route, init) {
-  const response = await fetch(`${baseUrl}${route}`, init);
+// Access headers for the target, resolved once per run and attached to every
+// request. Empty against a local dev server that has no gate.
+let accessHeaders = {};
+
+function isLocal(baseUrl) {
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(baseUrl);
+}
+
+async function api(baseUrl, route, init = {}) {
+  const response = await fetch(`${baseUrl}${route}`, {
+    ...init,
+    headers: { ...accessHeaders, ...(init.headers ?? {}) },
+  });
   const payload = await response.json().catch(() => null);
   if (!response.ok || !payload?.ok) {
     const detail = payload?.error ?? `HTTP ${response.status}`;
-    if (response.status === 403) {
+    if (response.status === 403 && isLocal(baseUrl)) {
       throw new Error(
         `${detail}\n\nA 403 from local dev is the Cloudflare Access gate: blank CF_ACCESS_TEAM_DOMAIN ` +
           "and CF_ACCESS_AUD in .dev.vars and restart `npm run dev` (see .dev.vars.example).",
@@ -141,6 +157,11 @@ async function main() {
     if (missing) console.log(`\n${missing} row(s) have no photo in the library and will need one collected in the UI.`);
     return;
   }
+
+  // Against the deployed Worker this finds a credential Access accepts, or
+  // fails with the login hint; against local dev it comes back empty.
+  const access = await resolveAccessHeaders(baseUrl, { log: (line) => console.log(line) });
+  accessHeaders = access.headers;
 
   let projectId = values.into;
   if (projectId) {
