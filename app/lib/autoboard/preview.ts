@@ -14,12 +14,15 @@
 import { ITEM_PRESETS } from "../collage.ts";
 import {
   BOARD_KIND_LABELS,
+  LIGHTING_SCOPE_LABEL,
   assignSlots,
   boardIdFor,
   boardTypesForRoom,
   extractBrand,
   extractTier,
   groupRowsByRoom,
+  groupRowsByUnit,
+  lightingFixtures,
 } from "./match.ts";
 import type { CollageType, LibraryRow, SlotConflict, SubstituteRecord } from "./types.ts";
 
@@ -69,11 +72,67 @@ export function previewBoards(rows: LibraryRow[]): BoardsPreview {
     skippedRooms: [],
   };
 
+  // The unit-wide lighting boards, first, for the same reason buildBoards
+  // builds them first: the room pass leaves the rows they account for out of
+  // its unmapped and skipped-room reports. A lighting preview with no fixture
+  // at all is omitted rather than shown empty — unlike a room board, whose
+  // empty preview says something about that room, an empty lighting board
+  // would repeat for every unit type in the sheet.
+  const lightingRowIds = new Set<string>();
+  for (const unit of groupRowsByUnit(rows).values()) {
+    const { fixtures, substitutes } = lightingFixtures(unit.rows);
+    preview.substitutes.push(
+      ...substitutes.map((row) => ({
+        slotId: "light_fixture",
+        collageType: "lighting_collage" as CollageType,
+        rowId: row.rowId,
+        itemName: row.itemName,
+        sku: row.sku,
+        unitType: unit.unitType,
+        roomLabel: row.roomLabel,
+      })),
+    );
+    for (const row of substitutes) lightingRowIds.add(row.rowId);
+    if (!fixtures.length) continue;
+
+    const scope: RoomScope = { unitType: unit.unitType, roomLabel: LIGHTING_SCOPE_LABEL };
+    preview.rooms.push(scope);
+    const slots: PreviewSlot[] = fixtures.map((fixture) => {
+      lightingRowIds.add(fixture.row.rowId);
+      const { name, tier } = extractTier(fixture.row.itemName);
+      const entry: PreviewSlot = {
+        slotId: fixture.slotId,
+        role: fixture.role,
+        required: true,
+        rowId: fixture.row.rowId,
+        itemName: fixture.row.itemName,
+        name,
+        brand: extractBrand(name),
+        sku: fixture.row.sku,
+        qty: fixture.row.qty,
+        reference: fixture.row.reference,
+      };
+      if (tier) entry.tier = tier;
+      return entry;
+    });
+    preview.boards.push({
+      id: boardIdFor(unit.unitType, LIGHTING_SCOPE_LABEL, "lighting_collage"),
+      ...scope,
+      collageType: "lighting_collage",
+      kindLabel: BOARD_KIND_LABELS.lighting_collage,
+      title: `${unit.unitType} ${BOARD_KIND_LABELS.lighting_collage}`,
+      slots,
+      // Every fixture found is on the board; there is no roster left unfilled.
+      unfilledSlots: [],
+    });
+  }
+
   for (const group of groupRowsByRoom(rows).values()) {
     const scope: RoomScope = { unitType: group.unitType, roomLabel: group.roomLabel };
     const boardTypes = boardTypesForRoom(group.roomLabel);
     if (!boardTypes.length) {
-      preview.skippedRooms.push({ ...scope, itemCount: group.rows.length });
+      const stranded = group.rows.filter((row) => !lightingRowIds.has(row.rowId));
+      if (stranded.length) preview.skippedRooms.push({ ...scope, itemCount: stranded.length });
       continue;
     }
     preview.rooms.push(scope);
@@ -125,7 +184,7 @@ export function previewBoards(rows: LibraryRow[]): BoardsPreview {
     }
 
     for (const row of group.rows) {
-      if (!mappedRowIds.has(row.rowId) && !heldBackRowIds.has(row.rowId)) {
+      if (!mappedRowIds.has(row.rowId) && !heldBackRowIds.has(row.rowId) && !lightingRowIds.has(row.rowId)) {
         preview.unmapped.push({
           ...scope,
           rowId: row.rowId,

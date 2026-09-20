@@ -13,6 +13,7 @@ export const COLLAGE_TYPES = [
   "appliance_collage",
   "bathroom_fixture_collage",
   "bathroom_tile_collage",
+  "lighting_collage",
 ] as const;
 
 export const QUALITIES = SUNBURST_QUALITIES;
@@ -121,6 +122,19 @@ export const ITEM_PRESETS: Record<CollageType, CollageItemInput[]> = {
     { id: "countertop", role: "countertop stone", required: true },
     { id: "metal_finish", role: "metal finish sample or hardware", required: true },
   ],
+  // One residence's light fixtures, gathered across every room. Every slot is
+  // optional: a lighting board has no fixed roster. The autoboard core does not
+  // fill these slots at all — it gives each fixture it finds its own slot and
+  // uses this list only to name the fixture's kind and to order the board (see
+  // lightingFixtures in app/lib/autoboard/match.ts).
+  lighting_collage: [
+    { id: "chandelier", role: "chandelier", required: false },
+    { id: "pendant", role: "pendant light", required: false },
+    { id: "ceiling_light", role: "ceiling light", required: false },
+    { id: "sconce", role: "wall sconce", required: false },
+    { id: "vanity_light", role: "vanity light", required: false },
+    { id: "lamp", role: "table or floor lamp", required: false },
+  ],
 };
 
 // Each subject line keeps its type-specific prohibition: the generic "no
@@ -137,6 +151,8 @@ const TYPE_PROMPTS: Record<CollageType, string> = {
     "Subject: luxury bathroom fixtures and finishes from the reference map. Do not add sanitaryware (toilet, tub, sink basin) or plumbing pieces that are not referenced.",
   bathroom_tile_collage:
     "Subject: luxury bathroom tile and finishes from the reference map, with realistic pattern scale and tactile detail. Do not add tile or finish samples that are not referenced.",
+  lighting_collage:
+    "Subject: the decorative and architectural light fixtures selected for one luxury residence, from the reference map, presented together as a lighting palette. Show every fixture complete and unlit, as a product object at a consistent relative scale, so silhouette, arm count, shade shape, and metal finish read true. Do not add fixtures, bulbs, canopies, cords, furniture, or room context that are not referenced.",
 };
 
 const COMPOSITION_PROMPTS: Record<Composition, string> = {

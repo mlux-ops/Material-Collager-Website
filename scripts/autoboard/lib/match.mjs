@@ -14,6 +14,7 @@ import { csvObjects } from "./source.mjs";
 
 export {
   BOARD_KIND_LABELS,
+  LIGHTING_SCOPE_LABEL,
   MAX_PRODUCT_REFERENCES,
   applyBoardMerges,
   assignSlots,
@@ -21,7 +22,11 @@ export {
   buildBoards,
   extractBrand,
   extractTier,
+  groupRowsByUnit,
+  isLightFixture,
   isSubstitute,
+  lightingFixtures,
+  lightingSlotId,
   slugify,
 } from "../../../app/lib/autoboard/match.ts";
 

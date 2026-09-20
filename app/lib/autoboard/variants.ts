@@ -35,6 +35,10 @@ const HERO_RANKING: Record<CollageType, string[]> = {
     "valve_trim", "vanity_wood", "cabinet_hardware",
   ],
   bathroom_tile_collage: ["wall_tile", "floor_tile", "accent_tile", "countertop", "vanity_wood", "metal_finish"],
+  // Lighting slots are per fixture (light_<rowId>), so there is nothing to
+  // rank by id. lightingFixtures orders the board chandelier and pendant
+  // first, and heroFor's fallback to the first item makes that the hero.
+  lighting_collage: [],
 };
 
 export function heroFor(collageType: CollageType, filledSlotIds: string[]): string | undefined {

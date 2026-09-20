@@ -60,6 +60,12 @@ builtins, the `@/` alias and extensionless imports — `docs/autoboard-shared-co
 has the rules and the reasons, and `tests/autoboard-parity.test.mjs` enforces
 them (nothing else does).
 
+`buildBoards` also emits one `lighting_collage` board per unit type, gathering
+every light fixture across the unit's rooms (id `<unit>-all-rooms-lighting`;
+slot ids are `light_<rowId>` so review notes survive a sheet refresh). Membership
+is `isLightFixture`, deliberately broader than the room boards' `light_fixture`
+slot; `docs/autoboard-shared-core.md` has the rules.
+
 `review` starts a dependency-free `node:http` review UI on **port 4790** (`--port` to
 override). Its render-workflow POST endpoints require `Content-Type: application/json`
 as a CSRF defense.
