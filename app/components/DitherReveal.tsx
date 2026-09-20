@@ -174,10 +174,18 @@ export function DitherReveal({
 
   // Load / reload the source image whenever `src` changes, WITHOUT resetting
   // displayedRef -- the reveal keeps its place, it just gets sharper data.
+  //
+  // No crossOrigin here: every caller so far passed a blob:/data: URI (immune
+  // to CORS either way), until the review board started passing a real,
+  // same-origin, cookie-authenticated render URL. crossOrigin="anonymous"
+  // forces a credential-less fetch even for a same-origin request, which is
+  // exactly what a Cloudflare Access-gated deployment answers with a login
+  // redirect instead of the image -- onload then never fires, and the reveal
+  // never gets real pixels to sample. A same-origin <canvas> is never tainted
+  // regardless of this attribute, so it was never buying anything here.
   useEffect(() => {
     let cancelled = false;
     const img = new Image();
-    img.crossOrigin = "anonymous";
     img.onload = () => {
       if (cancelled) return;
       const canvas = canvasRef.current;
