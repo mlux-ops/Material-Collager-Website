@@ -14,7 +14,16 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { DitherReveal } from "../DitherReveal";
 import styles from "./review-boards.module.css";
+
+// extractBrand pulls the brand out of the item name but leaves the name intact,
+// so rendering both prints "Kohler Kohler Purist Basin Faucet". The brand is
+// shown in its own weight; the name drops the prefix it duplicates.
+export function withoutBrandPrefix(name: string, brand: string): string {
+  if (!brand || !name.toLowerCase().startsWith(brand.toLowerCase())) return name;
+  return name.slice(brand.length).trim();
+}
 
 export type BoardState = {
   boardId: string;
@@ -141,6 +150,12 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
   const isStale = (render: BoardRender) =>
     render.selectionHash !== board.selectionHash || render.renderOptionsHash !== board.renderOptionsHash;
 
+  // The preview stage shows one image: whichever render is newest, or (before
+  // any render exists) the board's own hero reference so the stage is never
+  // simply blank.
+  const latestRender = renders.length ? renders.reduce((a, b) => (a.createdAt >= b.createdAt ? a : b)) : null;
+  const heroImage = board.items[0]?.images[0];
+
   const renderDraft = useCallback(async () => {
     setRendering(true);
     setError("");
@@ -179,104 +194,74 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
   );
 
   return (
-    <div className={styles.workflow}>
-      <div className={styles.field}>
-        <label className={styles.label} htmlFor={`instruction-${board.id}`}>
-          Board instruction
-        </label>
-        <textarea
-          id={`instruction-${board.id}`}
-          className={styles.textarea}
-          rows={2}
-          value={instruction}
-          placeholder="Warmer metals throughout; keep the tile cool."
-          onChange={(event) => {
-            setInstruction(event.target.value);
-            saveSoon({ instruction: event.target.value });
-          }}
-        />
-      </div>
+    <div className={styles.workflowGrid}>
+      {/* Settings: everything that feeds the prompt but is not itself an item. */}
+      <div className={styles.workflowSettings}>
+        <div className={styles.field}>
+          <label className={styles.label} htmlFor={`instruction-${board.id}`}>
+            Board instruction
+          </label>
+          <textarea
+            id={`instruction-${board.id}`}
+            className={styles.textarea}
+            rows={5}
+            value={instruction}
+            placeholder="Warmer metals throughout; keep the tile cool."
+            onChange={(event) => {
+              setInstruction(event.target.value);
+              saveSoon({ instruction: event.target.value });
+            }}
+          />
+        </div>
 
-      <div className={styles.workflowRow}>
-        <span className={styles.label}>Options</span>
-        <select
-          className={styles.select}
-          aria-label="Render quality"
-          value={board.state.quality ?? ""}
-          onChange={(event) => void save({ quality: event.target.value })}
-        >
-          <option value="">quality: stage default ({board.renderOptions.quality})</option>
-          {QUALITIES.map((quality) => (
-            <option key={quality} value={quality}>
-              quality: {quality}
-            </option>
-          ))}
-        </select>
-        <select
-          className={styles.select}
-          aria-label="Background"
-          value={board.state.background ?? ""}
-          onChange={(event) => void save({ background: event.target.value })}
-        >
-          <option value="">background: opaque</option>
-          {BACKGROUNDS.map((background) => (
-            <option key={background} value={background}>
-              background: {background}
-            </option>
-          ))}
-        </select>
-        <select
-          className={styles.select}
-          aria-label="Hero slot"
-          value={board.state.heroItemId ?? ""}
-          onChange={(event) => void save({ heroItemId: event.target.value })}
-        >
-          <option value="">hero: by board type</option>
-          {board.items.map((item) => (
-            <option key={item.slotId} value={item.slotId}>
-              hero: {item.slotId}
-            </option>
-          ))}
-        </select>
-      </div>
+        <div className={styles.field}>
+          <span className={styles.label}>Options</span>
+          <select
+            className={styles.select}
+            aria-label="Render quality"
+            value={board.state.quality ?? ""}
+            onChange={(event) => void save({ quality: event.target.value })}
+          >
+            <option value="">quality: stage default ({board.renderOptions.quality})</option>
+            {QUALITIES.map((quality) => (
+              <option key={quality} value={quality}>
+                quality: {quality}
+              </option>
+            ))}
+          </select>
+          <select
+            className={styles.select}
+            aria-label="Background"
+            value={board.state.background ?? ""}
+            onChange={(event) => void save({ background: event.target.value })}
+          >
+            <option value="">background: opaque</option>
+            {BACKGROUNDS.map((background) => (
+              <option key={background} value={background}>
+                background: {background}
+              </option>
+            ))}
+          </select>
+          <select
+            className={styles.select}
+            aria-label="Hero slot"
+            value={board.state.heroItemId ?? ""}
+            onChange={(event) => void save({ heroItemId: event.target.value })}
+          >
+            <option value="">hero: by board type</option>
+            {board.items.map((item) => (
+              <option key={item.slotId} value={item.slotId}>
+                hero: {item.slotId}
+              </option>
+            ))}
+          </select>
+        </div>
 
-      <ul className={styles.noteList}>
-        {board.items.map((item) => (
-          <li key={item.slotId} className={styles.noteRow}>
-            <label className={styles.noteLabel} htmlFor={`note-${board.id}-${item.slotId}`}>
-              {item.slotId}
-            </label>
-            <input
-              id={`note-${board.id}-${item.slotId}`}
-              className={styles.noteInput}
-              value={notes[item.slotId] ?? ""}
-              placeholder={`Note for ${item.name || item.role}`}
-              onChange={(event) => {
-                const next = { ...notes, [item.slotId]: event.target.value };
-                setNotes(next);
-                saveSoon({ notes: { [item.slotId]: event.target.value } });
-              }}
-            />
-            {item.rowId && onRemoveRow ? (
-              <button
-                type="button"
-                className={styles.photoAction}
-                disabled={saving}
-                onClick={() => void onRemoveRow(item.rowId!)}
-              >
-                Remove
-              </button>
-            ) : (
-              <span />
-            )}
-          </li>
-        ))}
-      </ul>
-
-      <div className={styles.workflowFoot}>
         <button type="button" className={styles.photoAction} onClick={() => setShowPrompt((open) => !open)}>
           {showPrompt ? "Hide prompt" : "Show prompt"}
         </button>
+        {showPrompt ? <pre className={styles.prompt}>{board.prompt}</pre> : null}
+
         <span className={styles.workflowMeta}>
           {board.referenceCount} references · {board.renderOptions.quality}/{board.renderOptions.background} ·{" "}
           {board.selectionHash.slice(0, 8)}
@@ -284,62 +269,130 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
         </span>
       </div>
 
-      {showPrompt ? <pre className={styles.prompt}>{board.prompt}</pre> : null}
-
-      <div className={styles.workflowRow}>
-        <button
-          type="button"
-          className={styles.primary}
-          disabled={rendering || !board.referenceCount}
-          onClick={renderDraft}
-        >
-          {rendering ? "Rendering…" : "Render draft"}
-        </button>
-        {/* Named plainly rather than buried: this is the one control on the
-            page that costs money, and a draft's bill is dominated by its
-            reference count, not its quality tier (CLAUDE.md). */}
-        <span className={styles.workflowMeta}>
-          spends on {board.referenceCount} reference{board.referenceCount === 1 ? "" : "s"}
-        </span>
-      </div>
-
-      {renders.length ? (
-        <ul className={styles.renderStrip}>
-          {renders.map((render) => (
-            <li key={render.id} className={styles.renderCell}>
-              <button
-                type="button"
-                className={styles.photoPick}
-                aria-pressed={render.status !== "candidate"}
-                aria-label={`${render.status === "candidate" ? "Pick" : "Release"} draft ${render.variant}`}
-                onClick={() => void setRenderStatus(render.id, render.status === "candidate" ? "picked" : "candidate")}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element -- see SlotPhotos */}
-                <img className={styles.renderImage} src={render.imageUrl} alt="" loading="lazy" />
-                <span className={styles.photoMeta}>
-                  {render.kind} {render.variant} · {render.quality}
-                  {isStale(render) ? <span className={styles.photoWarn}> stale</span> : null}
-                  {render.status === "picked" ? " · picked" : ""}
-                  {render.status === "approved" ? " · approved" : ""}
-                </span>
-              </button>
-              <div className={styles.photoActions}>
-                <button type="button" className={styles.photoAction} onClick={() => void setRenderStatus(render.id, "approved")}>
-                  Approve
-                </button>
-                <button type="button" className={styles.photoAction} onClick={() => void setRenderStatus(render.id, "delete")}>
-                  Delete
-                </button>
+      {/* Items: one card per slot — its reference photo, name, and its note. */}
+      <div className={styles.workflowItems}>
+        <ul className={styles.itemGrid}>
+          {board.items.map((item) => (
+            <li key={item.slotId} className={styles.itemCard}>
+              {/* eslint-disable-next-line @next/next/no-img-element -- see SlotPhotos */}
+              <img className={styles.itemImage} src={item.images[0]} alt="" loading="lazy" />
+              <div className={styles.itemBody}>
+                <label className={styles.noteLabel} htmlFor={`note-${board.id}-${item.slotId}`}>
+                  {item.brand ? <strong>{item.brand}</strong> : null}
+                  {item.brand ? " " : ""}
+                  {withoutBrandPrefix(item.name, item.brand)}
+                  <span className={styles.builtSlot}> · {item.slotId}</span>
+                </label>
+                <input
+                  id={`note-${board.id}-${item.slotId}`}
+                  className={styles.noteInput}
+                  value={notes[item.slotId] ?? ""}
+                  placeholder={`Note for ${item.name || item.role}`}
+                  onChange={(event) => {
+                    const next = { ...notes, [item.slotId]: event.target.value };
+                    setNotes(next);
+                    saveSoon({ notes: { [item.slotId]: event.target.value } });
+                  }}
+                />
+                {item.rowId && onRemoveRow ? (
+                  <button
+                    type="button"
+                    className={styles.photoAction}
+                    disabled={saving}
+                    onClick={() => void onRemoveRow(item.rowId!)}
+                  >
+                    Remove
+                  </button>
+                ) : null}
               </div>
             </li>
           ))}
         </ul>
-      ) : null}
-      {error ? (
-        <p className={styles.photoError} role="alert">
-          {error}
-        </p>
-      ) : null}
+      </div>
+
+      {/* Preview: the same dithered reveal the generator page uses, the render
+          button, and the strip of candidates it produces. */}
+      <div className={styles.workflowPreview}>
+        <div className={styles.previewStage}>
+          {rendering ? (
+            <DitherReveal
+              className={styles.previewDither}
+              style={{ height: "100%" }}
+              src={latestRender?.imageUrl ?? heroImage ?? ""}
+              alt="Rendering the board"
+            />
+          ) : latestRender ? (
+            <DitherReveal
+              key={latestRender.id}
+              className={styles.previewDither}
+              style={{ height: "100%" }}
+              src={latestRender.imageUrl}
+              alt={`${board.title} render`}
+              progress={1}
+            />
+          ) : heroImage ? (
+            // eslint-disable-next-line @next/next/no-img-element -- see SlotPhotos
+            <img className={styles.previewImage} src={heroImage} alt="" />
+          ) : (
+            <span className={styles.previewEmpty}>No reference photo yet</span>
+          )}
+        </div>
+
+        <div className={styles.workflowRow}>
+          <button
+            type="button"
+            className={styles.primary}
+            disabled={rendering || !board.referenceCount}
+            onClick={renderDraft}
+          >
+            {rendering ? "Rendering…" : "Render draft"}
+          </button>
+          {/* Named plainly rather than buried: this is the one control on the
+              page that costs money, and a draft's bill is dominated by its
+              reference count, not its quality tier (CLAUDE.md). */}
+          <span className={styles.workflowMeta}>
+            spends on {board.referenceCount} reference{board.referenceCount === 1 ? "" : "s"}
+          </span>
+        </div>
+
+        {renders.length ? (
+          <ul className={styles.renderStrip}>
+            {renders.map((render) => (
+              <li key={render.id} className={styles.renderCell}>
+                <button
+                  type="button"
+                  className={styles.photoPick}
+                  aria-pressed={render.status !== "candidate"}
+                  aria-label={`${render.status === "candidate" ? "Pick" : "Release"} draft ${render.variant}`}
+                  onClick={() => void setRenderStatus(render.id, render.status === "candidate" ? "picked" : "candidate")}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element -- see SlotPhotos */}
+                  <img className={styles.renderImage} src={render.imageUrl} alt="" loading="lazy" />
+                  <span className={styles.photoMeta}>
+                    {render.kind} {render.variant} · {render.quality}
+                    {isStale(render) ? <span className={styles.photoWarn}> stale</span> : null}
+                    {render.status === "picked" ? " · picked" : ""}
+                    {render.status === "approved" ? " · approved" : ""}
+                  </span>
+                </button>
+                <div className={styles.photoActions}>
+                  <button type="button" className={styles.photoAction} onClick={() => void setRenderStatus(render.id, "approved")}>
+                    Approve
+                  </button>
+                  <button type="button" className={styles.photoAction} onClick={() => void setRenderStatus(render.id, "delete")}>
+                    Delete
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {error ? (
+          <p className={styles.photoError} role="alert">
+            {error}
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }

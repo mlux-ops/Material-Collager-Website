@@ -22,7 +22,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { RouteReady } from "../RouteReady";
 import { SiteNavigation } from "../SiteNavigation";
 import { SlotPhotos, type ProjectPhoto } from "./SlotPhotos";
-import { BoardWorkflow, type BoardRender, type BuiltBoard } from "./BoardWorkflow";
+import { withoutBrandPrefix, type BoardRender, type BuiltBoard } from "./BoardWorkflow";
+import { BoardDrawer } from "./BoardDrawer";
 import { AddRowDialog } from "./AddRowDialog";
 import { RowTools, type Pin } from "./RowTools";
 import styles from "./review-boards.module.css";
@@ -121,14 +122,6 @@ function toggle(list: string[], value: string): string[] {
 
 function formatDate(ms: number): string {
   return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-}
-
-// extractBrand pulls the brand out of the item name but leaves the name intact,
-// so rendering both prints "Kohler Kohler Purist Basin Faucet". The brand is
-// shown in its own weight; the name drops the prefix it duplicates.
-function withoutBrandPrefix(name: string, brand: string): string {
-  if (!brand || !name.toLowerCase().startsWith(brand.toLowerCase())) return name;
-  return name.slice(brand.length).trim();
 }
 
 export function ReviewBoards() {
@@ -370,7 +363,7 @@ export function ReviewBoards() {
       <RouteReady path="/review-boards" />
       <SiteNavigation active={null} />
 
-      <div className={styles.shell}>
+      <div className={`${styles.shell} ${view === "boards" ? styles.shellWide : ""}`}>
         <aside className={styles.rail} aria-label="Stored projects">
           <div className={styles.railHead}>
             <h2 className={styles.railTitle}>Projects</h2>
@@ -910,6 +903,12 @@ function GapsSection({
  * Empty until something is selected, and that emptiness is the honest state: a
  * board is a set of reference images, and until a person picks them there is no
  * board, only a plan for one.
+ *
+ * Utilitarian on purpose: a card shows only its own reference photos — no item
+ * names, no slot list, no controls — so a wall of boards stays scannable by
+ * sight. Everything else (settings, items, the render preview and its
+ * dithering, same as the generator page) lives behind the card, in the drawer
+ * that opens beside it.
  */
 function BuiltBoards({
   built,
@@ -924,6 +923,8 @@ function BuiltBoards({
   onSaved: () => Promise<void>;
   onRemoveRow: (rowId: string) => Promise<void>;
 }) {
+  const [openBoardId, setOpenBoardId] = useState<string | null>(null);
+
   if (!built || !built.boards.length) {
     return (
       <p className={styles.placeholder}>
@@ -932,40 +933,48 @@ function BuiltBoards({
       </p>
     );
   }
+
+  const openBoard = built.boards.find((board) => board.id === openBoardId) ?? null;
+
   return (
-    <div className={styles.boards}>
-      {built.boards.map((board) => (
-        <article key={board.id} className={styles.board}>
-          <header className={styles.boardHead}>
-            <span className={styles.boardRoom}>
-              {board.unitType} · {board.roomLabel}
-            </span>
-            <span className={styles.boardKind}>{board.kindLabel}</span>
-            <span className={styles.boardFill}>{board.items.length} references</span>
-          </header>
-          <ul className={styles.builtGrid}>
-            {board.items.map((item) => (
-              <li key={item.slotId} className={styles.builtCell}>
-                {/* eslint-disable-next-line @next/next/no-img-element -- see SlotPhotos */}
-                <img className={styles.builtImage} src={item.images[0]} alt="" loading="lazy" />
-                <span className={styles.builtName}>
-                  {item.brand ? <strong>{item.brand}</strong> : null}
-                  {item.brand ? " " : ""}
-                  {withoutBrandPrefix(item.name, item.brand)}
-                </span>
-                <span className={styles.builtSlot}>{item.slotId}</span>
-              </li>
-            ))}
-          </ul>
-          <BoardWorkflow
-            projectId={projectId}
-            board={board}
-            renders={renders.filter((render) => render.boardId === board.id)}
-            onSaved={onSaved}
-            onRemoveRow={onRemoveRow}
-          />
-        </article>
-      ))}
-    </div>
+    <>
+      <div className={styles.builtBoardGrid}>
+        {built.boards.map((board) => {
+          const images = board.items.map((item) => item.images[0]).filter(Boolean).slice(0, 6);
+          return (
+            <button
+              key={board.id}
+              type="button"
+              className={styles.builtBoardCard}
+              onClick={() => setOpenBoardId(board.id)}
+            >
+              <span className={styles.builtBoardMosaic} data-count={Math.min(images.length, 6) || 1}>
+                {images.length ? (
+                  images.map((src, index) => (
+                    // eslint-disable-next-line @next/next/no-img-element -- see SlotPhotos
+                    <img key={`${board.id}-${index}`} src={src} alt="" loading="lazy" />
+                  ))
+                ) : (
+                  <span className={styles.previewEmpty}>No photos yet</span>
+                )}
+              </span>
+              <span className={styles.builtBoardCaption}>
+                {board.unitType} · {board.roomLabel}
+                <strong>{board.kindLabel}</strong>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <BoardDrawer
+        projectId={projectId}
+        board={openBoard}
+        renders={openBoard ? renders.filter((render) => render.boardId === openBoard.id) : []}
+        onSaved={onSaved}
+        onRemoveRow={onRemoveRow}
+        onClose={() => setOpenBoardId(null)}
+      />
+    </>
   );
 }

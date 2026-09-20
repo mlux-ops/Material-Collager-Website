@@ -49,6 +49,15 @@
   align-items: start;
 }
 
+/* Built boards is a utilitarian card wall, not a reading layout: it earns the
+   width a centred, capped shell would otherwise deny it. The rail stays (still
+   the way to switch projects) — only the cap and the outer gutters go. */
+.shellWide {
+  max-width: none;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
 /* --- Projects rail ------------------------------------------------------ */
 
 .rail {
@@ -800,35 +809,87 @@
   color: var(--ink);
 }
 
-.builtGrid {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* Image-only cards: the card shows the board's own reference photos and
+   nothing else. Everything text/controls lives in the drawer BoardDrawer
+   opens on click (see .drawer below). */
+.builtBoardGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 3px;
 }
 
-.builtCell {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.builtImage {
+.builtBoardCard {
   display: block;
+  position: relative;
   width: 100%;
-  aspect-ratio: 1;
-  object-fit: contain;
+  padding: 0;
   border: 1px solid var(--line);
   background: var(--surface-quiet);
+  cursor: pointer;
+  text-align: left;
 }
 
-.builtName {
+.builtBoardCard:hover,
+.builtBoardCard:focus-visible {
+  border-color: var(--ink);
+  outline: none;
+}
+
+.builtBoardMosaic {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1px;
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: var(--line);
+}
+
+.builtBoardMosaic[data-count="2"] {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.builtBoardMosaic[data-count="3"],
+.builtBoardMosaic[data-count="4"] {
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+}
+
+.builtBoardMosaic[data-count="5"],
+.builtBoardMosaic[data-count="6"] {
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+}
+
+.builtBoardMosaic img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.builtBoardCaption {
+  display: block;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 5px 7px;
+  background: rgba(255, 255, 255, 0.9);
+  border-top: 1px solid var(--line);
+  font-size: 8.4px;
+  font-weight: 500;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.builtBoardCaption strong {
+  display: block;
   font-size: 10px;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
+  font-weight: 650;
+  letter-spacing: normal;
+  text-transform: none;
+  margin-top: 2px;
 }
 
 .builtSlot {
@@ -837,14 +898,130 @@
   color: var(--muted);
 }
 
-/* --- Board workflow ----------------------------------------------------- */
+/* --- Board workflow: settings | items | preview, same split as the
+   generator page's builder-surface/references-surface/output-surface (see
+   .generator-shell .workbench in globals.css) — measured off the running
+   generator rather than re-derived, per AGENTS.md. Each pane scrolls on its
+   own so a long item list never pushes the preview or the settings off. --- */
 
-.workflow {
+.workflowGrid {
+  display: grid;
+  grid-template-columns: minmax(170px, 210px) minmax(220px, 1fr) minmax(300px, 420px);
+  gap: 0;
+  height: 100%;
+  min-height: 0;
+}
+
+.workflowSettings,
+.workflowItems,
+.workflowPreview {
   display: flex;
   flex-direction: column;
-  gap: 9px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 14px;
+}
+
+.workflowSettings {
+  padding-left: 0;
+  border-right: 1px solid var(--line);
+}
+
+.workflowPreview {
+  padding-right: 0;
+  border-left: 1px solid var(--line);
+}
+
+@media (max-width: 900px) {
+  .workflowGrid {
+    grid-template-columns: 1fr;
+    height: auto;
+    overflow-y: visible;
+  }
+
+  .workflowSettings,
+  .workflowItems,
+  .workflowPreview {
+    border: 0;
+    padding: 0 0 14px;
+    overflow-y: visible;
+  }
+}
+
+.itemGrid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.itemCard {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.itemCard:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.itemImage {
+  display: block;
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  background: var(--surface-quiet);
+}
+
+.itemBody {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Same dither-reveal treatment as the generator page's result-stage/
+   dither-stage (app/generator/page.tsx via DitherReveal): an aspect-boxed
+   frame that holds whatever the stage is showing — the sample/hero photo, the
+   working hold, or the finished render. */
+.previewStage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border: 1px solid var(--line);
+  background: var(--surface-quiet);
+  overflow: hidden;
+}
+
+.previewDither {
+  width: 100%;
+  height: 100%;
+}
+
+.previewImage {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.previewEmpty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 8px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--muted);
 }
 
 .textarea {
@@ -876,22 +1053,6 @@
   font-weight: 650;
 }
 
-.noteList {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.noteRow {
-  display: grid;
-  grid-template-columns: minmax(86px, auto) minmax(0, 1fr) auto;
-  gap: 7px;
-  align-items: center;
-}
-
 .noteLabel {
   color: var(--muted);
   overflow-wrap: anywhere;
@@ -905,13 +1066,6 @@
   background: var(--surface-quiet);
   color: var(--ink);
   font-size: 10px;
-}
-
-.workflowFoot {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
 }
 
 .workflowMeta {
@@ -1005,6 +1159,85 @@
 
 .dialog::backdrop {
   background: rgba(0, 0, 0, 0.35);
+}
+
+/* The board drawer: same <dialog> idiom as .dialog above (see BoardDrawer.tsx
+   and AddRowDialog.tsx), pinned to the left edge instead of centred, and wide
+   enough to hold the settings/items/preview split. showModal() flips display
+   from none to the top layer, which is enough to replay the slide-in
+   animation on every open — no JS-driven remount needed. Close is instant,
+   same as .dialog: only the open direction is animated. */
+.drawer {
+  position: fixed;
+  inset: 0 auto 0 0;
+  margin: 0;
+  width: 75vw;
+  max-width: none;
+  height: 100dvh;
+  max-height: 100dvh;
+  padding: 0;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+/* display must stay scoped to [open]: dialog:not([open]) is display:none in
+   the UA stylesheet, and an unscoped `display` here (an author rule) would
+   beat that default and leave the closed dialog painted — and, worse,
+   sitting over the page intercepting clicks on whatever is under it. */
+.drawer[open] {
+  display: flex;
+  flex-direction: column;
+  animation: drawerSlideIn var(--duration-slow, 400ms) var(--ease-smooth-out, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+.drawer::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+@keyframes drawerSlideIn {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer[open] {
+    animation: none;
+  }
+}
+
+.drawerHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+
+.drawerTitle {
+  margin: 3px 0 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.drawerBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 14px 16px;
+}
+
+@media (max-width: 900px) {
+  .drawer {
+    width: 100vw;
+  }
 }
 
 .dialogForm {
