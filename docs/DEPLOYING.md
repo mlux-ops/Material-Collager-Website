@@ -31,17 +31,27 @@ If you ever rename the database or bucket, update `wrangler.jsonc`
 Push to `main` (or run the **Deploy to Cloudflare** workflow manually from the
 Actions tab). The worker `material-collager` appears under Workers & Pages.
 
-### 4. Runtime secret
+### 4. Runtime secrets
 
 Dashboard → Workers & Pages → `material-collager` → Settings → Variables and
-Secrets → add secret **`OPENAI_API_KEY`**. (Or locally:
-`npx wrangler secret put OPENAI_API_KEY`.) Without it, generation only works
+Secrets → **Add** → type **Secret** → `OPENAI_API_KEY` → then press **Deploy**
+(an entry that is only saved is staged, not live). Or locally:
+`npx wrangler secret put OPENAI_API_KEY`. Without it, generation only works
 when a caller supplies a key in Settings on the generator page.
 
 Add **`SMARTSHEET_ACCESS_TOKEN`** the same way if `/review-boards` should read
 project sheets directly. Without it the board still works — projects can be
 seeded from a tracked definition (`npm run autoboard:seed-web`) and photos
-uploaded by hand — but **Read sheet** fails with a message naming the secret.
+uploaded by hand — but **Read sheet** fails with a message naming the secret
+and listing the bindings the Worker does see, so a value that never reached
+the Worker is visible at a glance.
+
+`wrangler.jsonc` sets `keep_vars: true` so a variable added in the dashboard
+survives the next deploy. Without it wrangler treats the config file as the
+whole truth for variables and deletes a dashboard entry of type **Text** on
+every push to `main`; type **Secret** survives either way, and is the right
+type for a token. `npx wrangler secret list` shows the secrets actually stored
+on the Worker (names only — values are write-only).
 
 ### 5. Domain
 

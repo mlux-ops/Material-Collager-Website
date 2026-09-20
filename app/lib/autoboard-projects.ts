@@ -97,15 +97,22 @@ async function initProjectStorage(): Promise<D1Database> {
   return DB;
 }
 
+// Read the same two ways OPENAI_API_KEY is: the env object, and process.env,
+// which nodejs_compat fills from the Worker's string bindings. When neither has
+// it, the error lists the bindings the Worker DOES see — a value staged in the
+// dashboard without pressing Deploy, added to a different Worker, or entered
+// under a misspelt name each shows up as a list that lacks it.
 export function smartsheetToken(): string {
-  const token = runtime().SMARTSHEET_ACCESS_TOKEN;
-  if (!token) {
-    throw new Error(
-      "SMARTSHEET_ACCESS_TOKEN is not set. Add it with `wrangler secret put SMARTSHEET_ACCESS_TOKEN`, " +
-        "or to .dev.vars for local development.",
-    );
-  }
-  return token;
+  const token = runtime().SMARTSHEET_ACCESS_TOKEN?.trim() || process.env.SMARTSHEET_ACCESS_TOKEN?.trim();
+  if (token) return token;
+  const visible = Object.keys(runtime()).sort();
+  throw new Error(
+    "SMARTSHEET_ACCESS_TOKEN is not set on this Worker" +
+      (visible.length ? ` (it sees: ${visible.join(", ")})` : " (it sees no bindings at all)") +
+      ". Add it in the Cloudflare dashboard — Workers & Pages → the Worker → Settings → Variables and Secrets → " +
+      "Add, type Secret — and press Deploy; or run `npx wrangler secret put SMARTSHEET_ACCESS_TOKEN` " +
+      "(`npx wrangler secret list` shows what is stored). For local dev, put it in .dev.vars.",
+  );
 }
 
 export function projectId(): string {

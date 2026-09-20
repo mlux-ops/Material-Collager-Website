@@ -49,6 +49,12 @@
     "CF_ACCESS_AUD": "e5e3fd974be8176910f6fc29cbe180b7ebc73d08b2f3475138567f694b559e15"
   },
 
+  // Secrets (OPENAI_API_KEY, SMARTSHEET_ACCESS_TOKEN) are managed in the
+  // dashboard, not here. Without this flag wrangler treats this file as the
+  // whole truth for variables and DELETES a Text-type variable added in the
+  // dashboard on every deploy; Secret-type entries survive either way.
+  "keep_vars": true,
+
   "observability": {
     "enabled": true
   }
