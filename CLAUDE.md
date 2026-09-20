@@ -173,3 +173,7 @@ localhost to mint a JWT. Blank both in `.dev.vars`, which overrides
   apply to `/v1/images/edits`.
 - `package.json` scripts use Bash-style globs while `README.md` documents PowerShell
   continuations. Match the shell you are actually in — this repo mixes both.
+- `wrangler.jsonc` sets `keep_vars: true` so variables added in the Cloudflare
+  dashboard survive `wrangler deploy`. Without it a Text-type dashboard variable
+  is deleted on every push to `main` (secrets are kept either way) — which is how
+  a token that was "put in Cloudflare" can be gone after the next deploy.
