@@ -64,6 +64,12 @@ export type BoardsPreview = {
   conflicts: (SlotConflict & RoomScope)[];
   unmapped: (RoomScope & { rowId: string; itemName: string; sku: string; costCode: string })[];
   skippedRooms: (RoomScope & { itemCount: number })[];
+  /**
+   * The rows behind skippedRooms' counts, individually — so one can be pinned
+   * to the lighting board (a fixture in a room with no board of its own is
+   * otherwise invisible here, only counted) or removed.
+   */
+  skippedRoomItems: (RoomScope & { rowId: string; itemName: string; sku: string; costCode: string })[];
 };
 
 export function previewBoards(rows: LibraryRow[], options: PreviewOptions = {}): BoardsPreview {
@@ -75,6 +81,7 @@ export function previewBoards(rows: LibraryRow[], options: PreviewOptions = {}):
     conflicts: [],
     unmapped: [],
     skippedRooms: [],
+    skippedRoomItems: [],
   };
 
   // The unit-wide lighting boards, first, for the same reason buildBoards
@@ -85,7 +92,7 @@ export function previewBoards(rows: LibraryRow[], options: PreviewOptions = {}):
   // would repeat for every unit type in the sheet.
   const lightingRowIds = new Set<string>();
   for (const unit of groupRowsByUnit(rows).values()) {
-    const { fixtures, substitutes } = lightingFixtures(unit.rows);
+    const { fixtures, substitutes } = lightingFixtures(unit.rows, pins);
     preview.substitutes.push(
       ...substitutes.map((row) => ({
         slotId: "light_fixture",
@@ -118,6 +125,7 @@ export function previewBoards(rows: LibraryRow[], options: PreviewOptions = {}):
         reference: fixture.row.reference,
       };
       if (tier) entry.tier = tier;
+      if (pins?.get(fixture.row.rowId)?.collageType === "lighting_collage") entry.pinned = true;
       return entry;
     });
     preview.boards.push({
@@ -137,7 +145,12 @@ export function previewBoards(rows: LibraryRow[], options: PreviewOptions = {}):
     const boardTypes = boardTypesForRoom(group.roomLabel);
     if (!boardTypes.length) {
       const stranded = group.rows.filter((row) => !lightingRowIds.has(row.rowId));
-      if (stranded.length) preview.skippedRooms.push({ ...scope, itemCount: stranded.length });
+      if (stranded.length) {
+        preview.skippedRooms.push({ ...scope, itemCount: stranded.length });
+        preview.skippedRoomItems.push(
+          ...stranded.map((row) => ({ ...scope, rowId: row.rowId, itemName: row.itemName, sku: row.sku, costCode: row.costCode })),
+        );
+      }
       continue;
     }
     preview.rooms.push(scope);

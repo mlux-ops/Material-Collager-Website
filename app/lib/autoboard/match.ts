@@ -421,12 +421,21 @@ export function lightingSlotId(row: LibraryRow): string {
 // fixture's role names its room, since the board spans them all. Substitutes
 // are held back exactly as assignSlots holds them back, and returned so the
 // caller can report them.
-export function lightingFixtures(rows: LibraryRow[]): { fixtures: LightingFixture[]; substitutes: LibraryRow[] } {
+export function lightingFixtures(
+  rows: LibraryRow[],
+  pins?: Map<string, SlotPin>,
+): { fixtures: LightingFixture[]; substitutes: LibraryRow[] } {
   const substitutes: LibraryRow[] = [];
   const ranked: { row: LibraryRow; rank: number; role: string; order: number }[] = [];
   rows.forEach((row, order) => {
-    if (!isLightFixture(row)) return;
-    if (isSubstitute(row)) {
+    // A pin is the person's decision, the same override it is everywhere
+    // else (assignSlots): it places the row even when isLightFixture's name
+    // and cost-code rules miss it — the case that matters, since a fixture
+    // in a room with no board of its own (a living room) has no other way
+    // onto any board at all — and it overrides the substitute hold-back too.
+    const pinned = pins?.get(row.rowId)?.collageType === LIGHTING_TYPE;
+    if (!isLightFixture(row) && !pinned) return;
+    if (isSubstitute(row) && !pinned) {
       substitutes.push(row);
       return;
     }
@@ -474,11 +483,11 @@ function buildLightingBoards(
   gaps: Gaps,
   lightingRowIds: Set<string>,
 ): Board[] {
-  const { resolveImages, imagesPerItem = 1, minSlots = 2 } = options;
+  const { resolveImages, imagesPerItem = 1, minSlots = 2, pins } = options;
   const boards: Board[] = [];
   for (const unit of groupRowsByUnit(rows).values()) {
     const scope: BoardScope = { unitType: unit.unitType, roomLabel: LIGHTING_SCOPE_LABEL, collageType: LIGHTING_TYPE };
-    const { fixtures, substitutes } = lightingFixtures(unit.rows);
+    const { fixtures, substitutes } = lightingFixtures(unit.rows, pins);
     gaps.substituteCandidates?.push(
       ...substitutes.map((row) => ({
         slotId: "light_fixture",

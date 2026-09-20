@@ -204,6 +204,16 @@ including rooms no board type maps to, such as a living room. The web preview
   the cap are recorded in `unfilledSlots` with their `rowId` and `itemName`.
 - `ITEM_PRESETS.lighting_collage` exists for the manual generator (every slot
   optional) and for kind naming; the autoboard core never fills those slots.
+- **`isLightFixture` has false negatives, and a pin (below) is the fix**: an
+  unusually named or uncoded row, or a fixture in a room `boardTypesForRoom`
+  maps to nothing (a living room, a foyer — where lighting is often the ONLY
+  finish category and is otherwise invisible, only counted in
+  `previewBoards`' `skippedRooms`), needs a person to say so. `lightingFixtures`
+  takes the same `pins` map every other board honours; a row pinned to
+  `lighting_collage` is placed on the unit's board regardless of what
+  `isLightFixture` and the substitute rule say, and `previewBoards` lists every
+  such stranded row individually in `skippedRoomItems` — not just a `skippedRooms`
+  count — precisely so there is something to pin.
 
 ## Edits on top of the sheet
 
@@ -218,10 +228,16 @@ D1 table `autoboard_row_edits`), so a refresh keeps them:
   another slot on that board type; a pin on a different board type has no
   effect on this one; a pinned substitute is placed (the pin is the decision).
   Two rows pinned to one slot: source order wins, the other is an alternate. A
-  pin naming a slot the board type lacks is ignored; `validatePin` refuses it
-  at the API, as it refuses the lighting board, which has no slots to pin to.
-  The preview marks a pinned slot `pinned: true`. The CLI passes no pins and
-  is unchanged.
+  pin naming a slot the board type lacks is ignored. The preview marks a
+  pinned slot `pinned: true`. The CLI passes no pins and is unchanged.
+  The lighting board is the one exception to "one slot of one board type": it
+  has no preset slots (every fixture gets its own, keyed by row id), so a pin
+  there means "place this row regardless of `isLightFixture`," not "assign it
+  to slot X" — `validatePin` accepts `{ collageType: "lighting_collage" }` and
+  normalizes any `slotId` to the placeholder `"light_fixture"` rather than
+  validating it against a list. `pinChoices` always offers this option,
+  independent of the room's own board types (even `pinChoices([])`, a room
+  with none), because the lighting board spans every room in the unit.
 - **Remove** (`excluded`): the row leaves every board and every gap list; the
   snapshot taken at removal is what the Removed list shows, and Restore forgets
   the exclusion. Removal never touches the sheet.

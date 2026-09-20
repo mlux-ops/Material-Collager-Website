@@ -136,23 +136,40 @@ test("manualRow normalizes like the sheet reader and refuses a row no board coul
   assert.throws(() => manualRow({ itemName: "X", unitType: "Penthouse" }), /room/);
 });
 
-test("validatePin accepts a real slot and refuses unknown types, unknown slots and the lighting board", () => {
+test("validatePin accepts a real slot, normalizes a lighting pin, and refuses unknown types and slots", () => {
   assert.deepEqual(validatePin({ collageType: "bathroom_fixture_collage", slotId: "countertop" }), {
     collageType: "bathroom_fixture_collage",
     slotId: "countertop",
   });
+  // The lighting board has no preset slots to validate against — any slotId
+  // normalizes to the one placeholder, since a lighting pin means "force this
+  // row onto the board," not "assign it to slot X."
+  assert.deepEqual(validatePin({ collageType: "lighting_collage", slotId: "whatever" }), {
+    collageType: "lighting_collage",
+    slotId: "light_fixture",
+  });
+  assert.deepEqual(validatePin({ collageType: "lighting_collage" }), {
+    collageType: "lighting_collage",
+    slotId: "light_fixture",
+  });
   assert.throws(() => validatePin({ collageType: "garage_collage", slotId: "x" }), /not a board type/);
   assert.throws(() => validatePin({ collageType: "bathroom_fixture_collage", slotId: "wall_tile" }), /not a slot on the bathroom_fixture_collage board/);
-  assert.throws(() => validatePin({ collageType: "lighting_collage", slotId: "light_1" }), /lighting board/);
   assert.throws(() => validatePin("countertop"), /A pin is/);
 });
 
-test("pinChoices lists every preset slot of the room's board types, minus the lighting board", () => {
+test("pinChoices lists every preset slot of the room's board types, plus a standing way to force the lighting board", () => {
   const choices = pinChoices(["bathroom_fixture_collage", "bathroom_tile_collage", "lighting_collage"]);
   assert.ok(choices.some((choice) => choice.collageType === "bathroom_fixture_collage" && choice.slotId === "vanity_faucet"));
   assert.ok(choices.some((choice) => choice.collageType === "bathroom_tile_collage" && choice.slotId === "wall_tile"));
-  assert.ok(!choices.some((choice) => choice.collageType === "lighting_collage"));
+  const lighting = choices.filter((choice) => choice.collageType === "lighting_collage");
+  assert.equal(lighting.length, 1);
+  assert.equal(lighting[0].slotId, "light_fixture");
   assert.ok(choices.every((choice) => choice.role));
+});
+
+test("pinChoices offers the lighting board even for a room with no board type of its own", () => {
+  const choices = pinChoices([]);
+  assert.deepEqual(choices.map((choice) => choice.collageType), ["lighting_collage"]);
 });
 
 // ---------------------------------------------------------------------------

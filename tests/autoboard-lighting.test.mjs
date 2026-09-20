@@ -205,6 +205,65 @@ test("preview and build agree on the lighting boards, and the preview leaves not
   assert.deepEqual(preview.substitutes.filter((entry) => entry.rowId === "8").map((entry) => entry.collageType), ["lighting_collage"]);
 });
 
+// ---------------------------------------------------------------------------
+// A pin overrides isLightFixture and the substitute hold-back: the one way
+// to place a fixture the name/cost-code rules missed, or one that lives in a
+// room (a living room, a foyer) with no board of its own to be "unmapped" on.
+// ---------------------------------------------------------------------------
+
+test("a pin forces a row onto the lighting board even when isLightFixture would exclude it", () => {
+  const pins = new Map([["9", { collageType: "lighting_collage", slotId: "light_fixture" }]]);
+  const { fixtures } = lightingFixtures(ROWS.filter((entry) => entry.unitType === "Penthouse"), pins);
+  // row 9 is "Sofa" — not a fixture by any rule; only the pin puts it here.
+  assert.ok(fixtures.some((fixture) => fixture.row.rowId === "9"));
+});
+
+test("a pin places a lighting substitute on the board too, the same override a pin is everywhere else", () => {
+  const pins = new Map([["8", { collageType: "lighting_collage", slotId: "light_fixture" }]]);
+  const { fixtures, substitutes } = lightingFixtures(ROWS.filter((entry) => entry.unitType === "Penthouse"), pins);
+  assert.ok(fixtures.some((fixture) => fixture.row.rowId === "8"));
+  assert.ok(!substitutes.some((entry) => entry.rowId === "8"));
+});
+
+test("an unpinned row is unaffected: a pin on another row does not loosen isLightFixture generally", () => {
+  const pins = new Map([["9", { collageType: "lighting_collage", slotId: "light_fixture" }]]);
+  const { fixtures } = lightingFixtures(ROWS.filter((entry) => entry.unitType === "Penthouse"), pins);
+  assert.ok(!fixtures.some((fixture) => fixture.row.rowId === "6"), "the grout, still not a fixture");
+});
+
+test("buildBoards honours a lighting pin end to end, and the row leaves the room's stranded count", () => {
+  const pins = new Map([["9", { collageType: "lighting_collage", slotId: "light_fixture" }]]);
+  const gaps = emptyGaps();
+  const { boards } = buildBoards(ROWS, { resolveImages: images, gaps, pins });
+  const board = boards.find((entry) => entry.id === "penthouse-all-rooms-lighting");
+  const item = board.items.find((entry) => entry.rowId === "9");
+  assert.ok(item);
+  assert.equal(item.name, "Sofa");
+  // the sofa was Living Room's only stranded row; pinned, nothing is left to skip
+  assert.deepEqual(gaps.skippedRooms.filter((gap) => gap.roomLabel === "Living Room"), []);
+});
+
+test("previewBoards lists a stranded row individually, and a lighting pin removes it from that list and places it on the board", () => {
+  const unpinned = previewBoards(ROWS);
+  const stranded = unpinned.skippedRoomItems.filter((entry) => entry.roomLabel === "Living Room");
+  assert.deepEqual(stranded.map((entry) => entry.rowId), ["9"]);
+  assert.deepEqual(
+    unpinned.skippedRooms.filter((entry) => entry.roomLabel === "Living Room").map((entry) => entry.itemCount),
+    [1],
+  );
+
+  const pins = new Map([["9", { collageType: "lighting_collage", slotId: "light_fixture" }]]);
+  const pinned = previewBoards(ROWS, { pins });
+  assert.deepEqual(pinned.skippedRoomItems.filter((entry) => entry.roomLabel === "Living Room"), []);
+  assert.deepEqual(pinned.skippedRooms.filter((entry) => entry.roomLabel === "Living Room"), []);
+  const board = pinned.boards.find((entry) => entry.id === "penthouse-all-rooms-lighting");
+  const slot = board.slots.find((entry) => entry.rowId === "9");
+  assert.ok(slot);
+  assert.equal(slot.pinned, true);
+  // an auto-matched fixture's slot is not marked pinned just because it is on the board
+  assert.equal(board.slots.find((entry) => entry.rowId === "1").pinned, undefined);
+});
+
 test("a sheet with no fixtures at all gets no lighting preview and no lighting board", () => {
   const rows = [
     row({ rowId: "1", roomLabel: "Bath 2", roomOriginal: "Bath 2", itemName: "Brizo Odin Lavatory Faucet", costCode: "11 45 Plumbing Fixtures M" }),
