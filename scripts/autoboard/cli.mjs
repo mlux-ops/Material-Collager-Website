@@ -364,6 +364,7 @@ function gapsMarkdown(runId, source, gaps) {
   const sections = [
     ["Rows with blank Unit Type (excluded)", gaps.blankUnitRows, (gap) => `- row ${gap.rowId}: ${gap.itemName} (SKU ${gap.sku || "—"})`],
     ["Rows with blank Room Type (excluded)", gaps.blankRoomRows, (gap) => `- row ${gap.rowId}: ${gap.itemName} (SKU ${gap.sku || "—"})`],
+    ["Rows flagged AGENT IGNORE in the sheet (excluded)", gaps.ignoredRows ?? [], (gap) => `- row ${gap.rowId}: ${gap.itemName} (SKU ${gap.sku || "—"})`],
     ["Rooms with no board type (skipped)", gaps.skippedRooms, (gap) => `- ${gap.unitType} / ${gap.roomLabel}: ${gap.itemCount} item(s) — ${gap.reason}`],
     ["Boards skipped", gaps.skippedBoards, (gap) => `- ${gap.unitType} / ${gap.roomLabel} / ${gap.collageType}: ${gap.reason}`],
     ["Slot conflicts (first match picked, alternates listed)", gaps.slotConflicts, (gap) =>

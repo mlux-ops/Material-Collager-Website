@@ -107,6 +107,8 @@ export type TileAssignment = {
 export type Gaps = {
   blankUnitRows: unknown[];
   blankRoomRows: unknown[];
+  /** Rows the sheet flags AGENT IGNORE. Excluded before matching, and counted here so the exclusion is visible. */
+  ignoredRows?: unknown[];
   substituteCandidates?: unknown[];
   unmappedItems: unknown[];
   imagelessItems: unknown[];

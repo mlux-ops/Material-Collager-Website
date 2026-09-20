@@ -135,7 +135,7 @@ const TILE_GATE_SLOTS = ["wall_tile", "floor_tile", "accent_tile"];
 export function boardTypesForRoom(roomLabel: unknown): CollageType[] {
   const lower = normalizeRoomLabel(roomLabel).toLowerCase();
   if (/^kitchen$/.test(lower)) return ["kitchen_material_palette", "appliance_collage"];
-  if (/^(bath\b|primary bath|powder)/.test(lower)) return ["bathroom_fixture_collage", "bathroom_tile_collage"];
+  if (/^(bath\b|primary bath|secondary bath|powder)/.test(lower)) return ["bathroom_fixture_collage", "bathroom_tile_collage"];
   return [];
 }
 
