@@ -27,6 +27,7 @@ import type {
   LibraryRow,
   SlotAssignment,
   SlotConflict,
+  SlotPin,
   SubstituteRecord,
 } from "./types.ts";
 
@@ -278,11 +279,29 @@ export function isSubstitute(row: LibraryRow): boolean {
 // recorded as alternates but stay available for later slots. Substitutes are
 // held back and returned separately, so a caller can report which slot each one
 // was kept out of.
+//
+// `pins` are a person's explicit placements (see SlotPin). A row pinned to a
+// slot on THIS board type is a candidate for that slot only, ahead of every
+// rule match, and never for another slot here; a pin on a different board type
+// has no effect on this one. A pin is a decision, so it also overrides the
+// substitute hold-back and the name rules: the person chose that row for that
+// slot, whatever the row is called.
 export function assignSlots(
   rows: LibraryRow[],
   collageType: CollageType,
+  pins?: Map<string, SlotPin>,
 ): { filled: SlotAssignment[]; unmapped: LibraryRow[]; conflicts: SlotConflict[]; substitutes: SubstituteRecord[] } {
   const presets = ITEM_PRESETS[collageType] ?? [];
+  const presetIds = new Set(presets.map((preset) => preset.id));
+  const pinnedTo = new Map<string, LibraryRow[]>();
+  const pinnedRowIds = new Set<string>();
+  for (const row of rows) {
+    const pin = pins?.get(row.rowId);
+    if (!pin || pin.collageType !== collageType || !presetIds.has(pin.slotId)) continue;
+    pinnedRowIds.add(row.rowId);
+    if (!pinnedTo.has(pin.slotId)) pinnedTo.set(pin.slotId, []);
+    pinnedTo.get(pin.slotId)!.push(row);
+  }
   const assignedRowIds = new Set<string>();
   const filled: SlotAssignment[] = [];
   const conflicts: SlotConflict[] = [];
@@ -290,8 +309,11 @@ export function assignSlots(
   const heldBack = new Set<string>();
   for (const preset of presets) {
     const candidates: LibraryRow[] = [];
+    for (const row of pinnedTo.get(preset.id) ?? []) {
+      if (!assignedRowIds.has(row.rowId)) candidates.push(row);
+    }
     for (const row of rows) {
-      if (assignedRowIds.has(row.rowId) || !slotMatches(collageType, preset.id, row)) continue;
+      if (pinnedRowIds.has(row.rowId) || assignedRowIds.has(row.rowId) || !slotMatches(collageType, preset.id, row)) continue;
       if (isSubstitute(row)) {
         substitutes.push({ slotId: preset.id, collageType, rowId: row.rowId, itemName: row.itemName, sku: row.sku });
         heldBack.add(row.rowId);
@@ -542,6 +564,7 @@ export function buildBoards(rows: LibraryRow[], options: BuildBoardsOptions): { 
     // gap, never a guess.
     tileAssignments = new Map(),
     tileIndex = new Map(),
+    pins,
   } = options;
 
   const roomGroups = groupRowsByRoom(rows);
@@ -573,7 +596,7 @@ export function buildBoards(rows: LibraryRow[], options: BuildBoardsOptions): { 
     // it alone and no row appears in two sections of gaps.md.
     const heldBackRowIds = new Set<string>();
     for (const collageType of boardTypes) {
-      const { filled, conflicts, substitutes } = assignSlots(group.rows, collageType);
+      const { filled, conflicts, substitutes } = assignSlots(group.rows, collageType, pins);
       gaps.slotConflicts.push(
         ...conflicts.map((conflict) => ({ ...conflict, unitType: group.unitType, roomLabel: group.roomLabel })),
       );

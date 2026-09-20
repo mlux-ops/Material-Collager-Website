@@ -1,4 +1,4 @@
-import { createProject, createProjectFromRows, listProjects } from "@/app/lib/autoboard-projects";
+import { createBlankProject, createProject, createProjectFromRows, listProjects } from "@/app/lib/autoboard-projects";
 import { jsonError, readJsonBody, requireSheetId, requireStringList } from "@/app/lib/autoboard-http";
 
 export const runtime = "edge";
@@ -20,7 +20,14 @@ export async function POST(request: Request) {
       rooms?: unknown;
       rows?: unknown;
       source?: unknown;
+      blank?: unknown;
     }>(request);
+
+    // Nothing in it yet: rows are added by hand afterwards.
+    if (body.blank === true) {
+      const blank = await createBlankProject({ name: String(body.name ?? "").trim() });
+      return Response.json({ ok: true, project: blank }, { status: 201 });
+    }
 
     // Rows supplied directly: a tracked project definition, which has no
     // Smartsheet of its own. See scripts/autoboard/seed-web-project.mjs.
