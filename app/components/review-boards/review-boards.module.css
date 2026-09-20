@@ -689,12 +689,18 @@
 }
 
 .photoAction {
+  display: inline-flex;
+  align-items: center;
   min-height: 26px;
   padding: 4px 8px;
   border: 1px solid var(--line);
   background: var(--surface-quiet);
   color: var(--muted);
   cursor: pointer;
+  /* Also used as an <a> (Open/Save on a render) alongside the plain
+     <button> uses -- a no-op for buttons, drops the browser's default
+     link underline for anchors. */
+  text-decoration: none;
 }
 
 .photoAction:hover:not(:disabled) {

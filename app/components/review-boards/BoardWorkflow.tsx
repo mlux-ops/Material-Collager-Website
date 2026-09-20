@@ -49,6 +49,13 @@ export type BoardRender = {
   createdAt: number;
 };
 
+// A stable, readable name for a saved render: which board, which draft/final
+// pass, which of that pass's variants. The id's own randomness stays out of
+// it -- nothing here needs to be unique, only recognizable in a downloads folder.
+function renderFilename(boardId: string, render: BoardRender): string {
+  return `${boardId}-${render.kind}-${render.variant}.png`;
+}
+
 export type BuiltBoard = {
   id: string;
   title: string;
@@ -355,6 +362,21 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
           </span>
         </div>
 
+        {latestRender ? (
+          <div className={styles.workflowRow}>
+            <a className={styles.photoAction} href={latestRender.imageUrl} target="_blank" rel="noreferrer">
+              Open full size
+            </a>
+            <a
+              className={styles.photoAction}
+              href={latestRender.imageUrl}
+              download={renderFilename(board.id, latestRender)}
+            >
+              Download
+            </a>
+          </div>
+        ) : null}
+
         {renders.length ? (
           <ul className={styles.renderStrip}>
             {renders.map((render) => (
@@ -376,6 +398,12 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
                   </span>
                 </button>
                 <div className={styles.photoActions}>
+                  <a className={styles.photoAction} href={render.imageUrl} target="_blank" rel="noreferrer">
+                    Open
+                  </a>
+                  <a className={styles.photoAction} href={render.imageUrl} download={renderFilename(board.id, render)}>
+                    Save
+                  </a>
                   <button type="button" className={styles.photoAction} onClick={() => void setRenderStatus(render.id, "approved")}>
                     Approve
                   </button>
