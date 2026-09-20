@@ -392,6 +392,38 @@ export function groupRowsByRoom(rows: LibraryRow[]): Map<string, RoomGroup> {
 // `penthouse-all-rooms-lighting`.
 export const LIGHTING_SCOPE_LABEL = "All Rooms";
 
+// Good/Better/Best: the same tier prefix extractTier reads off an item's name
+// (see TIER_PREFIX_PATTERN), used here to split ONE unit's lighting board into
+// up to three — one per tier package — when the sheet actually differentiates
+// by tier. A fixture tagged for a tier is exclusive to that tier's board; an
+// untiered fixture has no alternate to swap in, so it is included on every
+// tier's board (each package has to be a complete lighting plan, not a partial
+// one). A unit with no tiered fixtures at all still gets one consolidated
+// board, exactly as before splitting existed — three identical boards would
+// be pure noise, and three times the render cost, for zero difference between
+// them.
+export const LIGHTING_TIERS = ["good", "better", "best"] as const;
+export type LightingTier = (typeof LIGHTING_TIERS)[number];
+
+export const LIGHTING_TIER_LABELS: Record<LightingTier, string> = { good: "Good", better: "Better", best: "Best" };
+
+// The lighting board's roomLabel for a given tier, or the untiered scope when
+// tier is omitted. boardIdFor slugifies this, so "All Rooms — Good" mints
+// `all-rooms-good` and stays distinct from the untiered `all-rooms`.
+export function lightingScopeLabel(tier?: LightingTier): string {
+  return tier ? `${LIGHTING_SCOPE_LABEL} — ${LIGHTING_TIER_LABELS[tier]}` : LIGHTING_SCOPE_LABEL;
+}
+
+// The tier boards to build for one unit's rows: all three, in order, if the
+// unit tags any light fixture with a tier at all; otherwise the single
+// untiered board (`[undefined]`). Exported so previewBoards makes the exact
+// same call buildBoards does — the two must never disagree on which tier
+// boards exist for a unit.
+export function lightingTiersFor(unitRows: LibraryRow[]): (LightingTier | undefined)[] {
+  const anyTiered = unitRows.some((row) => isLightFixture(row) && Boolean(extractTier(row.itemName).tier));
+  return anyTiered ? [...LIGHTING_TIERS] : [undefined];
+}
+
 export type UnitGroup = { unitType: string; rows: LibraryRow[] };
 
 export function groupRowsByUnit(rows: LibraryRow[]): Map<string, UnitGroup> {
@@ -421,9 +453,15 @@ export function lightingSlotId(row: LibraryRow): string {
 // fixture's role names its room, since the board spans them all. Substitutes
 // are held back exactly as assignSlots holds them back, and returned so the
 // caller can report them.
+//
+// `tier`, when given, narrows to one Good/Better/Best package: a fixture
+// tagged for a DIFFERENT tier is left out, and one tagged for no tier at all
+// is kept — it has no alternate to swap in for this package, so it belongs on
+// every one. Omit `tier` for the untiered, everything-together board.
 export function lightingFixtures(
   rows: LibraryRow[],
   pins?: Map<string, SlotPin>,
+  tier?: LightingTier,
 ): { fixtures: LightingFixture[]; substitutes: LibraryRow[] } {
   const substitutes: LibraryRow[] = [];
   const ranked: { row: LibraryRow; rank: number; role: string; order: number }[] = [];
@@ -438,6 +476,10 @@ export function lightingFixtures(
     if (isSubstitute(row) && !pinned) {
       substitutes.push(row);
       return;
+    }
+    if (tier) {
+      const rowTier = extractTier(row.itemName).tier;
+      if (rowTier && rowTier !== tier) return;
     }
     const kind = lightingKind(row);
     ranked.push({ row, rank: kind.rank, role: `${row.roomLabel} ${kind.role}`, order });
@@ -486,73 +528,84 @@ function buildLightingBoards(
   const { resolveImages, imagesPerItem = 1, minSlots = 2, pins } = options;
   const boards: Board[] = [];
   for (const unit of groupRowsByUnit(rows).values()) {
-    const scope: BoardScope = { unitType: unit.unitType, roomLabel: LIGHTING_SCOPE_LABEL, collageType: LIGHTING_TYPE };
-    const { fixtures, substitutes } = lightingFixtures(unit.rows, pins);
-    gaps.substituteCandidates?.push(
-      ...substitutes.map((row) => ({
-        slotId: "light_fixture",
-        collageType: LIGHTING_TYPE,
-        rowId: row.rowId,
-        itemName: row.itemName,
-        sku: row.sku,
-        unitType: unit.unitType,
-        roomLabel: row.roomLabel,
-      })),
-    );
-    for (const row of substitutes) lightingRowIds.add(row.rowId);
+    const tiers = lightingTiersFor(unit.rows);
+    for (const [tierIndex, tier] of tiers.entries()) {
+      const scopeLabel = lightingScopeLabel(tier);
+      const scope: BoardScope = { unitType: unit.unitType, roomLabel: scopeLabel, collageType: LIGHTING_TYPE };
+      const { fixtures, substitutes } = lightingFixtures(unit.rows, pins, tier);
 
-    const items: BoardItem[] = [];
-    for (const fixture of fixtures) {
-      lightingRowIds.add(fixture.row.rowId);
-      const images = resolveImages(fixture.row.rowId, fixture.row.sku).slice(0, Math.max(1, imagesPerItem));
-      if (!images.length) {
-        // The fixture's own room, not the board's scope label: the reviewer
-        // collecting the photo needs to know where the fixture is.
-        gaps.imagelessItems.push({
-          unitType: unit.unitType,
-          roomLabel: fixture.row.roomLabel,
-          collageType: LIGHTING_TYPE,
+      // A held-back row is the same substitute whichever tier board is being
+      // built (tiering and the substitute rule are independent), so it is
+      // reported, and accounted for, only once — on the first pass — rather
+      // than once per tier board.
+      if (tierIndex === 0) {
+        gaps.substituteCandidates?.push(
+          ...substitutes.map((row) => ({
+            slotId: "light_fixture",
+            collageType: LIGHTING_TYPE,
+            rowId: row.rowId,
+            itemName: row.itemName,
+            sku: row.sku,
+            unitType: unit.unitType,
+            roomLabel: row.roomLabel,
+          })),
+        );
+        for (const row of substitutes) lightingRowIds.add(row.rowId);
+      }
+
+      const items: BoardItem[] = [];
+      for (const fixture of fixtures) {
+        lightingRowIds.add(fixture.row.rowId);
+        const images = resolveImages(fixture.row.rowId, fixture.row.sku).slice(0, Math.max(1, imagesPerItem));
+        if (!images.length) {
+          // The fixture's own room, not the board's scope label: the reviewer
+          // collecting the photo needs to know where the fixture is.
+          gaps.imagelessItems.push({
+            unitType: unit.unitType,
+            roomLabel: fixture.row.roomLabel,
+            collageType: LIGHTING_TYPE,
+            slotId: fixture.slotId,
+            rowId: fixture.row.rowId,
+            itemName: fixture.row.itemName,
+            sku: fixture.row.sku,
+          });
+          continue;
+        }
+        const { name, tier: itemTier } = extractTier(fixture.row.itemName);
+        const item: BoardItem = {
           slotId: fixture.slotId,
+          role: fixture.role,
+          required: true,
           rowId: fixture.row.rowId,
-          itemName: fixture.row.itemName,
           sku: fixture.row.sku,
-        });
+          brand: extractBrand(name),
+          name,
+          notes: fixture.row.qty > 1 ? `quantity ${fixture.row.qty}` : "",
+          images,
+        };
+        if (itemTier) item.tier = itemTier;
+        items.push(item);
+      }
+
+      enforceReferenceCap(items, scope, gaps);
+
+      if (items.length < minSlots) {
+        if (items.length) {
+          gaps.skippedBoards.push({ ...scope, reason: `only ${items.length} slot(s) filled; minimum is ${minSlots}` });
+        }
         continue;
       }
-      const { name, tier } = extractTier(fixture.row.itemName);
-      const item: BoardItem = {
-        slotId: fixture.slotId,
-        role: fixture.role,
-        required: true,
-        rowId: fixture.row.rowId,
-        sku: fixture.row.sku,
-        brand: extractBrand(name),
-        name,
-        notes: fixture.row.qty > 1 ? `quantity ${fixture.row.qty}` : "",
-        images,
-      };
-      if (tier) item.tier = tier;
-      items.push(item);
+
+      boards.push({
+        id: boardIdFor(unit.unitType, scopeLabel, LIGHTING_TYPE),
+        unitType: unit.unitType,
+        roomLabel: scopeLabel,
+        collageType: LIGHTING_TYPE,
+        kindLabel: BOARD_KIND_LABELS[LIGHTING_TYPE],
+        title: `${unit.unitType} ${BOARD_KIND_LABELS[LIGHTING_TYPE]}${tier ? ` — ${LIGHTING_TIER_LABELS[tier]}` : ""}`,
+        items,
+      });
     }
-
-    enforceReferenceCap(items, scope, gaps);
-
-    if (items.length < minSlots) {
-      if (items.length) {
-        gaps.skippedBoards.push({ ...scope, reason: `only ${items.length} slot(s) filled; minimum is ${minSlots}` });
-      }
-      continue;
-    }
-
-    boards.push({
-      id: boardIdFor(unit.unitType, LIGHTING_SCOPE_LABEL, LIGHTING_TYPE),
-      unitType: unit.unitType,
-      roomLabel: LIGHTING_SCOPE_LABEL,
-      collageType: LIGHTING_TYPE,
-      kindLabel: BOARD_KIND_LABELS[LIGHTING_TYPE],
-      title: `${unit.unitType} ${BOARD_KIND_LABELS[LIGHTING_TYPE]}`,
-      items,
-    });
   }
   return boards;
 }
