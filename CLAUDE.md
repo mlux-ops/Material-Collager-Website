@@ -65,10 +65,12 @@ every light fixture across the unit's rooms (id `<unit>-all-rooms-lighting`;
 slot ids are `light_<rowId>` so review notes survive a sheet refresh). Membership
 is `isLightFixture`, deliberately broader than the room boards' `light_fixture`
 slot. When any of a unit's fixtures carries the sheet's Good/Better/Best tier
-prefix, this becomes THREE boards per unit instead of one — `…-good-lighting`,
-`…-better-…`, `…-best-…` — each holding its tier's items plus every untiered
-one (`lightingTiersFor` in `match.ts`); a unit with no tiered fixture still
-gets a single board. `docs/autoboard-shared-core.md` has the rules.
+tag — `extractTier` reads it as either a leading `-Better- option -` or a
+trailing `- BETTER` on the item name, both seen in the wild — this becomes
+THREE boards per unit instead of one — `…-good-lighting`, `…-better-…`,
+`…-best-…` — each holding its tier's items plus every untiered one
+(`lightingTiersFor` in `match.ts`); a unit with no tiered fixture still gets a
+single board. `docs/autoboard-shared-core.md` has the rules.
 
 `review` starts a dependency-free `node:http` review UI on **port 4790** (`--port` to
 override). Its render-workflow POST endpoints require `Content-Type: application/json`

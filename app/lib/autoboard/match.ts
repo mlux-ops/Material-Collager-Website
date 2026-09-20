@@ -245,16 +245,23 @@ export function extractBrand(itemName: string): string {
   return "";
 }
 
-// Smartsheet's good/better/best alternates are typed as a prefix on the item
-// name itself, e.g. "-Better- option - Duo Pendant". That prefix is bookkeeping
-// for the sheet, not part of the product's name, so split it off: the tier
-// (lowercased) goes on item.tier and the rest becomes the actual name.
+// Smartsheet's good/better/best alternates are typed onto the item name
+// itself, not into a column of their own, and rows in the wild use either end
+// of the string for it: a leading "-Better- option - Duo Pendant" (the
+// original convention) or a trailing "Dimple Wall Sconce - BETTER" (seen on
+// the Penthouse lighting rows — no "option" wording, tier word bare at the
+// end). Both are sheet bookkeeping, not part of the product's name, so split
+// whichever is present off: the tier (lowercased) goes on item.tier and the
+// rest becomes the actual name.
 const TIER_PREFIX_PATTERN = /^\s*-\s*(Good|Better|Best)\s*-\s*option\s*-\s*/i;
+const TIER_SUFFIX_PATTERN = /\s*-\s*(Good|Better|Best)\s*$/i;
 
 export function extractTier(itemName: string): { name: string; tier: string | undefined } {
-  const match = TIER_PREFIX_PATTERN.exec(itemName);
-  if (!match) return { name: itemName, tier: undefined };
-  return { name: itemName.slice(match[0].length), tier: match[1].toLowerCase() };
+  const prefix = TIER_PREFIX_PATTERN.exec(itemName);
+  if (prefix) return { name: itemName.slice(prefix[0].length), tier: prefix[1].toLowerCase() };
+  const suffix = TIER_SUFFIX_PATTERN.exec(itemName);
+  if (suffix) return { name: itemName.slice(0, suffix.index), tier: suffix[1].toLowerCase() };
+  return { name: itemName, tier: undefined };
 }
 
 // A row a project marked as a substitute for another row (source.mjs's

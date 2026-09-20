@@ -215,9 +215,14 @@ including rooms no board type maps to, such as a living room. The web preview
   such stranded row individually in `skippedRoomItems` — not just a `skippedRooms`
   count — precisely so there is something to pin.
 - **Good/Better/Best** (`LIGHTING_TIERS`, `lightingTiersFor`, `lightingScopeLabel`
-  in `match.ts`): the sheet's existing tier-prefix convention (`-Good- option -
-  …`, read by `extractTier`, the same one that tags a good/better/best
-  alternate on any other board) can differentiate a unit's light fixtures too.
+  in `match.ts`): the sheet's existing tier-tag convention — read by
+  `extractTier`, the same function that tags a good/better/best alternate on
+  any other board — can differentiate a unit's light fixtures too.
+  `extractTier` recognizes the tag at either end of the item name: a leading
+  `-Good- option - Duo Pendant` (the original convention) or a bare trailing
+  `Duo Pendant - GOOD` (seen on the Penthouse lighting rows, no "option"
+  wording). Whichever end it's on, the tag is stripped from the displayed name
+  and only the tier survives onto `item.tier`.
   `lightingTiersFor(unitRows)` decides, per unit, whether ANY fixture carries a
   tier tag; if so, `buildLightingBoards`/`previewBoards` build THREE boards
   instead of one — `<unit>-all-rooms-good-lighting`, `…-better-…`, `…-best-…`,
