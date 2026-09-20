@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DitherReveal } from "../DitherReveal";
+import { DEFAULT_VARIANTS } from "@/app/lib/autoboard/variants";
 import styles from "./review-boards.module.css";
 
 // extractBrand pulls the brand out of the item name but leaves the name intact,
@@ -96,7 +97,7 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
   const [showPrompt, setShowPrompt] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [rendering, setRendering] = useState(false);
+  const [renderingVariant, setRenderingVariant] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pending = useRef<Record<string, unknown> | null>(null);
 
@@ -163,13 +164,13 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
   const latestRender = renders.length ? renders.reduce((a, b) => (a.createdAt >= b.createdAt ? a : b)) : null;
   const heroImage = board.items[0]?.images[0];
 
-  const renderDraft = useCallback(async () => {
-    setRendering(true);
+  const renderDraft = useCallback(async (variantKey: string) => {
+    setRenderingVariant(variantKey);
     setError("");
     try {
       const response = await fetch(
         `/api/autoboard/projects/${encodeURIComponent(projectId)}/boards/${encodeURIComponent(board.id)}/renders`,
-        { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ variant: "A" }) },
+        { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ variant: variantKey }) },
       );
       const payload = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
       if (!response.ok || !payload?.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
@@ -177,7 +178,7 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
     } catch (cause) {
       setError((cause as Error).message);
     } finally {
-      setRendering(false);
+      setRenderingVariant(null);
     }
   }, [projectId, board.id, onSaved]);
 
@@ -321,7 +322,7 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
           button, and the strip of candidates it produces. */}
       <div className={styles.workflowPreview}>
         <div className={styles.previewStage}>
-          {rendering ? (
+          {renderingVariant ? (
             <DitherReveal
               className={styles.previewDither}
               style={{ height: "100%" }}
@@ -346,19 +347,30 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
         </div>
 
         <div className={styles.workflowRow}>
-          <button
-            type="button"
-            className={styles.primary}
-            disabled={rendering || !board.referenceCount}
-            onClick={renderDraft}
-          >
-            {rendering ? "Rendering…" : "Render draft"}
-          </button>
+          {/* One button per board style (A/B/C: DEFAULT_VARIANTS in
+              autoboard/variants.ts) — same composition options the CLI's
+              batch render offers, varying only composition/density per the
+              standing rule that lighting and styling stay fixed. Each is its
+              own paid render, so a render already in flight disables all
+              three (no accidental concurrent spend) — the clicked one reads
+              "Rendering…", the other two just go inert. */}
+          {DEFAULT_VARIANTS.map((variant) => (
+            <button
+              key={variant.key}
+              type="button"
+              className={styles.primary}
+              disabled={Boolean(renderingVariant) || !board.referenceCount}
+              onClick={() => void renderDraft(variant.key)}
+              title={`${variant.composition}, ${variant.density} spacing`}
+            >
+              {renderingVariant === variant.key ? "Rendering…" : `Render ${variant.key}`}
+            </button>
+          ))}
           {/* Named plainly rather than buried: this is the one control on the
               page that costs money, and a draft's bill is dominated by its
               reference count, not its quality tier (CLAUDE.md). */}
           <span className={styles.workflowMeta}>
-            spends on {board.referenceCount} reference{board.referenceCount === 1 ? "" : "s"}
+            spends on {board.referenceCount} reference{board.referenceCount === 1 ? "" : "s"} per style
           </span>
         </div>
 
