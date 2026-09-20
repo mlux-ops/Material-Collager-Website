@@ -23,6 +23,8 @@ import { RouteReady } from "../RouteReady";
 import { SiteNavigation } from "../SiteNavigation";
 import { SlotPhotos, type ProjectPhoto } from "./SlotPhotos";
 import { BoardWorkflow, type BoardRender, type BuiltBoard } from "./BoardWorkflow";
+import { AddRowDialog } from "./AddRowDialog";
+import { RowTools, type Pin } from "./RowTools";
 import styles from "./review-boards.module.css";
 
 type Facet = { value: string; rowCount: number };
@@ -40,6 +42,7 @@ type PreviewSlot = {
   qty: number;
   reference: string;
   tier?: string;
+  pinned?: boolean;
 };
 
 type PreviewBoard = {
@@ -81,7 +84,14 @@ type Project = {
   updatedAt: number;
 };
 
-type ProjectDetail = Project & { preview: BoardsPreview };
+// A row as it was when removed: enough to name it in the Removed list and to
+// restore it, whatever the sheet has said since.
+type RemovedRow = { rowId: string; itemName: string; unitType: string; roomLabel: string; sku: string };
+
+// The reviewer's edits on top of the sheet's rows (app/lib/autoboard/row-edits.ts).
+type ProjectEdits = { removed: RemovedRow[]; pins: Record<string, Pin>; manualRowIds: string[] };
+
+type ProjectDetail = Project & { preview: BoardsPreview; edits: ProjectEdits };
 
 // The boards that actually exist: buildBoards run over the photos a person
 // selected. A row with no selected photo yields no images, so its slot is empty
@@ -136,8 +146,10 @@ export function ReviewBoards() {
   const [rooms, setRooms] = useState<string[]>([]);
   const [selectedRowCount, setSelectedRowCount] = useState<number | null>(null);
 
-  const [busy, setBusy] = useState<"" | "reading" | "building" | "refreshing" | "deleting">("");
+  const [busy, setBusy] = useState<"" | "reading" | "building" | "refreshing" | "deleting" | "creating" | "editing">("");
   const [error, setError] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [blankName, setBlankName] = useState("");
 
   const loadProjects = useCallback(async () => {
     const payload = await api<{ projects: Project[] }>("/api/autoboard/projects");
@@ -276,6 +288,58 @@ export function ReviewBoards() {
     setPhotos(photoPayload.photos);
     setRenders(renderPayload.renders);
   }, [activeId]);
+
+  const createBlank = useCallback(async () => {
+    setBusy("creating");
+    setError("");
+    try {
+      const payload = await api<{ project: ProjectDetail }>("/api/autoboard/projects", {
+        method: "POST",
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ name: blankName, blank: true }),
+      });
+      await loadProjects();
+      setActiveId(payload.project.id);
+      setBlankName("");
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }, [blankName, loadProjects]);
+
+  // One row's edits — pin, remove, restore — then everything derived from the
+  // rows is fetched again: a pin moves a slot, and a removal changes the built
+  // boards as well as the preview and the project's row count.
+  const patchRow = useCallback(
+    async (rowId: string, patch: { excluded?: boolean; pin?: Pin | null }) => {
+      if (!activeId) return;
+      setBusy("editing");
+      setError("");
+      try {
+        await api(`/api/autoboard/projects/${encodeURIComponent(activeId)}/rows/${encodeURIComponent(rowId)}`, {
+          method: "PATCH",
+          headers: JSON_HEADERS,
+          body: JSON.stringify(patch),
+        });
+        await reloadPhotos();
+        await loadProjects();
+      } catch (cause) {
+        setError((cause as Error).message);
+      } finally {
+        setBusy("");
+      }
+    },
+    [activeId, reloadPhotos, loadProjects],
+  );
+  const pinRow = useCallback((rowId: string, pin: Pin | null) => patchRow(rowId, { pin }), [patchRow]);
+  const removeRow = useCallback((rowId: string) => patchRow(rowId, { excluded: true }), [patchRow]);
+  const restoreRow = useCallback((rowId: string) => patchRow(rowId, { excluded: false }), [patchRow]);
+
+  const onRowAdded = useCallback(async () => {
+    await reloadPhotos();
+    await loadProjects();
+  }, [reloadPhotos, loadProjects]);
 
   const photosByRow = useMemo(() => {
     const map = new Map<string, ProjectPhoto[]>();
@@ -444,6 +508,30 @@ export function ReviewBoards() {
               </p>
             ) : null}
           </section>
+
+          <section className={styles.builder} aria-label="Start a blank project">
+            <h2 className={styles.builderTitle}>Start blank</h2>
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor="blank-name">
+                Project name
+              </label>
+              <input
+                id="blank-name"
+                className={styles.input}
+                value={blankName}
+                placeholder="Client sample kit"
+                onChange={(event) => setBlankName(event.target.value)}
+              />
+              <p className={styles.help}>
+                No sheet behind it. Add items one at a time with Add item; they are stored with the project.
+              </p>
+            </div>
+            <div className={styles.actions}>
+              <button type="button" className={styles.secondary} onClick={createBlank} disabled={busy !== ""}>
+                {busy === "creating" ? "Creating…" : "New blank project"}
+              </button>
+            </div>
+          </section>
         </aside>
 
         <main className={styles.main}>
@@ -455,9 +543,14 @@ export function ReviewBoards() {
                   <p className={styles.source}>{shown.source}</p>
                 </div>
                 <div className={styles.actions}>
-                  <button type="button" className={styles.secondary} onClick={refresh} disabled={busy !== ""}>
-                    {busy === "refreshing" ? "Re-reading…" : "Re-read sheet"}
+                  <button type="button" className={styles.secondary} onClick={() => setAdding(true)} disabled={busy !== ""}>
+                    Add item
                   </button>
+                  {shown.sheetId ? (
+                    <button type="button" className={styles.secondary} onClick={refresh} disabled={busy !== ""}>
+                      {busy === "refreshing" ? "Re-reading…" : "Re-read sheet"}
+                    </button>
+                  ) : null}
                   <button type="button" className={styles.quiet} onClick={remove} disabled={busy !== ""}>
                     Delete
                   </button>
@@ -505,7 +598,13 @@ export function ReviewBoards() {
               </div>
 
               {view === "boards" ? (
-                <BuiltBoards built={built} projectId={shown.id} renders={renders} onSaved={reloadPhotos} />
+                <BuiltBoards
+                  built={built}
+                  projectId={shown.id}
+                  renders={renders}
+                  onSaved={reloadPhotos}
+                  onRemoveRow={removeRow}
+                />
               ) : (
               <div className={styles.boards}>
                 {shown.preview.boards.map((board) => (
@@ -545,7 +644,19 @@ export function ReviewBoards() {
                               {slot.slotId}
                               {slot.sku ? ` · ${slot.sku}` : ""}
                               {slot.qty > 1 ? ` · qty ${slot.qty}` : ""}
+                              {slot.pinned ? <span className={styles.pinTag}>· pinned</span> : null}
+                              {shown.edits.manualRowIds.includes(slot.rowId) ? (
+                                <span className={styles.pinTag}>· added by hand</span>
+                              ) : null}
                             </span>
+                            <RowTools
+                              rowId={slot.rowId}
+                              roomLabel={board.roomLabel}
+                              pin={shown.edits.pins[slot.rowId]}
+                              busy={busy !== ""}
+                              onPin={pinRow}
+                              onRemove={removeRow}
+                            />
                             <SlotPhotos
                               projectId={shown.id}
                               rowId={slot.rowId}
@@ -584,7 +695,23 @@ export function ReviewBoards() {
               </div>
               )}
 
-              <GapsSection preview={shown.preview} />
+              <GapsSection
+                preview={shown.preview}
+                edits={shown.edits}
+                busy={busy !== ""}
+                onPin={pinRow}
+                onRemove={removeRow}
+                onRestore={restoreRow}
+              />
+
+              <AddRowDialog
+                projectId={shown.id}
+                open={adding}
+                onlyUnitType={shown.filter.unitTypes?.length === 1 ? shown.filter.unitTypes[0] : ""}
+                onlyRoom={shown.filter.rooms?.length === 1 ? shown.filter.rooms[0] : ""}
+                onClose={() => setAdding(false)}
+                onAdded={onRowAdded}
+              />
             </>
           ) : (
             <p className={styles.placeholder}>
@@ -604,9 +731,26 @@ export function ReviewBoards() {
  * the CLI's gaps.md: a board that looks complete while rows quietly went
  * missing is the failure mode the whole pipeline is built to avoid.
  */
-function GapsSection({ preview }: { preview: BoardsPreview }) {
+function GapsSection({
+  preview,
+  edits,
+  busy,
+  onPin,
+  onRemove,
+  onRestore,
+}: {
+  preview: BoardsPreview;
+  edits: ProjectEdits;
+  busy: boolean;
+  onPin: (rowId: string, pin: Pin | null) => Promise<void>;
+  onRemove: (rowId: string) => Promise<void>;
+  onRestore: (rowId: string) => Promise<void>;
+}) {
   const { substitutes, unmapped, skippedRooms, conflicts } = preview;
-  if (!substitutes.length && !unmapped.length && !skippedRooms.length && !conflicts.length) return null;
+  const removed = edits.removed;
+  if (!substitutes.length && !unmapped.length && !skippedRooms.length && !conflicts.length && !removed.length) {
+    return null;
+  }
 
   return (
     <section className={styles.gaps} aria-label="Rows the rules could not place">
@@ -614,8 +758,30 @@ function GapsSection({ preview }: { preview: BoardsPreview }) {
       <p className={styles.gapsIntro}>
         Every row the rules could not put on a board, and why. Nothing here is an error on its own — a
         substitute is held back deliberately, and an unmapped row may simply not belong on a presentation
-        board.
+        board. Pin a row to put it on a slot anyway; Remove takes it off every board until restored.
       </p>
+
+      {removed.length ? (
+        <div className={styles.gapGroup}>
+          <h3 className={styles.gapHead}>Removed from every board ({removed.length})</h3>
+          <ul className={styles.gapList}>
+            {removed.map((entry) => (
+              <li key={entry.rowId} className={styles.gapItem}>
+                {entry.itemName}{" "}
+                <span className={styles.gapWhere}>
+                  {entry.unitType} {entry.roomLabel}
+                  {entry.sku ? ` · ${entry.sku}` : ""}
+                </span>
+                <span className={styles.gapTools}>
+                  <button type="button" className={styles.photoAction} disabled={busy} onClick={() => void onRestore(entry.rowId)}>
+                    Restore
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {substitutes.length ? (
         <div className={styles.gapGroup}>
@@ -627,6 +793,14 @@ function GapsSection({ preview }: { preview: BoardsPreview }) {
                 <span className={styles.gapWhere}>
                   {entry.unitType} {entry.roomLabel} · {entry.slotId}
                 </span>
+                <RowTools
+                  rowId={entry.rowId}
+                  roomLabel={entry.roomLabel}
+                  pin={edits.pins[entry.rowId]}
+                  busy={busy}
+                  onPin={onPin}
+                  onRemove={onRemove}
+                />
               </li>
             ))}
           </ul>
@@ -659,6 +833,14 @@ function GapsSection({ preview }: { preview: BoardsPreview }) {
                 <span className={styles.gapWhere}>
                   {entry.unitType} {entry.roomLabel} · {entry.costCode}
                 </span>
+                <RowTools
+                  rowId={entry.rowId}
+                  roomLabel={entry.roomLabel}
+                  pin={edits.pins[entry.rowId]}
+                  busy={busy}
+                  onPin={onPin}
+                  onRemove={onRemove}
+                />
               </li>
             ))}
           </ul>
@@ -696,11 +878,13 @@ function BuiltBoards({
   projectId,
   renders,
   onSaved,
+  onRemoveRow,
 }: {
   built: Built | null;
   projectId: string;
   renders: BoardRender[];
   onSaved: () => Promise<void>;
+  onRemoveRow: (rowId: string) => Promise<void>;
 }) {
   if (!built || !built.boards.length) {
     return (
@@ -740,6 +924,7 @@ function BuiltBoards({
             board={board}
             renders={renders.filter((render) => render.boardId === board.id)}
             onSaved={onSaved}
+            onRemoveRow={onRemoveRow}
           />
         </article>
       ))}

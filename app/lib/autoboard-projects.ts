@@ -22,9 +22,19 @@ import {
 import { deleteProjectBoardState, emptyBoardState, listBoardState, type BoardState } from "./autoboard-board-state.ts";
 import { deleteProjectRenders } from "./autoboard-renders.ts";
 import { previewBoards, filterRows, type BoardsPreview, type SubsectionFilter } from "./autoboard/preview.ts";
+import { applyRowEdits, emptyRowEdits, type RowEdits } from "./autoboard/row-edits.ts";
+import { addSheetRow, fetchSheet, sheetSchema, type RowField } from "./autoboard/sheet-write.ts";
 import { collectRows, emptyGaps, loadSmartsheetRows } from "./autoboard/source.ts";
-import type { Board, Gaps, LibraryRow } from "./autoboard/types.ts";
+import type { Board, Gaps, LibraryRow, SlotPin } from "./autoboard/types.ts";
 import { deleteProjectPhotos, selectedImagesByRow } from "./autoboard-photos.ts";
+import {
+  addManualRow,
+  deleteProjectRowEdits,
+  listAllRowEdits,
+  listRowEdits,
+  setRowExcluded,
+  setRowPin,
+} from "./autoboard-row-edits.ts";
 
 export type AutoboardProject = {
   id: string;
@@ -38,9 +48,20 @@ export type AutoboardProject = {
   updatedAt: number;
 };
 
+// The reviewer's edits as the UI sees them: what was removed (as it was when
+// removed, so it can be shown and restored after a refresh), which rows are
+// pinned where, and which rows were added by hand.
+export type ProjectEdits = {
+  removed: LibraryRow[];
+  pins: Record<string, SlotPin>;
+  manualRowIds: string[];
+};
+
 export type AutoboardProjectDetail = AutoboardProject & {
+  /** The rows the boards are built from: the stored reading plus the edits. */
   rows: LibraryRow[];
   preview: BoardsPreview;
+  edits: ProjectEdits;
 };
 
 type ProjectRow = {
@@ -148,20 +169,21 @@ export function projectId(): string {
   return `proj-${crypto.randomUUID()}`;
 }
 
-// The preview is derived from the stored rows on every read rather than read
-// back from preview_json. The rows are the record of what the sheet said at
-// build time and stay fixed; the preview is a pure function of them, and
-// recomputing it means a change to the slot rules — a new board type, a
-// widened match — reaches every existing project, not only ones built after
-// the change. preview_json is still written, for older readers and as a
-// record of what the picker showed when the project was created.
-function storedPreview(row: ProjectRow): { rows: LibraryRow[]; preview: BoardsPreview } {
-  const rows = JSON.parse(row.rows_json) as LibraryRow[];
-  return { rows, preview: previewBoards(rows) };
+// The preview is derived on every read rather than read back from
+// preview_json: from the stored rows — the record of what the sheet said at
+// build time, which stay fixed — with the reviewer's edits applied on top
+// (app/lib/autoboard/row-edits.ts). Both are pure functions of stored data, so
+// a change to the slot rules reaches every existing project, and an edit shows
+// the moment it is saved. preview_json is still written, for older readers and
+// as a record of what the picker showed when the project was created.
+function storedPreview(row: ProjectRow, edits: RowEdits): { rows: LibraryRow[]; preview: BoardsPreview } {
+  const stored = JSON.parse(row.rows_json) as LibraryRow[];
+  const rows = applyRowEdits(stored, edits);
+  return { rows, preview: previewBoards(rows, { pins: edits.pins }) };
 }
 
-function publicProject(row: ProjectRow): AutoboardProject {
-  const { rows, preview } = storedPreview(row);
+function publicProject(row: ProjectRow, edits: RowEdits): AutoboardProject {
+  const { rows, preview } = storedPreview(row, edits);
   return {
     id: row.id,
     name: row.name,
@@ -175,11 +197,25 @@ function publicProject(row: ProjectRow): AutoboardProject {
   };
 }
 
-function detailFrom(row: ProjectRow): AutoboardProjectDetail {
+function detailFrom(row: ProjectRow, edits: RowEdits): AutoboardProjectDetail {
   return {
-    ...publicProject(row),
-    ...storedPreview(row),
+    ...publicProject(row, edits),
+    ...storedPreview(row, edits),
+    edits: {
+      removed: [...edits.excluded.values()],
+      pins: Object.fromEntries(edits.pins),
+      manualRowIds: edits.manual.map((manual) => manual.rowId),
+    },
   };
+}
+
+async function detailFor(row: ProjectRow): Promise<AutoboardProjectDetail> {
+  return detailFrom(row, await listRowEdits(row.id));
+}
+
+async function projectRow(id: string): Promise<ProjectRow | null> {
+  const DB = await ensureProjectStorage();
+  return (await DB.prepare("SELECT * FROM autoboard_projects WHERE id = ?").bind(id).first<ProjectRow>()) ?? null;
 }
 
 // Reads a sheet and narrows it, without touching storage. The sheet picker uses
@@ -243,7 +279,7 @@ export async function createProject(input: {
       row.updated_at,
     )
     .run();
-  return detailFrom(row);
+  return detailFrom(row, emptyRowEdits());
 }
 
 /**
@@ -303,21 +339,54 @@ export async function createProjectFromRows(input: {
       row.rows_json, row.preview_json, row.created_at, row.updated_at,
     )
     .run();
-  return detailFrom(row);
+  return detailFrom(row, emptyRowEdits());
+}
+
+/**
+ * A project with nothing in it yet: no sheet, no rows. Everything it will hold
+ * is added by hand (addProjectRow), stored as manual rows beside it, and it
+ * builds boards from those exactly as a sheet-backed project builds from its
+ * reading. Like an imported project it has no sheet to refresh from.
+ */
+export async function createBlankProject(input: { name: string }): Promise<AutoboardProjectDetail> {
+  const DB = await ensureProjectStorage();
+  const now = Date.now();
+  const row: ProjectRow = {
+    id: projectId(),
+    name: input.name.trim() || "Untitled project",
+    sheet_id: "",
+    source: "blank project",
+    filter_json: JSON.stringify({}),
+    rows_json: "[]",
+    preview_json: JSON.stringify(previewBoards([])),
+    created_at: now,
+    updated_at: now,
+  };
+  await DB.prepare(
+    `INSERT INTO autoboard_projects
+       (id, name, sheet_id, source, filter_json, rows_json, preview_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      row.id, row.name, row.sheet_id, row.source, row.filter_json,
+      row.rows_json, row.preview_json, row.created_at, row.updated_at,
+    )
+    .run();
+  return detailFrom(row, emptyRowEdits());
 }
 
 export async function listProjects(): Promise<AutoboardProject[]> {
   const DB = await ensureProjectStorage();
-  const result = await DB.prepare(
-    "SELECT * FROM autoboard_projects ORDER BY updated_at DESC",
-  ).all<ProjectRow>();
-  return result.results.map(publicProject);
+  const [result, edits] = await Promise.all([
+    DB.prepare("SELECT * FROM autoboard_projects ORDER BY updated_at DESC").all<ProjectRow>(),
+    listAllRowEdits(),
+  ]);
+  return result.results.map((row) => publicProject(row, edits.get(row.id) ?? emptyRowEdits()));
 }
 
 export async function getProject(id: string): Promise<AutoboardProjectDetail | null> {
-  const DB = await ensureProjectStorage();
-  const row = await DB.prepare("SELECT * FROM autoboard_projects WHERE id = ?").bind(id).first<ProjectRow>();
-  return row ? detailFrom(row) : null;
+  const row = await projectRow(id);
+  return row ? detailFor(row) : null;
 }
 
 export async function deleteProject(id: string): Promise<boolean> {
@@ -327,8 +396,161 @@ export async function deleteProject(id: string): Promise<boolean> {
   await deleteProjectPhotos(id);
   await deleteProjectBoardState(id);
   await deleteProjectRenders(id);
+  await deleteProjectRowEdits(id);
   const result = await DB.prepare("DELETE FROM autoboard_projects WHERE id = ?").bind(id).run();
   return Boolean(result.meta?.changes);
+}
+
+// ---------------------------------------------------------------------------
+// Row edits: add, remove, restore, pin
+// ---------------------------------------------------------------------------
+
+/**
+ * The form for adding a row to a project.
+ *
+ * A project with a sheet gets one field per sheet column — the sheet's own
+ * picklists as dropdowns, its existing values as suggestions — because the row
+ * is going INTO the sheet. A project without one gets the fields a row needs
+ * to build a board, with suggestions drawn from the rows it already has.
+ */
+export type RowForm = {
+  mode: "sheet" | "manual";
+  fields: RowField[];
+  /** What to write the row into, so the UI can say so before the person does. */
+  target: string;
+};
+
+const MANUAL_FIELDS: Omit<RowField, "suggestions">[] = [
+  { key: "itemName", label: "Item", kind: "text", required: true, options: [], field: "itemName" },
+  { key: "unitType", label: "Unit type", kind: "text", required: true, options: [], field: "unitType" },
+  { key: "roomType", label: "Room", kind: "text", required: true, options: [], field: "roomType" },
+  {
+    key: "costCode",
+    label: "Cost code",
+    kind: "text",
+    required: false,
+    options: [],
+    field: "costCode",
+    // The slot rules key some slots on cost code as well as name (match.ts):
+    // a faucet without "11 45" lands in Not placed. Saying so here beats a
+    // person wondering why their faucet is not on the board.
+    hint: "Some slots match by cost code: 11 45 plumbing fixtures, 09 00 hardware, 26 51 lighting. Leave it blank and pin the item to a slot if unsure.",
+  },
+  { key: "sku", label: "SKU", kind: "text", required: false, options: [], field: "sku" },
+  { key: "qty", label: "Qty", kind: "text", required: false, options: [], field: "qty" },
+  { key: "reference", label: "Reference URL", kind: "text", required: false, options: [], field: "reference" },
+  { key: "status", label: "Status", kind: "select", required: false, options: ["", "preferred", "alternative", "pending"], field: "status" },
+];
+
+function distinct(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+
+export async function projectRowForm(id: string): Promise<RowForm | null> {
+  const row = await projectRow(id);
+  if (!row) return null;
+  if (row.sheet_id) {
+    const sheet = await fetchSheet({ token: await smartsheetToken(), sheetId: row.sheet_id });
+    return { mode: "sheet", fields: sheetSchema(sheet), target: `Smartsheet ${row.sheet_id}` };
+  }
+  const { rows } = storedPreview(row, await listRowEdits(id));
+  const suggestions: Record<string, string[]> = {
+    unitType: distinct(rows.map((entry) => entry.unitType)),
+    roomType: distinct(rows.map((entry) => entry.roomOriginal || entry.roomLabel)),
+    costCode: distinct(rows.map((entry) => entry.costCode)),
+  };
+  return {
+    mode: "manual",
+    fields: MANUAL_FIELDS.map((field) => ({ ...field, suggestions: suggestions[field.key] ?? [] })),
+    target: "this project",
+  };
+}
+
+export type AddedProjectRow = {
+  rowId: string;
+  /** Whether the row is now in this project. A sheet row outside the project's filter is in the sheet but not here. */
+  inProject: boolean;
+  where: string;
+};
+
+/**
+ * Adds a row. With a sheet behind the project the row is written into the
+ * sheet, filed under its unit type and room (sheet-write.ts), and the project
+ * is re-read so the new row arrives with its real row id, the way every other
+ * row does. Without one the row is stored beside the project as a manual row.
+ */
+export async function addProjectRow(
+  id: string,
+  values: Record<string, unknown>,
+): Promise<{ project: AutoboardProjectDetail; added: AddedProjectRow } | null> {
+  const row = await projectRow(id);
+  if (!row) return null;
+
+  if (row.sheet_id) {
+    const added = await addSheetRow({ token: await smartsheetToken(), sheetId: row.sheet_id, values });
+    const project = await refreshProject(id);
+    if (!project) return null;
+    const inProject = project.rows.some((entry) => entry.rowId === added.rowId);
+    const at = added.rowNumber === null ? "" : ` as row ${added.rowNumber}`;
+    const where = added.placement.after
+      ? `Written to the sheet${at}, ${added.placement.reason} (after "${added.placement.after.itemName}").`
+      : `Written to the bottom of the sheet${at}: ${added.placement.reason}.`;
+    return {
+      project,
+      added: {
+        rowId: added.rowId,
+        inProject,
+        where: inProject
+          ? where
+          : `${where} It is not in this project: the project's filter leaves out its unit type or room.`,
+      },
+    };
+  }
+
+  const manual = await addManualRow(id, values);
+  const DB = await ensureProjectStorage();
+  await DB.prepare("UPDATE autoboard_projects SET updated_at = ? WHERE id = ?").bind(Date.now(), id).run();
+  const project = await detailFor((await projectRow(id)) ?? row);
+  return { project, added: { rowId: manual.rowId, inProject: true, where: "Added to this project." } };
+}
+
+// The row as the project currently knows it, edits included, so a removal
+// snapshots what the person saw and a pin targets a row that exists.
+async function knownRow(row: ProjectRow, rowId: string): Promise<LibraryRow | undefined> {
+  const edits = await listRowEdits(row.id);
+  const stored = JSON.parse(row.rows_json) as LibraryRow[];
+  return [...stored, ...edits.manual].find((entry) => entry.rowId === rowId) ?? edits.excluded.get(rowId);
+}
+
+export async function setProjectRowExcluded(
+  id: string,
+  rowId: string,
+  excluded: boolean,
+): Promise<AutoboardProjectDetail | null> {
+  const row = await projectRow(id);
+  if (!row) return null;
+  if (excluded) {
+    const known = await knownRow(row, rowId);
+    if (!known) throw new Error("That row is not in this project.");
+    await setRowExcluded(id, rowId, known);
+  } else {
+    await setRowExcluded(id, rowId, null);
+  }
+  return detailFor(row);
+}
+
+export async function setProjectRowPin(
+  id: string,
+  rowId: string,
+  pin: unknown | null,
+): Promise<AutoboardProjectDetail | null> {
+  const row = await projectRow(id);
+  if (!row) return null;
+  if (pin !== null && pin !== undefined && pin !== "" && !(await knownRow(row, rowId))) {
+    throw new Error("That row is not in this project.");
+  }
+  await setRowPin(id, rowId, pin);
+  return detailFor(row);
 }
 
 /**
@@ -366,6 +588,7 @@ export async function buildProjectBoards(
   const { boards } = buildBoards(project.rows, {
     resolveImages: (rowId) => byRow.get(rowId) ?? [],
     gaps,
+    pins: new Map(Object.entries(project.edits.pins)),
   });
 
   return {
@@ -434,7 +657,7 @@ export async function refreshProject(id: string): Promise<AutoboardProjectDetail
   )
     .bind(updated.source, updated.rows_json, updated.preview_json, updated.updated_at, id)
     .run();
-  return detailFrom(updated);
+  return detailFor(updated);
 }
 
 export async function renameProject(id: string, name: string): Promise<boolean> {

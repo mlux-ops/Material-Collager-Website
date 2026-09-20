@@ -205,6 +205,40 @@ including rooms no board type maps to, such as a living room. The web preview
 - `ITEM_PRESETS.lighting_collage` exists for the manual generator (every slot
   optional) and for kind naming; the autoboard core never fills those slots.
 
+## Edits on top of the sheet
+
+The stored rows stay a reading of the sheet, replaced wholesale by a refresh.
+A person's edits live beside them, keyed by row id, and are applied on every
+read (`app/lib/autoboard/row-edits.ts`, pure; `app/lib/autoboard-row-edits.ts`,
+D1 table `autoboard_row_edits`), so a refresh keeps them:
+
+- **Pin** (`SlotPin`, `BuildBoardsOptions.pins`, `previewBoards(rows, { pins })`):
+  places a row on one slot of one board type. In `assignSlots` a pinned row is
+  a candidate for that slot only, ahead of every rule match, and never for
+  another slot on that board type; a pin on a different board type has no
+  effect on this one; a pinned substitute is placed (the pin is the decision).
+  Two rows pinned to one slot: source order wins, the other is an alternate. A
+  pin naming a slot the board type lacks is ignored; `validatePin` refuses it
+  at the API, as it refuses the lighting board, which has no slots to pin to.
+  The preview marks a pinned slot `pinned: true`. The CLI passes no pins and
+  is unchanged.
+- **Remove** (`excluded`): the row leaves every board and every gap list; the
+  snapshot taken at removal is what the Removed list shows, and Restore forgets
+  the exclusion. Removal never touches the sheet.
+- **Manual rows** (`manual-<uuid>`): rows added by hand to a project with no
+  sheet behind it (a blank project, or one seeded from a tracked definition),
+  normalized by the same `normalizedRow` the reader uses and appended AFTER the
+  stored rows, so a hand-added row never displaces a sheet row that matched a
+  slot first — pin it if it should.
+- **Adding to a sheet-backed project writes the sheet** (`sheet-write.ts`):
+  the row form is one field per sheet column (`sheetSchema`: picklists as
+  dropdowns, existing values as suggestions, system and formula columns left
+  out, the reader's three required columns marked required), `addSheetRow`
+  posts the row as a sibling below the last row with the same Unit Type and
+  Room Type (`fileNewRow`; falling back to the same Unit Type, then the bottom
+  of the sheet), and the project is re-read so the row arrives with its real
+  row id. Nothing here edits an existing sheet row.
+
 ## API
 
 | Route | Does |
@@ -215,6 +249,10 @@ including rooms no board type maps to, such as a living room. The web preview
 | `GET /api/autoboard/projects/[id]` | One project with its preview |
 | `PATCH /api/autoboard/projects/[id]` | `{ action: "refresh" }` or `{ name }` |
 | `DELETE /api/autoboard/projects/[id]` | Remove it |
+| `POST /api/autoboard/projects` with `{ name, blank: true }` | A project with no sheet and no rows yet |
+| `GET /api/autoboard/projects/[id]/rows` | The row form: one field per sheet column, or the manual field set |
+| `POST /api/autoboard/projects/[id]/rows` | `{ values }` — into the sheet (then re-read) or as a manual row |
+| `PATCH /api/autoboard/projects/[id]/rows/[rowId]` | `{ excluded: bool }` and/or `{ pin: { collageType, slotId } \| null }` |
 
 Mutating routes require `Content-Type: application/json`, the same CSRF defense
 the CLI's review server uses.

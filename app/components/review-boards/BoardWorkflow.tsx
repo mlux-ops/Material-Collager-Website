@@ -47,7 +47,8 @@ export type BuiltBoard = {
   kindLabel: string;
   unitType: string;
   roomLabel: string;
-  items: { slotId: string; role: string; name: string; brand: string; images: string[] }[];
+  // rowId is null for an item injected from the tile schedule rather than a row.
+  items: { slotId: string; role: string; name: string; brand: string; images: string[]; rowId: string | null }[];
   state: BoardState;
   selectionHash: string;
   renderOptions: { quality: string; background: string };
@@ -69,9 +70,11 @@ type Props = {
   board: BuiltBoard;
   renders: BoardRender[];
   onSaved: () => void | Promise<void>;
+  /** Removes the item's row from every board (see RowTools); absent when the caller offers no removal. */
+  onRemoveRow?: (rowId: string) => Promise<void>;
 };
 
-export function BoardWorkflow({ projectId, board, renders, onSaved }: Props) {
+export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow }: Props) {
   const [instruction, setInstruction] = useState(board.state.instruction);
   const [notes, setNotes] = useState<Record<string, string>>(board.state.notes);
   const [showPrompt, setShowPrompt] = useState(false);
@@ -254,6 +257,18 @@ export function BoardWorkflow({ projectId, board, renders, onSaved }: Props) {
                 saveSoon({ notes: { [item.slotId]: event.target.value } });
               }}
             />
+            {item.rowId && onRemoveRow ? (
+              <button
+                type="button"
+                className={styles.photoAction}
+                disabled={saving}
+                onClick={() => void onRemoveRow(item.rowId!)}
+              >
+                Remove
+              </button>
+            ) : (
+              <span />
+            )}
           </li>
         ))}
       </ul>

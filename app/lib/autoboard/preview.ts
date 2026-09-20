@@ -24,7 +24,7 @@ import {
   groupRowsByUnit,
   lightingFixtures,
 } from "./match.ts";
-import type { CollageType, LibraryRow, SlotConflict, SubstituteRecord } from "./types.ts";
+import type { CollageType, LibraryRow, SlotConflict, SlotPin, SubstituteRecord } from "./types.ts";
 
 export type PreviewSlot = {
   slotId: string;
@@ -38,7 +38,11 @@ export type PreviewSlot = {
   qty: number;
   reference: string;
   tier?: string;
+  /** Set when a person pinned this row to this slot (see SlotPin). */
+  pinned?: boolean;
 };
+
+export type PreviewOptions = { pins?: Map<string, SlotPin> };
 
 export type PreviewBoard = {
   id: string;
@@ -62,7 +66,8 @@ export type BoardsPreview = {
   skippedRooms: (RoomScope & { itemCount: number })[];
 };
 
-export function previewBoards(rows: LibraryRow[]): BoardsPreview {
+export function previewBoards(rows: LibraryRow[], options: PreviewOptions = {}): BoardsPreview {
+  const { pins } = options;
   const preview: BoardsPreview = {
     boards: [],
     rooms: [],
@@ -141,7 +146,7 @@ export function previewBoards(rows: LibraryRow[]): BoardsPreview {
     const heldBackRowIds = new Set<string>();
 
     for (const collageType of boardTypes) {
-      const { filled, conflicts, substitutes } = assignSlots(group.rows, collageType);
+      const { filled, conflicts, substitutes } = assignSlots(group.rows, collageType, pins);
       preview.conflicts.push(...conflicts.map((conflict) => ({ ...conflict, ...scope })));
       preview.substitutes.push(...substitutes.map((substitute) => ({ ...substitute, ...scope })));
       for (const substitute of substitutes) heldBackRowIds.add(substitute.rowId);
@@ -163,6 +168,8 @@ export function previewBoards(rows: LibraryRow[]): BoardsPreview {
           reference: slot.row.reference,
         };
         if (tier) entry.tier = tier;
+        const pin = pins?.get(slot.row.rowId);
+        if (pin && pin.collageType === collageType && pin.slotId === slot.preset.id) entry.pinned = true;
         slots.push(entry);
       }
 

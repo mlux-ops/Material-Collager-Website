@@ -141,6 +141,11 @@ export type SubstituteRecord = {
   sku: string;
 };
 
+// A person's explicit placement of one row on one board slot, overriding the
+// name rules for that board type only. Keyed by row id in BuildBoardsOptions
+// and previewBoards' options, so the CLI, which passes none, is unchanged.
+export type SlotPin = { collageType: CollageType; slotId: string };
+
 export type BuildBoardsOptions = {
   resolveImages: ResolveImages;
   imagesPerItem?: number;
@@ -148,4 +153,5 @@ export type BuildBoardsOptions = {
   gaps?: Gaps;
   tileAssignments?: Map<string, TileAssignment>;
   tileIndex?: Map<string, TileEntry>;
+  pins?: Map<string, SlotPin>;
 };

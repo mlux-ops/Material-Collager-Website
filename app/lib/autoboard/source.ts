@@ -186,7 +186,21 @@ const COLUMN_TITLE_ALTERNATES: Record<string, string[]> = {
 
 const REQUIRED_COLUMNS = ["unitType", "roomType", "costCode", "itemName", "sku"];
 
-export type SheetColumn = { id: number | string; title: string; primary?: boolean };
+// The parts of Smartsheet's column object this code reads. `type`, `options`
+// and the system/formula markers are what the row form (sheet-write.ts) needs
+// to render a field per column; the reader itself only uses id, title and
+// primary.
+export type SheetColumn = {
+  id: number | string;
+  title: string;
+  primary?: boolean;
+  type?: string;
+  options?: string[];
+  systemColumnType?: string;
+  formula?: string;
+  hidden?: boolean;
+  validation?: boolean;
+};
 
 export type SheetCell = {
   columnId: number | string;
@@ -194,7 +208,9 @@ export type SheetCell = {
   value?: string | number | boolean;
 };
 
-export type SheetRow = { id: number | string; cells?: SheetCell[] };
+// rowNumber and parentId are what filing a new row needs (sheet-write.ts); the
+// reader trusts the Unit Type / Room Type columns and never looks at either.
+export type SheetRow = { id: number | string; rowNumber?: number; parentId?: number | string; cells?: SheetCell[] };
 
 export type SheetResponse = {
   columns?: SheetColumn[];
