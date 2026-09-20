@@ -49,11 +49,25 @@
     "CF_ACCESS_AUD": "e5e3fd974be8176910f6fc29cbe180b7ebc73d08b2f3475138567f694b559e15"
   },
 
-  // Secrets (OPENAI_API_KEY, SMARTSHEET_ACCESS_TOKEN) are managed in the
-  // dashboard, not here. Without this flag wrangler treats this file as the
-  // whole truth for variables and DELETES a Text-type variable added in the
-  // dashboard on every deploy; Secret-type entries survive either way.
+  // Secrets are managed in the dashboard, not here. Without this flag wrangler
+  // treats this file as the whole truth for variables and DELETES a Text-type
+  // variable added in the dashboard on every deploy; Secret-type entries
+  // survive either way.
   "keep_vars": true,
+
+  // The Smartsheet token lives in the account-level Secrets Store (dashboard:
+  // Storage & databases → Secrets Store), which is a different product from a
+  // Worker's own secrets: a Worker sees a Secrets Store entry only through a
+  // binding like this one, and gets an object with an async get(), not a
+  // string — app/lib/autoboard-projects.ts reads both shapes. The entry must
+  // carry the Workers scope. Rotating it is an edit in the store; no deploy.
+  "secrets_store_secrets": [
+    {
+      "binding": "SMARTSHEET_ACCESS_TOKEN",
+      "store_id": "b3ae60f8f0d34d03ae7182deb77bbe76",
+      "secret_name": "SMARTSHEET_ACCESS_TOKEN"
+    }
+  ],
 
   "observability": {
     "enabled": true

@@ -55,7 +55,14 @@ type ProjectRow = {
   updated_at: number;
 };
 
-type RuntimeEnv = { DB?: D1Database; SMARTSHEET_ACCESS_TOKEN?: string };
+type RuntimeEnv = {
+  DB?: D1Database;
+  // In production this is a Secrets Store binding (wrangler.jsonc
+  // `secrets_store_secrets`), which arrives as an object with an async get(),
+  // not a string. It is a plain string when set as a Worker secret or in
+  // .dev.vars. The reader takes either shape.
+  SMARTSHEET_ACCESS_TOKEN?: string | SecretsStoreSecret;
+};
 
 function runtime(): RuntimeEnv {
   return env as unknown as RuntimeEnv;
@@ -97,21 +104,43 @@ async function initProjectStorage(): Promise<D1Database> {
   return DB;
 }
 
-// Read the same two ways OPENAI_API_KEY is: the env object, and process.env,
-// which nodejs_compat fills from the Worker's string bindings. When neither has
-// it, the error lists the bindings the Worker DOES see — a value staged in the
-// dashboard without pressing Deploy, added to a different Worker, or entered
-// under a misspelt name each shows up as a list that lacks it.
-export function smartsheetToken(): string {
-  const token = runtime().SMARTSHEET_ACCESS_TOKEN?.trim() || process.env.SMARTSHEET_ACCESS_TOKEN?.trim();
-  if (token) return token;
+// Reads the token from whichever place holds it: the Secrets Store binding
+// (production), a plain string binding (a Worker secret, or .dev.vars in local
+// dev), or process.env, which nodejs_compat fills from string bindings and is
+// the path OPENAI_API_KEY already uses. When none has it, the error says which
+// step failed and lists the bindings the Worker DOES see — a secret that is in
+// the wrong store, under a misspelt name, or without the Workers scope each
+// shows up as a specific message rather than a bare "not set".
+export async function smartsheetToken(): Promise<string> {
+  const bound = runtime().SMARTSHEET_ACCESS_TOKEN;
+  let storeProblem = "";
+  if (bound && typeof bound === "object") {
+    try {
+      const value = (await bound.get()).trim();
+      if (value) return value;
+      storeProblem = "the Secrets Store entry is empty";
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      storeProblem = `the Secrets Store binding could not be read (${detail})`;
+    }
+  }
+  const plain = (typeof bound === "string" ? bound.trim() : "") || process.env.SMARTSHEET_ACCESS_TOKEN?.trim();
+  if (plain) return plain;
+  if (storeProblem) {
+    throw new Error(
+      `SMARTSHEET_ACCESS_TOKEN is bound to the Secrets Store, but ${storeProblem}. In the Cloudflare dashboard ` +
+        "(Storage & databases → Secrets Store) check that a secret named SMARTSHEET_ACCESS_TOKEN exists in the " +
+        "store wrangler.jsonc names, with the Workers scope. For local dev, create a local copy: " +
+        "`npx wrangler secrets-store secret create <store-id> --name SMARTSHEET_ACCESS_TOKEN --scopes workers`, " +
+        "or put it in .dev.vars.",
+    );
+  }
   const visible = Object.keys(runtime()).sort();
   throw new Error(
     "SMARTSHEET_ACCESS_TOKEN is not set on this Worker" +
       (visible.length ? ` (it sees: ${visible.join(", ")})` : " (it sees no bindings at all)") +
-      ". Add it in the Cloudflare dashboard — Workers & Pages → the Worker → Settings → Variables and Secrets → " +
-      "Add, type Secret — and press Deploy; or run `npx wrangler secret put SMARTSHEET_ACCESS_TOKEN` " +
-      "(`npx wrangler secret list` shows what is stored). For local dev, put it in .dev.vars.",
+      ". wrangler.jsonc should bind it from the Secrets Store (`secrets_store_secrets`); failing that, add it as a " +
+      "Worker secret with `npx wrangler secret put SMARTSHEET_ACCESS_TOKEN`. For local dev, put it in .dev.vars.",
   );
 }
 
@@ -145,7 +174,7 @@ function detailFrom(row: ProjectRow): AutoboardProjectDetail {
 // Reads a sheet and narrows it, without touching storage. The sheet picker uses
 // this to show what is in a sheet before anyone commits to a project.
 export async function readSheet(sheetId: string, filter: SubsectionFilter = {}) {
-  const { rows, gaps, source } = await loadSmartsheetRows({ token: smartsheetToken(), sheetId });
+  const { rows, gaps, source } = await loadSmartsheetRows({ token: await smartsheetToken(), sheetId });
   const selected = filterRows(rows, filter);
   return { rows: selected, allRows: rows, gaps, source };
 }

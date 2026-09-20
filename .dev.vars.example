@@ -7,8 +7,12 @@
 # "Render draft" reports "Add an OpenAI API key in Settings".
 OPENAI_API_KEY=sk-...
 
-# Reading a project sheet on /review-boards. Not needed for anything else.
-SMARTSHEET_ACCESS_TOKEN=
+# SMARTSHEET_ACCESS_TOKEN is deliberately absent. It is a Secrets Store binding
+# (wrangler.jsonc `secrets_store_secrets`), and the binding owns the name, so a
+# line here is ignored. For local dev, create a copy in Miniflare's emulated
+# store once per machine (it lives under .wrangler/state, git-ignored):
+#   npx wrangler secrets-store secret create b3ae60f8f0d34d03ae7182deb77bbe76 --name SMARTSHEET_ACCESS_TOKEN --scopes workers
+# It prompts for the value; without --remote nothing leaves the machine.
 
 # Blank on purpose: wrangler.jsonc sets these for production, and Miniflare
 # picks them up too, so local dev enforces the Cloudflare Access gate and
