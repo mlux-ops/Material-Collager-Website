@@ -9,7 +9,7 @@
 // (pure); this module only persists them.
 
 import { env } from "cloudflare:workers";
-import { emptyRowEdits, manualRow, validatePin, type RowEdits } from "./autoboard/row-edits.ts";
+import { emptyRowEdits, manualRow, validatePin, type RemovedBoardSnapshot, type RowEdits } from "./autoboard/row-edits.ts";
 import type { LibraryRow, SlotPin } from "./autoboard/types.ts";
 
 type EditRow = {
@@ -70,6 +70,13 @@ function fold(rows: EditRow[]): RowEdits {
     } else if (row.kind === "excluded") {
       const parsed = parse<LibraryRow>(row.payload_json);
       if (parsed) edits.excluded.set(row.row_id, parsed);
+    } else if (row.kind === "excluded_board") {
+      // row_id holds the board id here, not a row id — the same table, keyed
+      // more generally than its column name suggests, rather than a second
+      // table for what is otherwise an identical shape (project, subject,
+      // kind, payload, timestamp).
+      const parsed = parse<RemovedBoardSnapshot>(row.payload_json);
+      if (parsed) edits.excludedBoards.set(row.row_id, parsed);
     } else if (row.kind === "pin") {
       const parsed = parse<SlotPin>(row.payload_json);
       if (parsed) edits.pins.set(row.row_id, parsed);
@@ -128,6 +135,14 @@ export async function addManualRow(projectId: string, input: Record<string, unkn
 export async function setRowExcluded(projectId: string, rowId: string, snapshot: LibraryRow | null): Promise<void> {
   if (snapshot) await put(projectId, rowId, "excluded", snapshot);
   else await drop(projectId, rowId, "excluded");
+}
+
+// Removing a whole board, the board-level counterpart to setRowExcluded: the
+// snapshot lets the Removed list name it and lets a restore bring back the
+// exact board a person removed, whatever building the project now says.
+export async function setBoardExcluded(projectId: string, boardId: string, snapshot: RemovedBoardSnapshot | null): Promise<void> {
+  if (snapshot) await put(projectId, boardId, "excluded_board", snapshot);
+  else await drop(projectId, boardId, "excluded_board");
 }
 
 export async function setRowPin(projectId: string, rowId: string, pin: unknown | null): Promise<SlotPin | null> {

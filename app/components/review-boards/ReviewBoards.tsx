@@ -90,8 +90,16 @@ type Project = {
 // restore it, whatever the sheet has said since.
 type RemovedRow = { rowId: string; itemName: string; unitType: string; roomLabel: string; sku: string };
 
+// A board as it was when removed: enough to name it in the Removed list.
+type RemovedBoard = { id: string; title: string; unitType: string; roomLabel: string; kindLabel: string };
+
 // The reviewer's edits on top of the sheet's rows (app/lib/autoboard/row-edits.ts).
-type ProjectEdits = { removed: RemovedRow[]; pins: Record<string, Pin>; manualRowIds: string[] };
+type ProjectEdits = {
+  removed: RemovedRow[];
+  removedBoards: RemovedBoard[];
+  pins: Record<string, Pin>;
+  manualRowIds: string[];
+};
 
 type ProjectDetail = Project & { preview: BoardsPreview; edits: ProjectEdits };
 
@@ -329,6 +337,32 @@ export function ReviewBoards() {
   const pinRow = useCallback((rowId: string, pin: Pin | null) => patchRow(rowId, { pin }), [patchRow]);
   const removeRow = useCallback((rowId: string) => patchRow(rowId, { excluded: true }), [patchRow]);
   const restoreRow = useCallback((rowId: string) => patchRow(rowId, { excluded: false }), [patchRow]);
+
+  // A board's own removal — the whole board's card disappears from both
+  // views, rows and all — as distinct from removing one of its rows.
+  const patchBoard = useCallback(
+    async (boardId: string, excluded: boolean) => {
+      if (!activeId) return;
+      setBusy("editing");
+      setError("");
+      try {
+        await api(`/api/autoboard/projects/${encodeURIComponent(activeId)}/boards/${encodeURIComponent(boardId)}`, {
+          method: "PATCH",
+          headers: JSON_HEADERS,
+          body: JSON.stringify({ excluded }),
+        });
+        await reloadPhotos();
+        await loadProjects();
+      } catch (cause) {
+        setError((cause as Error).message);
+      } finally {
+        setBusy("");
+      }
+    },
+    [activeId, reloadPhotos, loadProjects],
+  );
+  const removeBoard = useCallback((boardId: string) => patchBoard(boardId, true), [patchBoard]);
+  const restoreBoard = useCallback((boardId: string) => patchBoard(boardId, false), [patchBoard]);
 
   const onRowAdded = useCallback(async () => {
     await reloadPhotos();
@@ -598,15 +632,26 @@ export function ReviewBoards() {
                   renders={renders}
                   onSaved={reloadPhotos}
                   onRemoveRow={removeRow}
+                  onRemoveBoard={removeBoard}
                 />
               ) : (
               <div className={styles.boards}>
                 {shown.preview.boards.map((board) => (
                   <article key={board.id} className={styles.board}>
                     <header className={styles.boardHead}>
-                      <span className={styles.boardRoom}>
-                        {board.unitType} · {board.roomLabel}
-                      </span>
+                      <div className={styles.boardHeadRow}>
+                        <span className={styles.boardRoom}>
+                          {board.unitType} · {board.roomLabel}
+                        </span>
+                        <button
+                          type="button"
+                          className={styles.photoAction}
+                          disabled={busy !== ""}
+                          onClick={() => void removeBoard(board.id)}
+                        >
+                          Remove board
+                        </button>
+                      </div>
                       <span className={styles.boardKind}>{board.kindLabel}</span>
                       <span className={styles.boardFill}>
                         {board.slots.length} of {board.slots.length + board.unfilledSlots.length} slots
@@ -696,6 +741,7 @@ export function ReviewBoards() {
                 onPin={pinRow}
                 onRemove={removeRow}
                 onRestore={restoreRow}
+                onRestoreBoard={restoreBoard}
               />
 
               <AddRowDialog
@@ -732,6 +778,7 @@ function GapsSection({
   onPin,
   onRemove,
   onRestore,
+  onRestoreBoard,
 }: {
   preview: BoardsPreview;
   edits: ProjectEdits;
@@ -739,16 +786,19 @@ function GapsSection({
   onPin: (rowId: string, pin: Pin | null) => Promise<void>;
   onRemove: (rowId: string) => Promise<void>;
   onRestore: (rowId: string) => Promise<void>;
+  onRestoreBoard: (boardId: string) => Promise<void>;
 }) {
   const { substitutes, unmapped, skippedRooms, skippedRoomItems, conflicts } = preview;
   const removed = edits.removed;
+  const removedBoards = edits.removedBoards;
   if (
     !substitutes.length &&
     !unmapped.length &&
     !skippedRooms.length &&
     !skippedRoomItems.length &&
     !conflicts.length &&
-    !removed.length
+    !removed.length &&
+    !removedBoards.length
   ) {
     return null;
   }
@@ -761,6 +811,27 @@ function GapsSection({
         substitute is held back deliberately, and an unmapped row may simply not belong on a presentation
         board. Pin a row to put it on a slot anyway; Remove takes it off every board until restored.
       </p>
+
+      {removedBoards.length ? (
+        <div className={styles.gapGroup}>
+          <h3 className={styles.gapHead}>Removed boards ({removedBoards.length})</h3>
+          <ul className={styles.gapList}>
+            {removedBoards.map((entry) => (
+              <li key={entry.id} className={styles.gapItem}>
+                {entry.title}{" "}
+                <span className={styles.gapWhere}>
+                  {entry.unitType} {entry.roomLabel} · {entry.kindLabel}
+                </span>
+                <span className={styles.gapTools}>
+                  <button type="button" className={styles.photoAction} disabled={busy} onClick={() => void onRestoreBoard(entry.id)}>
+                    Restore
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {removed.length ? (
         <div className={styles.gapGroup}>
@@ -916,12 +987,14 @@ function BuiltBoards({
   renders,
   onSaved,
   onRemoveRow,
+  onRemoveBoard,
 }: {
   built: Built | null;
   projectId: string;
   renders: BoardRender[];
   onSaved: () => Promise<void>;
   onRemoveRow: (rowId: string) => Promise<void>;
+  onRemoveBoard: (boardId: string) => Promise<void>;
 }) {
   const [openBoardId, setOpenBoardId] = useState<string | null>(null);
 
@@ -973,6 +1046,13 @@ function BuiltBoards({
         renders={openBoard ? renders.filter((render) => render.boardId === openBoard.id) : []}
         onSaved={onSaved}
         onRemoveRow={onRemoveRow}
+        onRemoveBoard={async (boardId) => {
+          // The board this drawer shows is about to stop existing — close
+          // before the removal lands rather than after, so the drawer never
+          // sits open on a board no longer in the project.
+          setOpenBoardId(null);
+          await onRemoveBoard(boardId);
+        }}
         onClose={() => setOpenBoardId(null)}
       />
     </>

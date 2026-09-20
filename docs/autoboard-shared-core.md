@@ -269,6 +269,20 @@ D1 table `autoboard_row_edits`), so a refresh keeps them:
 - **Remove** (`excluded`): the row leaves every board and every gap list; the
   snapshot taken at removal is what the Removed list shows, and Restore forgets
   the exclusion. Removal never touches the sheet.
+- **Remove a whole board** (`excludeBoards`, `RemovedBoardSnapshot`): distinct
+  from removing a row — the board's rows stay in the project and still count
+  toward any OTHER board they belong to, only this one board's card disappears.
+  Stored the same way as a row removal (same `autoboard_row_edits` table, kind
+  `"excluded_board"`, `row_id` holding the board id instead of a row id) and
+  the same shape of snapshot-and-restore. Unlike `applyRowEdits`, this cannot
+  run before a board exists — a board's id is assigned by `buildBoards`/
+  `previewBoards`, not present in the row list going in — so both
+  `storedPreview` and `buildProjectBoards` call `excludeBoards` themselves on
+  the boards array each one already produced, off the SAME ids (`boardIdFor`
+  is deterministic — see "Lighting board" above), so a board removed from one
+  view is gone from the other too. Board STATE (instruction, notes, render
+  options; a separate table, `autoboard-board-state.ts`) is untouched by
+  removal, so a restored board comes back exactly as it was left.
 - **Manual rows** (`manual-<uuid>`): rows added by hand to a project with no
   sheet behind it (a blank project, or one seeded from a tracked definition),
   normalized by the same `normalizedRow` the reader uses and appended AFTER the
@@ -297,6 +311,7 @@ D1 table `autoboard_row_edits`), so a refresh keeps them:
 | `GET /api/autoboard/projects/[id]/rows` | The row form: one field per sheet column, or the manual field set |
 | `POST /api/autoboard/projects/[id]/rows` | `{ values }` — into the sheet (then re-read) or as a manual row |
 | `PATCH /api/autoboard/projects/[id]/rows/[rowId]` | `{ excluded: bool }` and/or `{ pin: { collageType, slotId } \| null }` |
+| `PATCH /api/autoboard/projects/[id]/boards/[boardId]` | `{ excluded: bool }` removes/restores the whole board; otherwise board state fields (`instruction`, `heroItemId`, `quality`, `background`, `notes`) |
 
 Mutating routes require `Content-Type: application/json`, the same CSRF defense
 the CLI's review server uses.

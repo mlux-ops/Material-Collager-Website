@@ -22,7 +22,7 @@ import {
 import { deleteProjectBoardState, emptyBoardState, listBoardState, type BoardState } from "./autoboard-board-state.ts";
 import { deleteProjectRenders } from "./autoboard-renders.ts";
 import { previewBoards, filterRows, type BoardsPreview, type SubsectionFilter } from "./autoboard/preview.ts";
-import { applyRowEdits, emptyRowEdits, type RowEdits } from "./autoboard/row-edits.ts";
+import { applyRowEdits, emptyRowEdits, excludeBoards, type RemovedBoardSnapshot, type RowEdits } from "./autoboard/row-edits.ts";
 import { addSheetRow, fetchSheet, sheetSchema, type RowField } from "./autoboard/sheet-write.ts";
 import { collectRows, emptyGaps, loadSmartsheetRows } from "./autoboard/source.ts";
 import type { Board, Gaps, LibraryRow, SlotPin } from "./autoboard/types.ts";
@@ -32,6 +32,7 @@ import {
   deleteProjectRowEdits,
   listAllRowEdits,
   listRowEdits,
+  setBoardExcluded,
   setRowExcluded,
   setRowPin,
 } from "./autoboard-row-edits.ts";
@@ -53,6 +54,7 @@ export type AutoboardProject = {
 // pinned where, and which rows were added by hand.
 export type ProjectEdits = {
   removed: LibraryRow[];
+  removedBoards: RemovedBoardSnapshot[];
   pins: Record<string, SlotPin>;
   manualRowIds: string[];
 };
@@ -179,7 +181,8 @@ export function projectId(): string {
 function storedPreview(row: ProjectRow, edits: RowEdits): { rows: LibraryRow[]; preview: BoardsPreview } {
   const stored = JSON.parse(row.rows_json) as LibraryRow[];
   const rows = applyRowEdits(stored, edits);
-  return { rows, preview: previewBoards(rows, { pins: edits.pins }) };
+  const preview = previewBoards(rows, { pins: edits.pins });
+  return { rows, preview: { ...preview, boards: excludeBoards(preview.boards, edits.excludedBoards.keys()) } };
 }
 
 function publicProject(row: ProjectRow, edits: RowEdits): AutoboardProject {
@@ -203,6 +206,7 @@ function detailFrom(row: ProjectRow, edits: RowEdits): AutoboardProjectDetail {
     ...storedPreview(row, edits),
     edits: {
       removed: [...edits.excluded.values()],
+      removedBoards: [...edits.excludedBoards.values()],
       pins: Object.fromEntries(edits.pins),
       manualRowIds: edits.manual.map((manual) => manual.rowId),
     },
@@ -539,6 +543,43 @@ export async function setProjectRowExcluded(
   return detailFor(row);
 }
 
+// A board as the project currently knows it: found on the (not-yet-excluded)
+// preview, or in the snapshot from a previous removal — a restore does not
+// need the board to still exist, only to have existed once.
+async function knownBoard(row: ProjectRow, boardId: string): Promise<RemovedBoardSnapshot | undefined> {
+  const edits = await listRowEdits(row.id);
+  const { preview } = storedPreview(row, edits);
+  const board = preview.boards.find((entry) => entry.id === boardId);
+  if (board) return { id: board.id, title: board.title, unitType: board.unitType, roomLabel: board.roomLabel, kindLabel: board.kindLabel };
+  return edits.excludedBoards.get(boardId);
+}
+
+/**
+ * Removes a board entirely, distinct from removing a row: the board's rows
+ * stay in the project (and still count toward any other board they belong
+ * to), only this one board's card disappears from both the preview and the
+ * built boards, in both views alike (storedPreview and buildProjectBoards
+ * apply the same excludedBoards set). Board STATE (instruction, notes,
+ * render options) lives in a separate table and is untouched, so restoring a
+ * board brings it back exactly as it was left.
+ */
+export async function setProjectBoardExcluded(
+  id: string,
+  boardId: string,
+  excluded: boolean,
+): Promise<AutoboardProjectDetail | null> {
+  const row = await projectRow(id);
+  if (!row) return null;
+  if (excluded) {
+    const known = await knownBoard(row, boardId);
+    if (!known) throw new Error("That board is not in this project.");
+    await setBoardExcluded(id, boardId, known);
+  } else {
+    await setBoardExcluded(id, boardId, null);
+  }
+  return detailFor(row);
+}
+
 export async function setProjectRowPin(
   id: string,
   rowId: string,
@@ -585,11 +626,12 @@ export async function buildProjectBoards(
 ): Promise<{ boards: BuiltBoard[]; gaps: Gaps }> {
   const [byRow, state] = await Promise.all([selectedImagesByRow(project.id), listBoardState(project.id)]);
   const gaps = emptyGaps();
-  const { boards } = buildBoards(project.rows, {
+  const { boards: builtBoards } = buildBoards(project.rows, {
     resolveImages: (rowId) => byRow.get(rowId) ?? [],
     gaps,
     pins: new Map(Object.entries(project.edits.pins)),
   });
+  const boards = excludeBoards(builtBoards, project.edits.removedBoards.map((entry) => entry.id));
 
   return {
     gaps,

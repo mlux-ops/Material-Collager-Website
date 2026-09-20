@@ -23,9 +23,12 @@ type Props = {
   onClose: () => void;
   onSaved: () => void | Promise<void>;
   onRemoveRow: (rowId: string) => Promise<void>;
+  /** Removes the whole board from the project — its rows stay, only this
+   *  board's card goes. Reversible from the Removed boards list. */
+  onRemoveBoard: (boardId: string) => Promise<void>;
 };
 
-export function BoardDrawer({ projectId, board, renders, onClose, onSaved, onRemoveRow }: Props) {
+export function BoardDrawer({ projectId, board, renders, onClose, onSaved, onRemoveRow, onRemoveBoard }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -51,9 +54,14 @@ export function BoardDrawer({ projectId, board, renders, onClose, onSaved, onRem
               </span>
               <h2 className={styles.drawerTitle}>{board.kindLabel}</h2>
             </div>
-            <button type="button" className={styles.secondary} onClick={onClose}>
-              Close
-            </button>
+            <div className={styles.drawerHeadActions}>
+              <button type="button" className={styles.quiet} onClick={() => void onRemoveBoard(board.id)}>
+                Remove board
+              </button>
+              <button type="button" className={styles.secondary} onClick={onClose}>
+                Close
+              </button>
+            </div>
           </div>
           <div className={styles.drawerBody}>
             <BoardWorkflow
