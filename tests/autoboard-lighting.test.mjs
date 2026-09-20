@@ -392,6 +392,40 @@ test("a pin overrides isLightFixture and the substitute rule independent of tier
   }
 });
 
+// Regression: the Penthouse sheet tags its tiers as a trailing "- BETTER"
+// (no "-Good- option -" wrapper), which extractTier originally didn't
+// recognize at all. The row then read as untiered, so it rendered identically
+// on every tier board instead of only its own — the exact duplication the
+// live screenshot showed across the Good and Better boards.
+test("a suffix-style tier tag (\"Name - BETTER\") splits its board same as the prefix style, with no duplication across tiers", () => {
+  const rows = [
+    row({ rowId: "s1", unitType: "Penthouse", roomLabel: "Bath 2", roomOriginal: "Bath 2", itemName: "Dimple Wall Sconce - Black and White Glass, Maybe Amber Glass? - BETTER" }),
+    row({ rowId: "s2", unitType: "Penthouse", itemName: "Modern Forms Cinch Vanity Light" }),
+    // A second untiered fixture, so Good and Best still clear the lighting
+    // board's own 2-item minimum once s1 is (correctly) excluded from them —
+    // isolating the tier fix from that unrelated gate.
+    row({ rowId: "s3", unitType: "Penthouse", roomLabel: "Bath 2", roomOriginal: "Bath 2", itemName: "Tech Lighting Mini Pendant" }),
+  ];
+  const preview = previewBoards(rows);
+  const good = findLighting(preview.boards, "Penthouse", "penthouse-all-rooms-good-lighting");
+  const better = findLighting(preview.boards, "Penthouse", "penthouse-all-rooms-better-lighting");
+  const best = findLighting(preview.boards, "Penthouse", "penthouse-all-rooms-best-lighting");
+
+  // The tiered sconce is exclusive to Better; Good and Best only get the two
+  // untiered fixtures. Before the fix all three boards held all three rows.
+  assert.deepEqual(good.slots.map((slot) => slot.rowId).sort(), ["s2", "s3"]);
+  assert.deepEqual(better.slots.map((slot) => slot.rowId).sort(), ["s1", "s2", "s3"]);
+  assert.deepEqual(best.slots.map((slot) => slot.rowId).sort(), ["s2", "s3"]);
+  assert.equal(better.slots.find((slot) => slot.rowId === "s1").tier, "better");
+  assert.equal(better.slots.find((slot) => slot.rowId === "s1").name, "Dimple Wall Sconce - Black and White Glass, Maybe Amber Glass?");
+
+  const { boards } = buildBoards(rows, { resolveImages: images, gaps: emptyGaps() });
+  const builtBetter = findLighting(boards, "Penthouse", "penthouse-all-rooms-better-lighting");
+  const builtGood = findLighting(boards, "Penthouse", "penthouse-all-rooms-good-lighting");
+  assert.deepEqual(builtBetter.items.map((item) => item.rowId).sort(), ["s1", "s2", "s3"]);
+  assert.deepEqual(builtGood.items.map((item) => item.rowId).sort(), ["s2", "s3"]);
+});
+
 test("a sheet with no fixtures at all gets no lighting preview and no lighting board", () => {
   const rows = [
     row({ rowId: "1", roomLabel: "Bath 2", roomOriginal: "Bath 2", itemName: "Brizo Odin Lavatory Faucet", costCode: "11 45 Plumbing Fixtures M" }),

@@ -386,6 +386,21 @@ test("extractTier strips a leading good/better/best marker and records the tier"
   assert.deepEqual(extractTier("Brizo Odin Lavatory Faucet"), { name: "Brizo Odin Lavatory Faucet", tier: undefined });
 });
 
+// Some rows tag the tier as a bare trailing word instead — e.g. the Penthouse
+// lighting rows read "Dimple Wall Sconce - Black and White Glass, Maybe Amber
+// Glass? - BETTER", no "option" wording, tier word at the very end. Before this
+// suffix form was recognized, extractTier left the whole string untouched, so
+// the row read as untiered and rendered identically (and duplicated) across
+// every Good/Better/Best board instead of only its own tier's.
+test("extractTier also strips a trailing good/better/best marker and records the tier", () => {
+  assert.deepEqual(
+    extractTier("Dimple Wall Sconce - Black and White Glass, Maybe Amber Glass? - BETTER"),
+    { name: "Dimple Wall Sconce - Black and White Glass, Maybe Amber Glass?", tier: "better" },
+  );
+  assert.deepEqual(extractTier("Duo Pendant - Good"), { name: "Duo Pendant", tier: "good" });
+  assert.deepEqual(extractTier("Duo Pendant - Best"), { name: "Duo Pendant", tier: "best" });
+});
+
 test("buildBoards splits the good/better/best marker off item.name into item.tier", () => {
   const rows = [
     row({ rowId: "1", itemName: "-Better- option - Duo Pendant", costCode: "26 51 Lighting Fixtures - M" }),
