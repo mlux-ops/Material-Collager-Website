@@ -12,6 +12,7 @@ import {
   MANUAL_ROW_PREFIX,
   applyRowEdits,
   emptyRowEdits,
+  excludeBoards,
   isManualRowId,
   manualRow,
   pinChoices,
@@ -111,6 +112,22 @@ test("buildBoards and previewBoards both honour pins, and the preview marks the 
   assert.ok(!preview.unmapped.some((entry) => entry.rowId === "3"));
 });
 
+test("excludeBoards applied to buildBoards and previewBoards output drops the same board from both, by the id they share", () => {
+  const rows = [
+    row({ rowId: "1", itemName: "Brizo Odin Lavatory Faucet" }),
+    row({ rowId: "2", itemName: "Brizo Round Showerhead" }),
+  ];
+  const { boards: built } = buildBoards(rows, { resolveImages: images, gaps: emptyGaps() });
+  const preview = previewBoards(rows);
+  const targetId = built.find((entry) => entry.collageType === "bathroom_fixture_collage").id;
+  assert.ok(preview.boards.some((entry) => entry.id === targetId), "preview and build must agree on the id to begin with");
+
+  assert.ok(!excludeBoards(built, [targetId]).some((entry) => entry.id === targetId));
+  assert.ok(!excludeBoards(preview.boards, [targetId]).some((entry) => entry.id === targetId));
+  // A board id that never existed removes nothing — the count is unchanged.
+  assert.equal(excludeBoards(built, ["no-such-board"]).length, built.length);
+});
+
 // ---------------------------------------------------------------------------
 // Row edits
 // ---------------------------------------------------------------------------
@@ -121,6 +138,22 @@ test("applyRowEdits keeps sheet rows first, appends manual rows, and drops what 
   edits.excluded.set("2", row({ rowId: "2", itemName: "Removed" }));
   const rows = applyRowEdits([row({ rowId: "1" }), row({ rowId: "2" }), row({ rowId: "1" })], edits);
   assert.deepEqual(rows.map((entry) => entry.rowId), ["1", "manual-a"]);
+});
+
+// A board removed entirely: unlike applyRowEdits (which the row list is built
+// from before a board exists), excludeBoards runs on the boards array AFTER
+// buildBoards/previewBoards produce it — the id it filters on does not exist
+// any earlier.
+test("excludeBoards drops only the named board ids, leaving every other board untouched", () => {
+  const boards = [{ id: "a" }, { id: "b" }, { id: "c" }];
+  assert.deepEqual(excludeBoards(boards, ["b"]), [{ id: "a" }, { id: "c" }]);
+  // Accepts a Map's keys directly (how RowEdits.excludedBoards is stored) as
+  // well as a plain array (how the public ProjectEdits.removedBoards shape
+  // carries the same ids over HTTP) -- both are what the two real call sites
+  // actually pass.
+  const asMapKeys = new Map([["a", { id: "a", title: "A" }]]).keys();
+  assert.deepEqual(excludeBoards(boards, asMapKeys), [{ id: "b" }, { id: "c" }]);
+  assert.deepEqual(excludeBoards(boards, []), boards);
 });
 
 test("manualRow normalizes like the sheet reader and refuses a row no board could use", () => {

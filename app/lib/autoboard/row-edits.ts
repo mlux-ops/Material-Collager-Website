@@ -19,14 +19,26 @@ import { COLLAGE_TYPES, ITEM_PRESETS } from "../collage.ts";
 import { normalizedRow } from "./source.ts";
 import type { CollageType, LibraryRow, SlotPin } from "./types.ts";
 
+// A board as it was when removed: enough to name it in the Removed list. A
+// board has no rows of its own to snapshot — a room's worth of items, not one
+// row — so this names the board itself rather than reusing LibraryRow.
+export type RemovedBoardSnapshot = {
+  id: string;
+  title: string;
+  unitType: string;
+  roomLabel: string;
+  kindLabel: string;
+};
+
 export type RowEdits = {
   manual: LibraryRow[];
   excluded: Map<string, LibraryRow>;
+  excludedBoards: Map<string, RemovedBoardSnapshot>;
   pins: Map<string, SlotPin>;
 };
 
 export function emptyRowEdits(): RowEdits {
-  return { manual: [], excluded: new Map(), pins: new Map() };
+  return { manual: [], excluded: new Map(), excludedBoards: new Map(), pins: new Map() };
 }
 
 export const MANUAL_ROW_PREFIX = "manual-";
@@ -48,6 +60,20 @@ export function applyRowEdits(rows: LibraryRow[], edits: RowEdits): LibraryRow[]
     result.push(row);
   }
   return result;
+}
+
+// A whole board removed entirely, as distinct from a row excluded off every
+// board: this drops the board itself, not its rows, so the rows remain (and
+// still count) toward any OTHER board they belong to. Unlike applyRowEdits,
+// this cannot run before buildBoards/previewBoards — a board's id does not
+// exist until one of them assigns it — so callers apply it to the boards
+// array each produces, rather than to the row list going in. boardIdFor is
+// deterministic, so a preview board and its eventual built board share an id;
+// applying this the same way on both sides is what keeps them agreeing on
+// which boards exist.
+export function excludeBoards<T extends { id: string }>(boards: T[], excludedBoards: Iterable<string>): T[] {
+  const ids = excludedBoards instanceof Set ? excludedBoards : new Set(excludedBoards);
+  return boards.filter((board) => !ids.has(board.id));
 }
 
 // A hand-entered row, normalized by the same function the sheet reader uses,

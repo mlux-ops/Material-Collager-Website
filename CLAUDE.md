@@ -87,11 +87,15 @@ sheet needs `SMARTSHEET_ACCESS_TOKEN`, which is a Secrets Store binding, not a
 Worker secret — see Deploy.
 
 A person's edits sit on top of the sheet's rows and survive a refresh: pins
-(`SlotPin`, honoured by `assignSlots` when passed), removals, and hand-added
+(`SlotPin`, honoured by `assignSlots` when passed), row removals, and hand-added
 rows for projects with no sheet (blank projects, seeded ones). Adding an item to
 a sheet-backed project writes a new row INTO the sheet, filed under its unit
 type and room, then re-reads it (`app/lib/autoboard/sheet-write.ts`); removal
-never touches the sheet. Rules in `docs/autoboard-shared-core.md`.
+never touches the sheet. A whole BOARD can also be removed (`excludeBoards` in
+`app/lib/autoboard/row-edits.ts`) — its rows stay and still count toward any
+other board they belong to, only that one board's card disappears, in both the
+preview and the built boards alike — and restored from the project's Removed
+boards list. Rules in `docs/autoboard-shared-core.md`.
 
 Server-side URL fetching is an SSRF surface — a sheet cell is untrusted input.
 `app/lib/autoboard/photo-sources.ts` holds the guard; read it before touching
