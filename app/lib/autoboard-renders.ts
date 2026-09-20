@@ -19,6 +19,7 @@
 import { env } from "cloudflare:workers";
 import { DEFAULT_VARIANTS, boardPayload, type Variant } from "./autoboard/variants.ts";
 import { boardForRender, renderOptionsHash, resolveRenderOptions, selectionHash } from "./autoboard/render-options.ts";
+import { decodeGeneratedImage } from "./generated-image.ts";
 import type { Board } from "./autoboard/types.ts";
 import { getPhotoObject } from "./autoboard-photos.ts";
 
@@ -207,15 +208,11 @@ export async function renderBoardDraft(
     throw new Error(`The render failed: ${message}`);
   }
 
-  const costHeader = Number(response.headers.get("x-cost-usd") ?? "");
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (!bytes.length) throw new Error("The render came back empty.");
+  const { bytes, contentType, costUsd } = decodeGeneratedImage(await response.json());
 
   const id = `render-${crypto.randomUUID()}`;
   const r2Key = `autoboard/renders/${projectId}/${board.id}/${id}.png`;
-  await bucket().put(r2Key, bytes as unknown as ArrayBufferView, {
-    httpMetadata: { contentType: response.headers.get("content-type") ?? "image/png" },
-  });
+  await bucket().put(r2Key, bytes, { httpMetadata: { contentType } });
 
   const row: RenderRow = {
     id,
@@ -229,7 +226,7 @@ export async function renderBoardDraft(
     render_options_hash: renderOptionsHash(renderOptions),
     quality: renderOptions.quality,
     background: renderOptions.background,
-    cost_usd: Number.isFinite(costHeader) && costHeader > 0 ? costHeader : null,
+    cost_usd: costUsd,
     created_at: Date.now(),
   };
   await DB.prepare(
