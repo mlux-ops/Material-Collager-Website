@@ -166,7 +166,7 @@ Locally it comes from Miniflare's emulated store (`npx wrangler secrets-store
 secret create <store-id> --name SMARTSHEET_ACCESS_TOKEN --scopes workers`), not
 from `.dev.vars` — the binding owns the name. See `docs/DEPLOYING.md`.
 
-## Lighting board (one per unit type)
+## Lighting board (one per unit type, up to three when tiered)
 
 Besides the per-room boards, `buildBoards` emits one `lighting_collage` board
 per unit type that gathers **every light fixture across the unit's rooms**,
@@ -214,6 +214,29 @@ including rooms no board type maps to, such as a living room. The web preview
   `isLightFixture` and the substitute rule say, and `previewBoards` lists every
   such stranded row individually in `skippedRoomItems` — not just a `skippedRooms`
   count — precisely so there is something to pin.
+- **Good/Better/Best** (`LIGHTING_TIERS`, `lightingTiersFor`, `lightingScopeLabel`
+  in `match.ts`): the sheet's existing tier-prefix convention (`-Good- option -
+  …`, read by `extractTier`, the same one that tags a good/better/best
+  alternate on any other board) can differentiate a unit's light fixtures too.
+  `lightingTiersFor(unitRows)` decides, per unit, whether ANY fixture carries a
+  tier tag; if so, `buildLightingBoards`/`previewBoards` build THREE boards
+  instead of one — `<unit>-all-rooms-good-lighting`, `…-better-…`, `…-best-…`,
+  titled `<Unit> Lighting Collage — Good` and so on — each built by the same
+  `lightingFixtures(rows, pins, tier)` call with `tier` narrowing which rows
+  are candidates: a fixture tagged for a DIFFERENT tier is excluded, one
+  tagged for no tier is kept on every board (it has no alternate to swap in,
+  so each package still needs the whole plan). Both functions call the exact
+  same `lightingTiersFor` — the preview and the build can never disagree on
+  which units split. A unit with no tiered fixture at all still gets the
+  single consolidated board exactly as before tiering existed: three
+  identical boards would be pure noise and three times the render spend for
+  no difference between them. A substitute held back from a tiered unit is
+  still reported once against `lighting_collage`, not once per tier board.
+  Pins are independent of tiering: a pinned untiered row still lands on every
+  tier board, the same as it would with no tiering in play at all. The review
+  UI needed no changes — a board is already rendered generically by its id,
+  `roomLabel`, `kindLabel` and `title`, so three lighting boards per unit show
+  up as three ordinary board cards.
 
 ## Edits on top of the sheet
 

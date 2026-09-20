@@ -264,6 +264,134 @@ test("previewBoards lists a stranded row individually, and a lighting pin remove
   assert.equal(board.slots.find((entry) => entry.rowId === "1").pinned, undefined);
 });
 
+// ---------------------------------------------------------------------------
+// Good/Better/Best: a unit whose light fixtures are tiered splits into three
+// boards — one per package — each holding its own tier's items plus every
+// untiered fixture (which has no alternate to swap in, so it belongs on all
+// three). A unit that never tiers its fixtures still gets one consolidated
+// board, exactly as before tiering existed.
+// ---------------------------------------------------------------------------
+
+const TIERED_ROWS = [
+  row({ rowId: "t1", unitType: "Duplex Down", roomLabel: "Bath 2", roomOriginal: "Bath 2", itemName: "-Good- option - Cinch Vanity Light" }),
+  row({ rowId: "t2", unitType: "Duplex Down", roomLabel: "Bath 2", roomOriginal: "Bath 2", itemName: "-Better- option - Cinch Vanity Light Plus" }),
+  row({ rowId: "t3", unitType: "Duplex Down", roomLabel: "Bath 2", roomOriginal: "Bath 2", itemName: "-Best- option - Cinch Vanity Light Deluxe" }),
+  // Untiered — has no Good/Better/Best alternate, so it belongs on every package.
+  row({ rowId: "t4", unitType: "Duplex Down", itemName: "Tech Lighting Mini Pendant" }),
+];
+
+function findLighting(boards, unitType, id) {
+  const board = boards.find((entry) => entry.collageType === "lighting_collage" && entry.unitType === unitType && entry.id === id);
+  assert.ok(board, `expected a lighting board with id ${id}`);
+  return board;
+}
+
+test("a unit whose fixtures include a tier splits into three boards, each holding its own tier plus every untiered fixture", () => {
+  const preview = previewBoards(TIERED_ROWS);
+  const good = findLighting(preview.boards, "Duplex Down", "duplex-down-all-rooms-good-lighting");
+  const better = findLighting(preview.boards, "Duplex Down", "duplex-down-all-rooms-better-lighting");
+  const best = findLighting(preview.boards, "Duplex Down", "duplex-down-all-rooms-best-lighting");
+
+  assert.equal(good.roomLabel, "All Rooms — Good");
+  assert.equal(good.title, "Duplex Down Lighting Collage — Good");
+  assert.equal(good.kindLabel, "Lighting Collage");
+
+  assert.deepEqual(good.slots.map((slot) => slot.rowId).sort(), ["t1", "t4"]);
+  assert.deepEqual(better.slots.map((slot) => slot.rowId).sort(), ["t2", "t4"]);
+  assert.deepEqual(best.slots.map((slot) => slot.rowId).sort(), ["t3", "t4"]);
+
+  // Each item's own tier is recorded (or absent, for the untiered pendant).
+  assert.equal(good.slots.find((slot) => slot.rowId === "t1").tier, "good");
+  assert.equal(better.slots.find((slot) => slot.rowId === "t2").tier, "better");
+  assert.equal(best.slots.find((slot) => slot.rowId === "t3").tier, "best");
+  assert.equal(good.slots.find((slot) => slot.rowId === "t4").tier, undefined);
+
+  // Only three lighting boards for this unit — no fourth, untiered one.
+  const allLighting = preview.boards.filter((entry) => entry.collageType === "lighting_collage" && entry.unitType === "Duplex Down");
+  assert.equal(allLighting.length, 3);
+});
+
+test("buildBoards produces the same three tier boards, and each validates against the generator", () => {
+  const gaps = emptyGaps();
+  const { boards } = buildBoards(TIERED_ROWS, { resolveImages: images, gaps });
+  const good = findLighting(boards, "Duplex Down", "duplex-down-all-rooms-good-lighting");
+  const better = findLighting(boards, "Duplex Down", "duplex-down-all-rooms-better-lighting");
+  const best = findLighting(boards, "Duplex Down", "duplex-down-all-rooms-best-lighting");
+  assert.deepEqual(good.items.map((item) => item.rowId).sort(), ["t1", "t4"]);
+  assert.deepEqual(better.items.map((item) => item.rowId).sort(), ["t2", "t4"]);
+  assert.deepEqual(best.items.map((item) => item.rowId).sort(), ["t3", "t4"]);
+  for (const board of [good, better, best]) {
+    for (const variant of DEFAULT_VARIANTS) {
+      const payload = boardPayload(board, variant, { basename });
+      assert.doesNotThrow(() => validateCollageRequest(payload));
+    }
+  }
+});
+
+test("preview and build agree on which units get split and which stay consolidated", () => {
+  const rows = [
+    ...TIERED_ROWS,
+    row({ rowId: "u1", unitType: "Common", itemName: "Tech Lighting Mini Pendant" }),
+    row({ rowId: "u2", unitType: "Common", roomLabel: "Bath 2", roomOriginal: "Bath 2", itemName: "Modern Forms Cinch Vanity Light" }),
+  ];
+  const preview = previewBoards(rows);
+  const gaps = emptyGaps();
+  const { boards } = buildBoards(rows, { resolveImages: images, gaps });
+
+  const tieredPreview = preview.boards.filter((entry) => entry.collageType === "lighting_collage" && entry.unitType === "Duplex Down");
+  const tieredBuilt = boards.filter((entry) => entry.collageType === "lighting_collage" && entry.unitType === "Duplex Down");
+  assert.equal(tieredPreview.length, 3);
+  assert.equal(tieredBuilt.length, 3);
+
+  // Common's fixtures are never tiered — one consolidated board, not three
+  // identical ones (three times the render cost for zero difference).
+  const consolidatedPreview = preview.boards.filter((entry) => entry.collageType === "lighting_collage" && entry.unitType === "Common");
+  const consolidatedBuilt = boards.filter((entry) => entry.collageType === "lighting_collage" && entry.unitType === "Common");
+  assert.equal(consolidatedPreview.length, 1);
+  assert.equal(consolidatedPreview[0].id, "common-all-rooms-lighting");
+  assert.equal(consolidatedPreview[0].roomLabel, "All Rooms");
+  assert.equal(consolidatedPreview[0].title, "Common Lighting Collage");
+  assert.equal(consolidatedBuilt.length, 1);
+  assert.equal(consolidatedBuilt[0].id, "common-all-rooms-lighting");
+});
+
+test("a substitute held back from a tiered board is reported once, not once per tier", () => {
+  // Living Room, deliberately: a room with no board type of its own, so the
+  // only substitute report this row could produce is the lighting board's —
+  // isolating "not once per tier" from the pre-existing, separate rule that a
+  // substitute is reported once per BOARD TYPE that held it back.
+  const rows = [
+    ...TIERED_ROWS,
+    row({
+      rowId: "t5",
+      unitType: "Duplex Down",
+      roomLabel: "Living Room",
+      roomOriginal: "Living Room",
+      itemName: "-Better- option - Alternative Sconce",
+      status: "alternative",
+    }),
+  ];
+  const gaps = emptyGaps();
+  buildBoards(rows, { resolveImages: images, gaps });
+  const reported = gaps.substituteCandidates.filter((entry) => entry.rowId === "t5");
+  assert.equal(reported.length, 1);
+  assert.equal(reported[0].collageType, "lighting_collage");
+
+  const preview = previewBoards(rows);
+  assert.equal(preview.substitutes.filter((entry) => entry.rowId === "t5").length, 1);
+});
+
+test("a pin overrides isLightFixture and the substitute rule independent of tiering: an untiered pinned row still lands on every tier board", () => {
+  const rows = [...TIERED_ROWS, row({ rowId: "t5", unitType: "Duplex Down", itemName: "Random Object", status: "alternative" })];
+  const pins = new Map([["t5", { collageType: "lighting_collage", slotId: "light_fixture" }]]);
+  const { boards } = buildBoards(rows, { resolveImages: images, gaps: emptyGaps(), pins });
+  const lighting = boards.filter((board) => board.collageType === "lighting_collage" && board.unitType === "Duplex Down");
+  assert.equal(lighting.length, 3);
+  for (const board of lighting) {
+    assert.ok(board.items.some((item) => item.rowId === "t5"), `${board.title} includes the pinned row`);
+  }
+});
+
 test("a sheet with no fixtures at all gets no lighting preview and no lighting board", () => {
   const rows = [
     row({ rowId: "1", roomLabel: "Bath 2", roomOriginal: "Bath 2", itemName: "Brizo Odin Lavatory Faucet", costCode: "11 45 Plumbing Fixtures M" }),

@@ -14,7 +14,7 @@
 import { ITEM_PRESETS } from "../collage.ts";
 import {
   BOARD_KIND_LABELS,
-  LIGHTING_SCOPE_LABEL,
+  LIGHTING_TIER_LABELS,
   assignSlots,
   boardIdFor,
   boardTypesForRoom,
@@ -23,6 +23,8 @@ import {
   groupRowsByRoom,
   groupRowsByUnit,
   lightingFixtures,
+  lightingScopeLabel,
+  lightingTiersFor,
 } from "./match.ts";
 import type { CollageType, LibraryRow, SlotConflict, SlotPin, SubstituteRecord } from "./types.ts";
 
@@ -89,55 +91,66 @@ export function previewBoards(rows: LibraryRow[], options: PreviewOptions = {}):
   // its unmapped and skipped-room reports. A lighting preview with no fixture
   // at all is omitted rather than shown empty — unlike a room board, whose
   // empty preview says something about that room, an empty lighting board
-  // would repeat for every unit type in the sheet.
+  // would repeat for every unit type in the sheet. lightingTiersFor decides,
+  // for each unit, whether it gets one consolidated board or three
+  // Good/Better/Best ones — the exact same decision buildBoards makes, from
+  // the exact same function.
   const lightingRowIds = new Set<string>();
   for (const unit of groupRowsByUnit(rows).values()) {
-    const { fixtures, substitutes } = lightingFixtures(unit.rows, pins);
-    preview.substitutes.push(
-      ...substitutes.map((row) => ({
-        slotId: "light_fixture",
-        collageType: "lighting_collage" as CollageType,
-        rowId: row.rowId,
-        itemName: row.itemName,
-        sku: row.sku,
-        unitType: unit.unitType,
-        roomLabel: row.roomLabel,
-      })),
-    );
-    for (const row of substitutes) lightingRowIds.add(row.rowId);
-    if (!fixtures.length) continue;
+    const tiers = lightingTiersFor(unit.rows);
+    for (const [tierIndex, tier] of tiers.entries()) {
+      const { fixtures, substitutes } = lightingFixtures(unit.rows, pins, tier);
+      // A held-back row is the same substitute regardless of which tier board
+      // is being previewed, so it is reported only once, on the first pass.
+      if (tierIndex === 0) {
+        preview.substitutes.push(
+          ...substitutes.map((row) => ({
+            slotId: "light_fixture",
+            collageType: "lighting_collage" as CollageType,
+            rowId: row.rowId,
+            itemName: row.itemName,
+            sku: row.sku,
+            unitType: unit.unitType,
+            roomLabel: row.roomLabel,
+          })),
+        );
+        for (const row of substitutes) lightingRowIds.add(row.rowId);
+      }
+      if (!fixtures.length) continue;
 
-    const scope: RoomScope = { unitType: unit.unitType, roomLabel: LIGHTING_SCOPE_LABEL };
-    preview.rooms.push(scope);
-    const slots: PreviewSlot[] = fixtures.map((fixture) => {
-      lightingRowIds.add(fixture.row.rowId);
-      const { name, tier } = extractTier(fixture.row.itemName);
-      const entry: PreviewSlot = {
-        slotId: fixture.slotId,
-        role: fixture.role,
-        required: true,
-        rowId: fixture.row.rowId,
-        itemName: fixture.row.itemName,
-        name,
-        brand: extractBrand(name),
-        sku: fixture.row.sku,
-        qty: fixture.row.qty,
-        reference: fixture.row.reference,
-      };
-      if (tier) entry.tier = tier;
-      if (pins?.get(fixture.row.rowId)?.collageType === "lighting_collage") entry.pinned = true;
-      return entry;
-    });
-    preview.boards.push({
-      id: boardIdFor(unit.unitType, LIGHTING_SCOPE_LABEL, "lighting_collage"),
-      ...scope,
-      collageType: "lighting_collage",
-      kindLabel: BOARD_KIND_LABELS.lighting_collage,
-      title: `${unit.unitType} ${BOARD_KIND_LABELS.lighting_collage}`,
-      slots,
-      // Every fixture found is on the board; there is no roster left unfilled.
-      unfilledSlots: [],
-    });
+      const scopeLabel = lightingScopeLabel(tier);
+      const scope: RoomScope = { unitType: unit.unitType, roomLabel: scopeLabel };
+      preview.rooms.push(scope);
+      const slots: PreviewSlot[] = fixtures.map((fixture) => {
+        lightingRowIds.add(fixture.row.rowId);
+        const { name, tier: itemTier } = extractTier(fixture.row.itemName);
+        const entry: PreviewSlot = {
+          slotId: fixture.slotId,
+          role: fixture.role,
+          required: true,
+          rowId: fixture.row.rowId,
+          itemName: fixture.row.itemName,
+          name,
+          brand: extractBrand(name),
+          sku: fixture.row.sku,
+          qty: fixture.row.qty,
+          reference: fixture.row.reference,
+        };
+        if (itemTier) entry.tier = itemTier;
+        if (pins?.get(fixture.row.rowId)?.collageType === "lighting_collage") entry.pinned = true;
+        return entry;
+      });
+      preview.boards.push({
+        id: boardIdFor(unit.unitType, scopeLabel, "lighting_collage"),
+        ...scope,
+        collageType: "lighting_collage",
+        kindLabel: BOARD_KIND_LABELS.lighting_collage,
+        title: `${unit.unitType} ${BOARD_KIND_LABELS.lighting_collage}${tier ? ` — ${LIGHTING_TIER_LABELS[tier]}` : ""}`,
+        slots,
+        // Every fixture found is on the board; there is no roster left unfilled.
+        unfilledSlots: [],
+      });
+    }
   }
 
   for (const group of groupRowsByRoom(rows).values()) {
