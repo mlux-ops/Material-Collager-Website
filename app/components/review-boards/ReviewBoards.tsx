@@ -70,6 +70,7 @@ type BoardsPreview = {
   })[];
   unmapped: (RoomScope & { rowId: string; itemName: string; costCode: string })[];
   skippedRooms: (RoomScope & { itemCount: number })[];
+  skippedRoomItems: (RoomScope & { rowId: string; itemName: string; costCode: string })[];
 };
 
 type Project = {
@@ -746,9 +747,16 @@ function GapsSection({
   onRemove: (rowId: string) => Promise<void>;
   onRestore: (rowId: string) => Promise<void>;
 }) {
-  const { substitutes, unmapped, skippedRooms, conflicts } = preview;
+  const { substitutes, unmapped, skippedRooms, skippedRoomItems, conflicts } = preview;
   const removed = edits.removed;
-  if (!substitutes.length && !unmapped.length && !skippedRooms.length && !conflicts.length && !removed.length) {
+  if (
+    !substitutes.length &&
+    !unmapped.length &&
+    !skippedRooms.length &&
+    !skippedRoomItems.length &&
+    !conflicts.length &&
+    !removed.length
+  ) {
     return null;
   }
 
@@ -857,6 +865,36 @@ function GapsSection({
                 <span className={styles.gapWhere}>
                   {entry.unitType} · {entry.itemCount} rows
                 </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {skippedRoomItems.length ? (
+        <div className={styles.gapGroup}>
+          <h3 className={styles.gapHead}>Rows in those rooms, individually ({skippedRoomItems.length})</h3>
+          <p className={styles.help}>
+            None of these rooms has a board of its own, so nothing here is a slot the rules missed — but a light
+            fixture in a living room, dining room, or foyer belongs on the unit&rsquo;s lighting board. Pin one
+            there, or remove it if it genuinely has no board.
+          </p>
+          <ul className={styles.gapList}>
+            {skippedRoomItems.map((entry) => (
+              <li key={entry.rowId} className={styles.gapItem}>
+                {entry.itemName}{" "}
+                <span className={styles.gapWhere}>
+                  {entry.unitType} {entry.roomLabel}
+                  {entry.costCode ? ` · ${entry.costCode}` : ""}
+                </span>
+                <RowTools
+                  rowId={entry.rowId}
+                  roomLabel={entry.roomLabel}
+                  pin={edits.pins[entry.rowId]}
+                  busy={busy}
+                  onPin={onPin}
+                  onRemove={onRemove}
+                />
               </li>
             ))}
           </ul>

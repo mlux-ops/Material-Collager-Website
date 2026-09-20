@@ -72,7 +72,13 @@ export function validatePin(value: unknown): SlotPin {
   const type = String(collageType ?? "");
   if (!(COLLAGE_TYPES as readonly string[]).includes(type)) throw new Error(`"${type}" is not a board type.`);
   if (type === "lighting_collage") {
-    throw new Error("The lighting board takes every light fixture on its own; there is no slot to pin to.");
+    // No fixed slot to name: every fixture gets its own slot, keyed by its
+    // row id (lightingSlotId), not one of these. Pinning here means "place
+    // this row on the lighting board regardless of what isLightFixture and
+    // the substitute rule say" — the same override a pin is everywhere else
+    // — so the slot name is not meaningful and is normalized rather than
+    // validated against a list.
+    return { collageType: "lighting_collage", slotId: "light_fixture" };
   }
   const slot = String(slotId ?? "");
   const presets = ITEM_PRESETS[type as CollageType] ?? [];
@@ -83,7 +89,14 @@ export function validatePin(value: unknown): SlotPin {
 }
 
 // The slots a row in a given room could be pinned to, for a picker: every
-// preset slot of every board type the room maps to, minus the lighting board.
+// preset slot of every board type the room maps to, plus a standing option to
+// force the row onto the unit's lighting board. The lighting board has no
+// preset slots to list — every fixture gets its own slot, keyed by its row id
+// — so this is one fixed choice rather than one per slot, and it is offered
+// for EVERY room, including one with no board type of its own: the lighting
+// board spans every room in the unit, and this is the one way to place a
+// fixture isLightFixture's rules missed, or one that lives in a room (a
+// living room, a foyer) with no board of its own to be "unmapped" on at all.
 export function pinChoices(boardTypes: CollageType[]): { collageType: CollageType; slotId: string; role: string }[] {
   const choices: { collageType: CollageType; slotId: string; role: string }[] = [];
   for (const collageType of boardTypes) {
@@ -92,5 +105,6 @@ export function pinChoices(boardTypes: CollageType[]): { collageType: CollageTyp
       choices.push({ collageType, slotId: preset.id, role: preset.role });
     }
   }
+  choices.push({ collageType: "lighting_collage" as CollageType, slotId: "light_fixture", role: "any light fixture" });
   return choices;
 }
