@@ -129,7 +129,10 @@ UUID via `wrangler d1 list` before `wrangler deploy` — the UUID in `wrangler.j
 is a local placeholder, so do not treat it as real. Repo secrets required:
 `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`. `OPENAI_API_KEY` is a runtime Worker
 secret set separately (`wrangler secret put`), and locally lives in git-ignored
-`.dev.vars`. See `docs/DEPLOYING.md`.
+`.dev.vars`. A repository secret `SMARTSHEET_ACCESS_TOKEN`, if present, is pushed
+to the Worker by the workflow's **Sync Worker secrets** step after each deploy,
+and that step prints `wrangler secret list` (names only) every run. See
+`docs/DEPLOYING.md`.
 
 **Local dev enforces the Access gate.** `CF_ACCESS_TEAM_DOMAIN` and
 `CF_ACCESS_AUD` are set in `wrangler.jsonc` `vars`, and Miniflare reads that
