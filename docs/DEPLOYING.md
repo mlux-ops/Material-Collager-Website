@@ -46,6 +46,14 @@ uploaded by hand — but **Read sheet** fails with a message naming the secret
 and listing the bindings the Worker does see, so a value that never reached
 the Worker is visible at a glance.
 
+Or set it from GitHub: add **`SMARTSHEET_ACCESS_TOKEN`** as a repository
+secret (Settings → Secrets and variables → Actions → New repository secret)
+and the deploy workflow's **Sync Worker secrets** step pushes it to the Worker
+on every deploy — run **Deploy to Cloudflare** from the Actions tab to apply
+it without a code change. The same step prints `wrangler secret list` (names
+and types only) on every run, so the deploy log always shows which secrets
+the live Worker holds.
+
 `wrangler.jsonc` sets `keep_vars: true` so a variable added in the dashboard
 survives the next deploy. Without it wrangler treats the config file as the
 whole truth for variables and deletes a dashboard entry of type **Text** on
