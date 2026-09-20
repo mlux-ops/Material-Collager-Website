@@ -216,6 +216,36 @@ produced an Energy Guide label, a freezer drawer full of food and a Porcelanosa
 placeholder card among the "best available" scrapes; a person looking was the
 only filter that held.
 
+### Reading the 651 Belmont sheet
+
+Checked against the live sheet (`FINISH DATABASE: 651 Belmont`, 6391628162879364)
+before the first production read, which would otherwise have failed on the
+first click:
+
+- **The item name is in a column still titled "Primary Column."** No title
+  alternate matches it, so `resolveColumnIds` now falls back to the column
+  flagged `primary` — in Smartsheet the primary column is the row's name by
+  convention. A titled name column still wins when one exists.
+- **AGENT IGNORE is a checkbox the owner ticks on rows no automation should
+  read** — the whole ARCHIVE section and superseded picks; 96 of 218 sampled rows.
+  Ticked rows are excluded before matching and recorded in `gaps.ignoredRows`,
+  so the exclusion is visible in `gaps.md` rather than silent. The column is
+  optional; a sheet without it reads every row.
+- **"Secondary Bathroom" is on the room picklist** and matched no board type,
+  because the bath rule only matched labels starting with bath/primary bath/
+  powder. It now aliases to "Secondary Bath" and maps to the bathroom boards.
+  Laundry, Living Room, bedrooms, closets, Mudroom and Dining still map to
+  nothing and are reported as skipped rooms — a Laundry board type is a
+  standing open decision, not something to force onto a kitchen board.
+- **The Image column is not a picture source.** 127 of 163 leaf rows have a
+  value, and none is a URL — they are attachment filenames (`RS36A72J1N.jpg`),
+  the display text of a Smartsheet cell image. Reaching those needs the
+  attachments API and is not built. **Reference** is the picture source: 113 of
+  163 populated, all Ferguson product pages, resolved through `og:image`.
+
+`tests/autoboard-smartsheet-reader.test.mjs` uses the sheet's real column titles,
+ids and primary flag as its fixture.
+
 ### The fetch is a server-side SSRF surface
 
 A URL from a Smartsheet cell is untrusted input, and a Worker's `fetch` reaches

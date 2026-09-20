@@ -79,6 +79,7 @@ export function csvObjects(text: string): Record<string, string>[] {
 const ROOM_ALIASES = new Map([
   ["kitchen pendant", "Kitchen"], // pendant lights tagged as their own "room"
   ["primary bathroom", "Primary Bath"],
+  ["secondary bathroom", "Secondary Bath"], // 651 Belmont's picklist; a bathroom the bath rule must see
 ]);
 
 export function normalizeRoomLabel(label: unknown): string {
@@ -145,6 +146,7 @@ export function emptyGaps(): Gaps {
   return {
     blankUnitRows: [],
     blankRoomRows: [],
+    ignoredRows: [],
     substituteCandidates: [],
     unmappedItems: [],
     imagelessItems: [],
@@ -161,6 +163,11 @@ export function emptyGaps(): Gaps {
 // Live source: Smartsheet REST API. Columns are resolved BY TITLE; if a
 // required title cannot be found the loader fails loudly and lists the
 // sheet's actual column titles so the alternates table below can be fixed.
+//
+// One exception: the item name falls back to the sheet's PRIMARY column. In
+// Smartsheet the primary column is, by convention, the row's name, and a sheet
+// that keeps it under the default title "Primary Column" (651 Belmont does) has
+// no title for the table below to match.
 // ---------------------------------------------------------------------------
 
 const COLUMN_TITLE_ALTERNATES: Record<string, string[]> = {
@@ -171,16 +178,20 @@ const COLUMN_TITLE_ALTERNATES: Record<string, string[]> = {
   sku: ["sku", "model", "model number", "model #"],
   qty: ["qty", "quantity"],
   reference: ["reference", "reference url", "link", "url"],
+  // A checkbox the sheet's owner ticks on rows no automation should read:
+  // archived sections, superseded picks. Honoured by exclusion, never by
+  // guessing at why it was ticked.
+  agentIgnore: ["agent ignore"],
 };
 
 const REQUIRED_COLUMNS = ["unitType", "roomType", "costCode", "itemName", "sku"];
 
-export type SheetColumn = { id: number | string; title: string };
+export type SheetColumn = { id: number | string; title: string; primary?: boolean };
 
 export type SheetCell = {
   columnId: number | string;
   displayValue?: string;
-  value?: string | number;
+  value?: string | number | boolean;
 };
 
 export type SheetRow = { id: number | string; cells?: SheetCell[] };
@@ -201,6 +212,10 @@ export function resolveColumnIds(columns: SheetColumn[]): Record<string, number 
         break;
       }
     }
+  }
+  if (!("itemName" in resolved)) {
+    const primary = columns.find((column) => column.primary === true);
+    if (primary) resolved.itemName = primary.id;
   }
   const missing = REQUIRED_COLUMNS.filter((field) => !(field in resolved));
   if (missing.length) {
@@ -244,14 +259,22 @@ export async function loadSmartsheetRows({
   const sheet = (await response.json()) as SheetResponse;
   const columnIds = resolveColumnIds(sheet.columns ?? []);
   const gaps = emptyGaps();
-  const rawRows = (sheet.rows ?? []).map((row: SheetRow) => {
+  const rawRows: Record<string, unknown>[] = [];
+  for (const row of sheet.rows ?? []) {
     const cells = new Map((row.cells ?? []).map((cell) => [cell.columnId, cell]));
-    const valueOf = (field: string) => {
+    const valueOf = (field: string): string | number | boolean => {
       const cell = cells.get(columnIds[field]);
       if (!cell) return "";
       return cell.displayValue ?? cell.value ?? "";
     };
-    return {
+    // A checkbox cell arrives as boolean true, or as the string "true" through
+    // displayValue on some exports; anything else is unticked.
+    const ignoreValue = columnIds.agentIgnore ? valueOf("agentIgnore") : "";
+    if (ignoreValue === true || String(ignoreValue).toLowerCase() === "true") {
+      gaps.ignoredRows?.push({ rowId: String(row.id), itemName: String(valueOf("itemName")), sku: String(valueOf("sku")) });
+      continue;
+    }
+    rawRows.push({
       rowId: row.id,
       unitType: valueOf("unitType"),
       roomType: valueOf("roomType"),
@@ -260,8 +283,8 @@ export async function loadSmartsheetRows({
       sku: valueOf("sku"),
       qty: columnIds.qty ? valueOf("qty") : "",
       reference: columnIds.reference ? valueOf("reference") : "",
-    };
-  });
+    });
+  }
   const rows = collectRows(rawRows, gaps);
   return { rows, gaps, source: `smartsheet:${sheetId} (version ${sheet.version ?? "unknown"})` };
 }
