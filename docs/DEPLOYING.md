@@ -39,20 +39,34 @@ Secrets → **Add** → type **Secret** → `OPENAI_API_KEY` → then press **De
 `npx wrangler secret put OPENAI_API_KEY`. Without it, generation only works
 when a caller supplies a key in Settings on the generator page.
 
-Add **`SMARTSHEET_ACCESS_TOKEN`** the same way if `/review-boards` should read
-project sheets directly. Without it the board still works — projects can be
-seeded from a tracked definition (`npm run autoboard:seed-web`) and photos
-uploaded by hand — but **Read sheet** fails with a message naming the secret
-and listing the bindings the Worker does see, so a value that never reached
-the Worker is visible at a glance.
+**`SMARTSHEET_ACCESS_TOKEN`** is different: it lives in the account-level
+**Secrets Store** (Dashboard → Storage & databases → Secrets Store), and
+`wrangler.jsonc` binds it to the Worker under `secrets_store_secrets` (store
+id plus secret name). The Secrets Store is a separate product from a Worker's
+own Variables and Secrets: an entry there reaches a Worker only through such a
+binding, never by name alone, and `wrangler secret list` never shows it. The
+entry needs the **Workers** scope. Rotating it is an edit in the store; the
+Worker reads the current value on each request, so no deploy is needed.
+Without it the board still works — projects can be seeded from a tracked
+definition (`npm run autoboard:seed-web`) and photos uploaded by hand — but
+**Read sheet** fails with a message saying which step failed: binding
+missing, entry missing or unreadable, or value empty.
 
-Or set it from GitHub: add **`SMARTSHEET_ACCESS_TOKEN`** as a repository
-secret (Settings → Secrets and variables → Actions → New repository secret)
-and the deploy workflow's **Sync Worker secrets** step pushes it to the Worker
-on every deploy — run **Deploy to Cloudflare** from the Actions tab to apply
-it without a code change. The same step prints `wrangler secret list` (names
-and types only) on every run, so the deploy log always shows which secrets
-the live Worker holds.
+Locally, `.dev.vars` cannot supply this one — the binding name belongs to the
+Secrets Store object, so a same-named line is ignored. Create a local copy in
+Miniflare's emulated store once per machine instead (it lives under
+`.wrangler/state`, git-ignored):
+
+```bash
+npx wrangler secrets-store secret create b3ae60f8f0d34d03ae7182deb77bbe76 \
+  --name SMARTSHEET_ACCESS_TOKEN --scopes workers
+```
+
+It prompts for the value; without `--remote` nothing leaves the machine.
+
+The deploy workflow's **List Worker secrets** step prints `wrangler secret list`
+(names and types only) on every run, so the deploy log records what the live
+Worker holds among its own secrets.
 
 `wrangler.jsonc` sets `keep_vars: true` so a variable added in the dashboard
 survives the next deploy. Without it wrangler treats the config file as the

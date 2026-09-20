@@ -158,8 +158,13 @@ Rows and preview are stored as JSON in one row, so the write refuses anything
 over 800 KB with a message saying to narrow the subsection. D1 caps a TEXT value
 at 1 MB.
 
-`SMARTSHEET_ACCESS_TOKEN` is a Worker secret (`wrangler secret put`), and locally
-lives in git-ignored `.dev.vars` beside `OPENAI_API_KEY`.
+`SMARTSHEET_ACCESS_TOKEN` is a Secrets Store binding (`wrangler.jsonc`
+`secrets_store_secrets`), so `env.SMARTSHEET_ACCESS_TOKEN` is an object with an
+async `get()`, not a string; `smartsheetToken()` in `autoboard-projects.ts`
+accepts either shape and says which step failed when neither yields a value.
+Locally it comes from Miniflare's emulated store (`npx wrangler secrets-store
+secret create <store-id> --name SMARTSHEET_ACCESS_TOKEN --scopes workers`), not
+from `.dev.vars` — the binding owns the name. See `docs/DEPLOYING.md`.
 
 ## API
 

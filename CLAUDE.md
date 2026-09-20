@@ -71,7 +71,8 @@ the sheet's link (resolved through the product page's `og:image` when the link
 is a page, not an image), a pasted URL, or an upload; nothing is used until a
 person selects it in the review grid. Storage is the lazily-created D1 tables
 `autoboard_projects` and `autoboard_photos` plus R2 under `autoboard/`; reading a
-sheet needs the `SMARTSHEET_ACCESS_TOKEN` Worker secret.
+sheet needs `SMARTSHEET_ACCESS_TOKEN`, which is a Secrets Store binding, not a
+Worker secret — see Deploy.
 
 Server-side URL fetching is an SSRF surface — a sheet cell is untrusted input.
 `app/lib/autoboard/photo-sources.ts` holds the guard; read it before touching
@@ -129,10 +130,14 @@ UUID via `wrangler d1 list` before `wrangler deploy` — the UUID in `wrangler.j
 is a local placeholder, so do not treat it as real. Repo secrets required:
 `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`. `OPENAI_API_KEY` is a runtime Worker
 secret set separately (`wrangler secret put`), and locally lives in git-ignored
-`.dev.vars`. A repository secret `SMARTSHEET_ACCESS_TOKEN`, if present, is pushed
-to the Worker by the workflow's **Sync Worker secrets** step after each deploy,
-and that step prints `wrangler secret list` (names only) every run. See
-`docs/DEPLOYING.md`.
+`.dev.vars`. `SMARTSHEET_ACCESS_TOKEN` is NOT a Worker secret: it lives in the
+account-level Secrets Store and reaches the Worker through the
+`secrets_store_secrets` binding in `wrangler.jsonc`, arriving as an object with
+an async `get()`. `.dev.vars` cannot supply it (the binding owns the name);
+locally, create a copy in Miniflare's emulated store once per machine with
+`npx wrangler secrets-store secret create <store-id> --name SMARTSHEET_ACCESS_TOKEN --scopes workers`.
+The workflow's **List Worker secrets** step prints `wrangler secret list` (names
+only) every run. See `docs/DEPLOYING.md`.
 
 **Local dev enforces the Access gate.** `CF_ACCESS_TEAM_DOMAIN` and
 `CF_ACCESS_AUD` are set in `wrangler.jsonc` `vars`, and Miniflare reads that

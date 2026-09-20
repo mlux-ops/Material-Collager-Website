@@ -56,23 +56,12 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      # Worker secrets can be managed from GitHub as well as the dashboard: a
-      # repository secret named SMARTSHEET_ACCESS_TOKEN is pushed to the Worker
-      # after every deploy (so rotating it is a repository-secret edit plus a
-      # deploy), and skipped when the repository has none. The value is piped,
-      # never echoed; `wrangler secret list` prints names and types only, so
-      # this log always shows which secrets the live Worker holds.
-      - name: Sync Worker secrets
-        run: |
-          if [ -n "$SMARTSHEET_ACCESS_TOKEN" ]; then
-            printf '%s' "$SMARTSHEET_ACCESS_TOKEN" | npx wrangler secret put SMARTSHEET_ACCESS_TOKEN
-            echo "Set SMARTSHEET_ACCESS_TOKEN from the repository secret"
-          else
-            echo "No SMARTSHEET_ACCESS_TOKEN repository secret; leaving the Worker's secrets as they are"
-          fi
-          echo "Secrets on the Worker now:"
-          npx wrangler secret list
+      # The Smartsheet token is a Secrets Store binding (wrangler.jsonc), so
+      # nothing is pushed here. `wrangler secret list` prints the Worker's own
+      # secrets — names and types only — so every deploy log records what the
+      # live Worker holds.
+      - name: List Worker secrets
+        run: npx wrangler secret list
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          SMARTSHEET_ACCESS_TOKEN: ${{ secrets.SMARTSHEET_ACCESS_TOKEN }}
