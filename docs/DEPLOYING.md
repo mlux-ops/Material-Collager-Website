@@ -24,7 +24,14 @@ If you ever rename the database or bucket, update `wrangler.jsonc`
 | Secret | Where to get it |
 |---|---|
 | `CLOUDFLARE_ACCOUNT_ID` | Dashboard → Workers & Pages → right sidebar, or any dashboard URL |
-| `CLOUDFLARE_API_TOKEN` | Dashboard → profile → API Tokens → Create Token → template **"Edit Cloudflare Workers"** (grant D1 + Workers R2 Storage edit for the account too) |
+| `CLOUDFLARE_API_TOKEN` | Dashboard → profile → API Tokens → Create Token → template **"Edit Cloudflare Workers"** (grant D1, Workers R2 Storage and Secrets Store edit for the account too) |
+
+The **Edit Cloudflare Workers** template does not include the Secrets Store.
+Add **Account → Secrets Store → Edit** to the token (API Tokens → the token →
+Edit → Permissions → Add more), or `wrangler deploy` fails while attaching the
+`secrets_store_secrets` binding with `Secrets store binding authorization
+failed [code: 10021]`, and the previous version stays live. Editing a token's
+permissions keeps its value, so the GitHub secret does not change.
 
 ### 3. First deploy
 
