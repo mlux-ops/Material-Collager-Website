@@ -148,15 +148,27 @@ export function projectId(): string {
   return `proj-${crypto.randomUUID()}`;
 }
 
+// The preview is derived from the stored rows on every read rather than read
+// back from preview_json. The rows are the record of what the sheet said at
+// build time and stay fixed; the preview is a pure function of them, and
+// recomputing it means a change to the slot rules — a new board type, a
+// widened match — reaches every existing project, not only ones built after
+// the change. preview_json is still written, for older readers and as a
+// record of what the picker showed when the project was created.
+function storedPreview(row: ProjectRow): { rows: LibraryRow[]; preview: BoardsPreview } {
+  const rows = JSON.parse(row.rows_json) as LibraryRow[];
+  return { rows, preview: previewBoards(rows) };
+}
+
 function publicProject(row: ProjectRow): AutoboardProject {
-  const preview = JSON.parse(row.preview_json) as BoardsPreview;
+  const { rows, preview } = storedPreview(row);
   return {
     id: row.id,
     name: row.name,
     sheetId: row.sheet_id,
     source: row.source,
     filter: JSON.parse(row.filter_json) as SubsectionFilter,
-    rowCount: (JSON.parse(row.rows_json) as LibraryRow[]).length,
+    rowCount: rows.length,
     boardCount: preview.boards.length,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -166,8 +178,7 @@ function publicProject(row: ProjectRow): AutoboardProject {
 function detailFrom(row: ProjectRow): AutoboardProjectDetail {
   return {
     ...publicProject(row),
-    rows: JSON.parse(row.rows_json) as LibraryRow[],
-    preview: JSON.parse(row.preview_json) as BoardsPreview,
+    ...storedPreview(row),
   };
 }
 
