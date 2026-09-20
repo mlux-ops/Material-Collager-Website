@@ -7,6 +7,14 @@ API as actual image inputs — never downsampled to text descriptions.
 Frontend visual-fidelity rules live in `AGENTS.md`. Read it before touching the
 landing page or the generator UI.
 
+**Design details come from the existing site.** Measure the running app — type,
+colour and spacing — and match it. Do not design from `globals.css`: the
+`.generator-shell` block near the end of that file overrides the earlier rules,
+so the source reads nothing like what renders. The live scale is 8.4px uppercase
+labels and buttons, 10px sub text, 11px body and controls, 14px headings and
+item titles; nothing on any page is larger than 14px, and chrome text is black
+or `#657069`, never the teal — which is reserved for state.
+
 ## Commands
 
 ```bash
@@ -45,9 +53,37 @@ Board-generation pipeline in `scripts/autoboard/`, run as `npm run autoboard -- 
 Subcommands: `plan`, `generate`, `redraft`, `confirm`, `finalize`, `batch-finalize`,
 `batch-status`, `review`.
 
+The slot rules and board assembly live in `app/lib/autoboard/`, not in
+`scripts/autoboard/lib/`; the `.mjs` files there re-export them, so existing
+imports are unchanged. Anything under `app/lib/autoboard/` must avoid `node:`
+builtins, the `@/` alias and extensionless imports — `docs/autoboard-shared-core.md`
+has the rules and the reasons, and `tests/autoboard-parity.test.mjs` enforces
+them (nothing else does).
+
 `review` starts a dependency-free `node:http` review UI on **port 4790** (`--port` to
 override). Its render-workflow POST endpoints require `Content-Type: application/json`
 as a CSRF defense.
+
+The web equivalent is `/review-boards`: point it at a project's Smartsheet, pick
+the unit types and rooms you want, collect a reference photo per row, and it
+builds and stores the boards. It runs the same core. Reference photos come from
+the sheet's link (resolved through the product page's `og:image` when the link
+is a page, not an image), a pasted URL, or an upload; nothing is used until a
+person selects it in the review grid. Storage is the lazily-created D1 tables
+`autoboard_projects` and `autoboard_photos` plus R2 under `autoboard/`; reading a
+sheet needs the `SMARTSHEET_ACCESS_TOKEN` Worker secret.
+
+Server-side URL fetching is an SSRF surface — a sheet cell is untrusted input.
+`app/lib/autoboard/photo-sources.ts` holds the guard; read it before touching
+anything that fetches. See `docs/autoboard-shared-core.md`.
+
+`npm run autoboard:seed-web -- --project 651-belmont [--select]` fills a running
+`/review-boards` from a tracked project definition and the library root the
+scaffold already built — the web board's D1/R2 state is per-machine, so a fresh
+checkout otherwise means collecting a photo for every row by hand before the
+first draft. It reads the library and uploads copies through the app's own API;
+nothing in the library root is touched. A project seeded this way has no sheet
+behind it, so `refresh` refuses it by design.
 
 Projects without a Smartsheet sheet of their own live as tracked definitions in
 `scripts/autoboard/projects/`; `npm run autoboard:scaffold -- --project <id>` turns one
@@ -63,6 +99,7 @@ alongside Wieland's on 4790.
 | Path | Role |
 |---|---|
 | `app/` | The live Next.js App Router source — pages, `app/api/*` handlers, `app/lib/*`, `app/components/*` |
+| `app/lib/autoboard/` | Board-building rules shared by the CLI and the web review board — see `docs/autoboard-shared-core.md` before adding to it |
 | `worker/` | Cloudflare Worker entry (`index.ts`, per `wrangler.jsonc` `main`); gates on Access JWT, then delegates to vinext's app-router entry |
 | `src/material_collager/` | Legacy Python CLI, superseded by the web app but still shipped |
 | `db/` | Drizzle schema over D1; tables are created lazily |
@@ -94,12 +131,31 @@ is a local placeholder, so do not treat it as real. Repo secrets required:
 secret set separately (`wrangler secret put`), and locally lives in git-ignored
 `.dev.vars`. See `docs/DEPLOYING.md`.
 
+**Local dev enforces the Access gate.** `CF_ACCESS_TEAM_DOMAIN` and
+`CF_ACCESS_AUD` are set in `wrangler.jsonc` `vars`, and Miniflare reads that
+block too, so `npm run dev` answers 403 to every page with nothing in front of
+localhost to mint a JWT. Blank both in `.dev.vars`, which overrides
+`wrangler.jsonc` — `.dev.vars.example` has the full local set.
+
 ## Gotchas
 
 - Dev, build, and start all run through `vinext`, not `next` directly. Reaching for
   `npx next dev` will not work.
 - Tests need `node --experimental-strip-types`. That strips types only — no enums,
-  namespaces, or decorators in anything a test imports.
+  namespaces, decorators, or constructor parameter properties in anything a test
+  imports. `tsconfig.json` sets `erasableSyntaxOnly` so `npm run typecheck`
+  rejects them; without it both `tsc` and `eslint` accept all four and only
+  `node --test` fails. It also sets `verbatimModuleSyntax`, because a
+  value-position import of a type is a link-time `SyntaxError` that neither gate
+  can see.
+- `npm run typecheck` is not a pass/fail gate: 14 errors pre-date this tree
+  (workbench, scene-lab, `db/index.ts`, and the `examples/` tree). The usable
+  criterion is that a change adds none. Cloudflare's own types come from
+  `@cloudflare/workers-types` via tsconfig `types`; that array also has to list
+  `node`, because naming it at all turns off automatic `@types/*` inclusion.
+  `db/index.ts` still errors because workers-types' generic `Env` has no
+  bindings — the fix is a generated `worker-configuration.d.ts` from
+  `wrangler types`, not a hand-written declaration.
 - Request bodies cap at 32 MB (`next.config.ts` `serverActions.bodySizeLimit`), applied
   to route handlers too. Large reference sets must use the chunked transport rather
   than one request.

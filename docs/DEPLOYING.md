@@ -38,6 +38,11 @@ Secrets → add secret **`OPENAI_API_KEY`**. (Or locally:
 `npx wrangler secret put OPENAI_API_KEY`.) Without it, generation only works
 when a caller supplies a key in Settings on the generator page.
 
+Add **`SMARTSHEET_ACCESS_TOKEN`** the same way if `/review-boards` should read
+project sheets directly. Without it the board still works — projects can be
+seeded from a tracked definition (`npm run autoboard:seed-web`) and photos
+uploaded by hand — but **Read sheet** fails with a message naming the secret.
+
 ### 5. Domain
 
 Workers & Pages → `material-collager` → Settings → Domains & Routes → add your
@@ -65,7 +70,9 @@ Cloudflare Access (free for up to 50 users):
      Access → Applications → the auto-created app → Overview.
    Redeploy. The Worker (`worker/access.ts`) then rejects any request
    without a valid Access JWT. Do this only *after* step 1, or every
-   request is denied. Local dev is unaffected (vars unset locally).
+   request is denied. **Local dev is affected**: Miniflare reads the same
+   `vars` block, so `npm run dev` answers 403 to every page until both are
+   blanked in `.dev.vars` (see `.dev.vars.example`).
 4. Validate: open the site in a private window → expect the Access login;
    a non-studio email should be denied. Zero Trust → Logs → Access shows
    each decision.
