@@ -163,10 +163,12 @@ export type WorkbenchParams = {
   genDetails?: string;
   genConstraints?: string;
   editChange?: string;
-  editPreserve?: string[];
-  editExclusions?: string[];
+  // Raw textarea text, one entry per line — NOT a pre-split array. Splitting
+  // on keystroke makes a trailing space or an Enter impossible to type.
+  editPreserve?: string;
+  editExclusions?: string;
   refineChange?: string;
-  refineCarry?: string[];
+  refineCarry?: string;
   // Index-aligned with the references arriving on the node's references port.
   referenceRoles?: string[];
   // imageGenerate / imageEdit
