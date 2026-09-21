@@ -81,9 +81,10 @@ test("every paid node (paid:true on the manifest or its spec) declares an estima
 
 test("the executor's executeMap/isExecutable predicate is fully determined by manifest-declared execute cores plus the known DOM-wrapper set (no orphaned skip lists)", () => {
   const nonExecutable = NODE_KINDS.filter((kind) => !expectedExecutable(kind));
-  // note (annotation-only) and compare (pure presentation) are the only two
-  // kinds with neither a manifest execute core nor a DOM wrapper.
-  assert.deepEqual(new Set(nonExecutable), new Set(["note", "compare"]));
+  // note (annotation-only), compare (pure presentation), and viewImage (a
+  // pure viewer — connect an image, look at it) are the only three kinds
+  // with neither a manifest execute core nor a DOM wrapper.
+  assert.deepEqual(new Set(nonExecutable), new Set(["note", "compare", "viewImage"]));
   for (const kind of NODE_KINDS) {
     if (nonExecutable.includes(kind)) continue;
     assert.ok(expectedExecutable(kind), `${kind} should be executable`);

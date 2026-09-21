@@ -27,6 +27,7 @@ import { Component as SaveToLibraryComponent, execute as saveToLibraryExecute } 
 import { Component as TextComponent } from "./text";
 import { Component as UpscalerComponent, execute as upscalerExecute } from "./upscaler";
 import { Component as VariationsComponent, execute as variationsExecute } from "./variations";
+import { Component as ViewImageComponent } from "./viewImage";
 
 export const NODE_TYPES = {
   photo: PhotoComponent,
@@ -53,6 +54,7 @@ export const NODE_TYPES = {
   crop: CropComponent,
   patch: PatchComponent,
   exportDownload: ExportDownloadComponent,
+  viewImage: ViewImageComponent,
 };
 
 // DOM-touching execute wrappers exported by the .tsx modules. Each wrapper

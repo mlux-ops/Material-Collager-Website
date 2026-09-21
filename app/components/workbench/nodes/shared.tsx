@@ -574,6 +574,29 @@ export function useConnectedReferenceSlots(id: string, portIds: string[]) {
   }, [edges, nodes, id, portIds]);
 }
 
+// Same resolution as useConnectedImageCacheKey just below, but returns the
+// whole value (url AND cacheKey) rather than only the cacheKey -- View Image
+// needs both: the cacheKey for its card thumbnail (ThumbnailImage), the url
+// for its full-resolution lightbox, the same field OutputPreview's own
+// lightbox already reads directly rather than round-tripping through
+// blob-cache's getBlobUrl (that fallback path is for a failed thumbnail, not
+// the routine "show the full image" case).
+export function useConnectedImageValue(id: string, portId: string | undefined): NodeOutputValue | undefined {
+  const edges = useEdges();
+  const nodes = useNodes<WorkbenchNode>();
+  return useMemo(() => {
+    if (!portId) return undefined;
+    const edge = edges.find((candidate) => candidate.target === id && candidate.targetHandle === portId);
+    if (!edge) return undefined;
+    const source = nodes.find((candidate) => candidate.id === edge.source);
+    if (!source) return undefined;
+    const run = activeRunOf(source);
+    if (!run) return undefined;
+    const value = outputValuesFor(source, run, edge.sourceHandle ?? specFor(source.data.kind).outputs[0]?.id ?? "")[0];
+    return value?.kind === "image" ? value : undefined;
+  }, [edges, nodes, id, portId]);
+}
+
 // The cacheKey of the single image on one input port, for UI that needs the
 // input's pixel dimensions (GenerationSettings' "Match input image" size).
 export function useConnectedImageCacheKey(id: string, portId: string | undefined): string | undefined {
