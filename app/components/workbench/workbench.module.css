@@ -730,6 +730,52 @@
   cursor: pointer;
 }
 
+/* View Image's zoomable lightbox. .viewImageSurface is position:absolute
+   (not a flex child) so it fills .lightboxOverlay regardless of that class's
+   own centering rules -- a plain, robust way for a ResizeObserver on it to
+   read back something close to the true viewport size. */
+.viewImageSurface {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.viewImageImg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
+  transform-origin: 0 0;
+  user-select: none;
+}
+
+.viewImageControls {
+  position: fixed;
+  z-index: 1001;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: default;
+}
+
+.viewImageControls button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.viewImageZoom {
+  min-width: 40px;
+  text-align: center;
+  font-size: 10px;
+  letter-spacing: 0.1575px;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
 .history {
   position: absolute;
   right: 6px;

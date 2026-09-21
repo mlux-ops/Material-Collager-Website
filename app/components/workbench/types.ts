@@ -28,7 +28,8 @@ export type NodeKind =
   | "resize"
   | "crop"
   | "patch"
-  | "exportDownload";
+  | "exportDownload"
+  | "viewImage";
 
 export type NodeStatus = "idle" | "running" | "done" | "error" | "stale" | "needs-selection";
 

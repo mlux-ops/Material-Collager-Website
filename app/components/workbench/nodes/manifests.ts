@@ -38,6 +38,7 @@ import { saveToLibraryManifest } from "./saveToLibrary.manifest.ts";
 import { textManifest } from "./text.manifest.ts";
 import { upscalerManifest } from "./upscaler.manifest.ts";
 import { variationsManifest } from "./variations.manifest.ts";
+import { viewImageManifest } from "./viewImage.manifest.ts";
 
 // Registration order drives the add-node palette.
 export const MANIFESTS: Record<NodeKind, NodeManifest> = {
@@ -65,6 +66,7 @@ export const MANIFESTS: Record<NodeKind, NodeManifest> = {
   crop: cropManifest,
   patch: patchManifest,
   exportDownload: exportDownloadManifest,
+  viewImage: viewImageManifest,
 };
 
 export const NODE_KINDS = Object.keys(MANIFESTS) as NodeKind[];
