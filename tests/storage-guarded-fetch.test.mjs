@@ -96,3 +96,22 @@ test("truncate mode keeps the first bytes of an oversized page and stops reading
 test("a body under the cap is returned whole", async () => {
   assert.deepEqual(await readCapped(new Response(new Uint8Array([7, 8, 9])), 3), new Uint8Array([7, 8, 9]));
 });
+
+// The route imports "@/…" modules; the helper's resolve hook maps the alias.
+await import("./helpers/fake-worker-env.mjs");
+const { POST: importReference } = await import("../app/api/references/import/route.ts");
+
+test("reference import refuses a redirect to loopback without requesting it (R11)", async (t) => {
+  const requested = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    requested.push([String(url), init.redirect]);
+    return new Response(null, { status: 302, headers: { location: "https://[::1]/secret" } });
+  });
+  const response = await importReference(new Request("http://localhost/api/references/import", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ imageUrl: "https://vendor.example/p.jpg" }),
+  }));
+  assert.notEqual(response.status, 200);
+  assert.deepEqual(requested, [["https://vendor.example/p.jpg", "manual"]]);
+});
