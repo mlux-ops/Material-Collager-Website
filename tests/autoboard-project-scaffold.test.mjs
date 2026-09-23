@@ -432,5 +432,14 @@ test("the default download cancels an oversized photo instead of buffering it wh
 test("a stalled vendor server fails its download instead of hanging the run", { timeout: 5_000 }, async (t) => {
   t.mock.method(globalThis, "fetch", (input, init) =>
     new Promise((resolve, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason))));
-  await assert.rejects(downloadImage("https://cdn.vendor.example/seafoam.jpg", { timeoutMs: 50 }), { name: "TimeoutError" });
+  // AbortSignal.timeout's timer is unref'd, and with fetch mocked there is no
+  // socket either, so nothing holds the event loop open: on Linux node:test
+  // cancels the test before the 50 ms timeout can fire. Hold it open until the
+  // download settles.
+  const keepAlive = setInterval(() => {}, 1_000);
+  try {
+    await assert.rejects(downloadImage("https://cdn.vendor.example/seafoam.jpg", { timeoutMs: 50 }), { name: "TimeoutError" });
+  } finally {
+    clearInterval(keepAlive);
+  }
 });
