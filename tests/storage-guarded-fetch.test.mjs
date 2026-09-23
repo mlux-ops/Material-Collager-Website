@@ -43,7 +43,20 @@ test("a redirect chain longer than the cap is refused", async (t) => {
 test("hosts the old reference-import regex let through are refused without a request", async (t) => {
   let calls = 0;
   t.mock.method(globalThis, "fetch", async () => { calls += 1; return new Response("x"); });
-  for (const url of ["https://[::1]/x.png", "https://0.0.0.0/x.png", "https://metadata.google.internal/x.png", "http://vendor.example/x.png"]) {
+  for (const url of [
+    "https://[::1]/x.png",
+    "https://0.0.0.0/x.png",
+    "https://metadata.google.internal/x.png",
+    "http://vendor.example/x.png",
+    // A trailing dot (bare or percent-encoded) is a no-op in DNS, and the old
+    // reference-import regex (a prefix match on ^localhost) refused it; the
+    // hostname-set/suffix checks below must not let it back in (R11).
+    "https://localhost./x.png",
+    "https://localhost%2e/x.png",
+    "https://foo.localhost./x.png",
+    "https://metadata.google.internal./x.png",
+    "https://LOCALHOST./x.png",
+  ]) {
     await assert.rejects(fetchPublic(url, { timeoutMs: 1000 }), Error, url);
   }
   assert.equal(calls, 0);
