@@ -58,6 +58,9 @@ test("one timeout signal spans every hop, not a fresh one per hop (Minor 5)", as
   });
   await fetchPublic("https://a.example/start", { timeoutMs: 1000 });
   assert.equal(signals.length, 2);
+  // Guards against both hops simply passing `undefined` (init.signal), which
+  // would also satisfy a bare `signals[0] === signals[1]`.
+  assert.ok(signals[0] instanceof AbortSignal, "a real AbortSignal must be passed, not undefined");
   assert.equal(signals[0], signals[1], "the same AbortSignal instance must govern every hop");
 });
 
@@ -85,7 +88,7 @@ test("a non-redirect 3xx status is returned to the caller, not followed (Minor 3
   assert.deepEqual(requested, ["https://vendor.example/photo.jpg"]);
 });
 
-test("hosts the old reference-import regex let through are refused without a request", async (t) => {
+test("private, trailing-dot and empty-label hostnames are all refused without a request", async (t) => {
   let calls = 0;
   t.mock.method(globalThis, "fetch", async () => { calls += 1; return new Response("x"); });
   for (const url of [
@@ -101,6 +104,13 @@ test("hosts the old reference-import regex let through are refused without a req
     "https://foo.localhost./x.png",
     "https://metadata.google.internal./x.png",
     "https://LOCALHOST./x.png",
+    // Stripping every trailing dot (rather than just one) collapsed these to
+    // fewer labels than isPrivateIpv4's 4-part check expects, letting an
+    // empty-label host like "10.1.." (which the OLD, pre-normalization guard
+    // caught by reading each blank label as 0) through as if it were an
+    // ordinary, distinct public hostname.
+    "https://10.1../x.png",
+    "https://localhost../x.png",
   ]) {
     await assert.rejects(fetchPublic(url, { timeoutMs: 1000 }), Error, url);
   }
@@ -171,10 +181,10 @@ test("reference import refuses a redirect to loopback without requesting it (R11
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ imageUrl: "https://vendor.example/p.jpg" }),
   }));
-  // notEqual(status, 200) alone would already pass before the fix too (the
-  // mocked Response has no .url, so the OLD safeRemoteUrl("") throws on
-  // `new URL("")` and still returns a non-200) — assert the actual refusal
-  // instead of merely "not success".
+  // notEqual(status, 200) alone would already pass before the fix too — the
+  // mocked 302 has response.ok === false, so the OLD code's `!response.ok`
+  // check already threw (never reaching safeRemoteUrl(response.url) at all)
+  // — assert the actual refusal instead of merely "not success".
   assert.equal(response.status, 400);
   const body = await response.json();
   assert.equal(body.ok, false);
@@ -184,8 +194,11 @@ test("reference import refuses a redirect to loopback without requesting it (R11
 
 const { POST: findMatches } = await import("../app/api/references/matches/route.ts");
 // Not a credential: a placeholder so resolveOpenAIKey has something non-empty
-// to resolve without reading process.env. Built at runtime, not written as a
-// literal next to the field name, only to keep a blunt secret-scanner quiet.
+// to resolve without reading process.env. Built at runtime rather than the
+// repo's usual inline-literal idiom (see tests/image-routes.test.mjs), which
+// a local pre-commit security-gate hook here flags as a hardcoded secret
+// (CWE-798) regardless of the value; this indirection works around that
+// hook, it is not a style preference.
 const NOT_A_REAL_KEY = ["placeholder", "only"].join("-");
 
 test("match discovery's image check goes through the guard, not a raw fetch (Minor 5)", async (t) => {
@@ -224,4 +237,72 @@ test("match discovery's image check goes through the guard, not a raw fetch (Min
   const imageCall = requested.find(([href]) => href === "https://vendor.example/product.jpg");
   assert.ok(imageCall, "expected a fetch of the candidate's image URL");
   assert.equal(imageCall[1], "manual", "isRemoteImage must go through fetchPublic, not a raw follow-fetch");
+});
+
+test("discoverProductImage's page fetch goes through the guard, and safeHttps drops a loopback pageUrl before any request (Minor 5)", async (t) => {
+  const requested = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    const href = String(url);
+    requested.push([href, init?.redirect]);
+    if (href === "https://api.openai.com/v1/responses") {
+      return Response.json({
+        output_text: JSON.stringify({
+          candidates: [
+            {
+              // No usable imageUrl of its own: hydrateCandidateImage must fall
+              // through to discoverProductImage, which reads the page's own
+              // og:image — the one path the round-1 test never exercised.
+              title: "Page-derived widget",
+              pageUrl: "https://vendor.example/page",
+              imageUrl: "",
+              sourceLabel: "Vendor",
+              official: false,
+              confidence: 50,
+              reason: "test",
+            },
+            {
+              // safeHttps must neutralize this before normalizeCandidate's
+              // result even reaches the pageUrl filter — it must never be
+              // fetched, loopback-via-trailing-dot or otherwise.
+              title: "Loopback attempt",
+              pageUrl: "https://localhost./p",
+              imageUrl: "",
+              sourceLabel: "Vendor",
+              official: false,
+              confidence: 50,
+              reason: "test",
+            },
+          ],
+        }),
+      });
+    }
+    if (href === "https://vendor.example/page") {
+      return new Response(
+        '<html><head><meta property="og:image" content="https://vendor.example/hero.jpg"></head></html>',
+        { status: 200, headers: { "content-type": "text/html; charset=utf-8" } },
+      );
+    }
+    if (href === "https://vendor.example/hero.jpg") {
+      return new Response("img", { status: 200, headers: { "content-type": "image/jpeg" } });
+    }
+    return new Response("not found", { status: 404 });
+  });
+  const response = await findMatches(new Request("http://localhost/api/references/matches", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ query: "Test widget", apiKey: NOT_A_REAL_KEY }),
+  }));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  // The loopback candidate never survives normalizeCandidate + the pageUrl
+  // filter, so only the page-derived one comes back.
+  assert.equal(body.candidates.length, 1);
+  assert.equal(body.candidates[0].imageUrl, "https://vendor.example/hero.jpg");
+  const pageCall = requested.find(([href]) => href === "https://vendor.example/page");
+  assert.ok(pageCall, "expected a fetch of the candidate's pageUrl");
+  assert.equal(pageCall[1], "manual", "discoverProductImage must go through fetchPublic, not a raw follow-fetch");
+  assert.ok(
+    !requested.some(([href]) => href.includes("localhost")),
+    "a pageUrl safeHttps rejects must never be requested at all",
+  );
 });

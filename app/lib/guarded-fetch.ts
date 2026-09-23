@@ -25,9 +25,9 @@ export const MAX_REDIRECTS = 5;
 
 // Only these statuses carry a Location a client is expected to follow. Every
 // other 3xx (300 Multiple Choices, 304 Not Modified, a bare 305/306/309-399)
-// is handed back to the caller's own `!response.ok` handling instead — treating
-// every 3xx as "follow the Location" is exactly the class of bug this module
-// exists to close.
+// is handed back to the caller's own `!response.ok` handling instead — a
+// spec-conformance fix, not a security one: a followed 300 or 304 would still
+// be validated hop by hop like any other.
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 export async function fetchPublic(

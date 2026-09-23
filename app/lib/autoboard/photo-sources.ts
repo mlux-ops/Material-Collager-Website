@@ -67,11 +67,18 @@ export function assertFetchableUrl(raw: unknown): URL {
     throw new Error(`Only https URLs can be fetched; got "${url.protocol}".`);
   }
 
-  // A trailing dot (or its percent-encoded form, "%2e") is a no-op in DNS —
-  // "localhost." and "localhost" name the same host — but the URL parser
-  // keeps it, so every literal-hostname and suffix check below would miss it
-  // without this normalization.
-  const hostname = url.hostname.toLowerCase().replace(/\.+$/, "");
+  // A single trailing dot (or its percent-encoded form, "%2e") is a no-op in
+  // DNS — "localhost." and "localhost" name the same host — but the URL
+  // parser keeps it, so every literal-hostname and suffix check below would
+  // miss it without stripping exactly one. Stripping every trailing dot
+  // instead (not just one) would collapse an empty-label host like "10.1.."
+  // to "10.1", losing the label isPrivateIpv4's 4-part check relies on to
+  // catch it — so any remaining empty label (from a second trailing dot, or
+  // one anywhere else) is refused outright rather than silently folded away.
+  const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
+  if (!hostname || hostname.split(".").includes("")) {
+    throw new Error(`"${hostname}" is not a public host.`);
+  }
   if (BLOCKED_HOSTNAMES.has(hostname) || BLOCKED_HOST_SUFFIXES.some((suffix) => hostname.endsWith(suffix))) {
     throw new Error(`"${hostname}" is not a public host.`);
   }
