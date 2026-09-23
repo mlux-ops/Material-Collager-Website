@@ -1,6 +1,6 @@
 import { activeItems, buildGenerationPrompt, resolvedBackground, resolvedOutputFormat, resolvedQuality, resolvedSize, validateCollageRequest, type CollageRequestInput } from "@/app/lib/collage";
 import { cleanupExpiredJobs, ensureJobStorage, publicJob, RETENTION_MS, runtimeStorage, type JobRow } from "@/app/lib/generation-jobs";
-import { errorResponse, readOpenAIResponse, resolveOpenAIKey } from "@/app/lib/openai-server";
+import { errorResponse, OpenAIRequestError, readOpenAIResponse, resolveOpenAIKey } from "@/app/lib/openai-server";
 import { validateImagePrompt } from "@/app/lib/image-edit";
 import { SUNBURST_MODEL, calculateSunburstUsageCost, resolveWireModel } from "@/app/lib/sunburst";
 
@@ -91,11 +91,18 @@ export async function POST(request: Request) {
         .bind(fullMessage, Date.now(), jobId)
         .run()
         .catch(() => undefined);
-      // Reuse the same error (never a new plain Error): an OpenAIRequestError's
-      // status and Retry-After handling in errorResponse must survive this —
-      // only its displayed message grows the guidance above.
-      if (error instanceof Error) error.message = fullMessage;
-      throw error;
+      // Reuse an OpenAIRequestError in place: its status and Retry-After
+      // handling in errorResponse must survive this, so only its displayed
+      // message grows the guidance above. Anything else — a timed-out fetch
+      // rejects with a DOMException, which passes `instanceof Error` but has
+      // a read-only `message` and throws a TypeError on assignment (verified
+      // against both Node and this repo's workerd/Miniflare) — is wrapped in
+      // a plain Error instead, with the original kept as `cause`.
+      if (error instanceof OpenAIRequestError) {
+        error.message = fullMessage;
+        throw error;
+      }
+      throw new Error(fullMessage, { cause: error });
     }
     try {
       await DB.prepare("UPDATE generation_jobs SET status = ?, openai_batch_id = ?, updated_at = ? WHERE id = ?")

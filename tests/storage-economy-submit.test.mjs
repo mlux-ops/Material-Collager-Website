@@ -109,6 +109,36 @@ test("a failed submission leaves a failed row that says how to check before payi
   assert.match(body.error, new RegExp(`material_collager_job = ${row.id}`));
 });
 
+test("a timed-out batch create still carries the guidance, and is never retried (R09)", async (t) => {
+  // AbortSignal.timeout rejects with a DOMException, not an OpenAIRequestError
+  // — readOpenAIResponse never runs, since the fetch itself never resolves.
+  // A DOMException passes `instanceof Error` but its `message` is read-only
+  // (verified against both Node and this repo's workerd/Miniflare — see
+  // dom-exception-message-check.mjs / workerd-dom-exception-check.mjs in the
+  // scratchpad); assigning it must not throw a TypeError that replaces the
+  // guidance with a raw "read only property" message.
+  const calls = { files: 0, batches: 0 };
+  t.mock.method(globalThis, "fetch", async (url) => {
+    if (String(url).endsWith("/v1/files")) {
+      calls.files += 1;
+      return Response.json({ id: `file_input_${calls.files}` });
+    }
+    if (String(url).endsWith("/v1/batches")) {
+      calls.batches += 1;
+      throw new DOMException("The operation timed out.", "TimeoutError");
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  });
+  const response = await submit();
+  assert.notEqual(response.status, 200);
+  assert.equal(calls.batches, 1, "the paid call itself must never be retried");
+  const body = await response.json();
+  const row = await DB.prepare("SELECT id, status, error, openai_batch_id FROM generation_jobs WHERE mode = 'economy' ORDER BY rowid DESC LIMIT 1").first();
+  assert.equal(row.status, "failed");
+  assert.match(row.error, new RegExp(`material_collager_job = ${row.id}`));
+  assert.match(body.error, new RegExp(`material_collager_job = ${row.id}`));
+});
+
 test("the batch id write is retried once before giving up (R09)", async (t) => {
   failBatchIdUpdate = 1;
   try {
