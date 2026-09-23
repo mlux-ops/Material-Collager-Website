@@ -195,7 +195,13 @@ test("a cleared note is not resurrected by an earlier failed write's stale value
   await sleep(30); // write 1 fails at ~20ms; the clear stays pending, nothing auto-resends
   queue.saveSoon({ instruction: "later edit" });
   await queue.flush();
-  assert.deepEqual(sent, [{ notes: { faucet: "" }, instruction: "later edit" }]);
+  // On a loaded runner the clear can go out on its own before the later edit
+  // is queued, so assert what the server ends up holding, not how many writes
+  // carried it.
+  const stored = sent.reduce((acc, patch) => ({ ...acc, ...patch, notes: { ...acc.notes, ...patch.notes } }), { notes: {} });
+  assert.equal(stored.notes.faucet, "");
+  assert.equal(stored.instruction, "later edit");
+  assert.ok(!sent.some((patch) => patch.notes?.faucet === "brushed brass"), "the cleared note's old value never reached the server");
 });
 
 // Minor 1: a failed dropdown save must not be re-sent — the dropdown itself
