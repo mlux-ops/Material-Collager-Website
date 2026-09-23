@@ -1,5 +1,6 @@
 import { persistGenerationOutput } from "@/app/lib/generation-jobs";
 import { errorResponse } from "@/app/lib/openai-server";
+import { sniffImageType } from "@/app/lib/autoboard/image-size";
 
 export const runtime = "edge";
 
@@ -26,9 +27,15 @@ export async function POST(request: Request) {
     }
     if (image.size >= 50 * 1024 * 1024) throw new Error("The image must be under 50 MB.");
 
+    const bytes = new Uint8Array(await image.arrayBuffer());
+    // The bytes decide the type, not the caller's filename or Content-Type:
+    // persistence derives the R2 content type and the history's format from
+    // the extension, so it has to be the real one.
+    const type = sniffImageType(bytes);
+    if (!type) throw new Error("Only PNG, JPEG or WebP images can be saved to the library.");
     const stored = await persistGenerationOutput({
-      imageBase64: base64FromBytes(new Uint8Array(await image.arrayBuffer())),
-      filename: safeFilename(payload.filename),
+      imageBase64: base64FromBytes(bytes),
+      filename: safeFilename(payload.filename, type),
       format: (payload.format || "").slice(0, 32) || "workbench",
       prompt: (payload.prompt || "Workbench output").slice(0, 32_000),
       payload: { source: "workbench", workflow: payload.workflow || "untitled" },
@@ -51,8 +58,11 @@ function base64FromBytes(bytes: Uint8Array) {
   return btoa(binary);
 }
 
-function safeFilename(value?: string) {
-  const raw = value?.trim() || "workbench-output.png";
-  const withExtension = raw.toLowerCase().endsWith(".png") ? raw : `${raw}.png`;
-  return withExtension.replace(/[<>:"/\\|?*]+/g, "_");
+const EXTENSION_FOR_TYPE = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" } as const;
+
+// Renaming is not transcoding: "board.png" holding JPEG bytes is stored as
+// "board.jpg", so its name, MIME type and recorded format all agree.
+function safeFilename(value: string | undefined, type: keyof typeof EXTENSION_FOR_TYPE) {
+  const stem = (value?.trim() || "workbench-output").replace(/\.(png|jpe?g|webp)$/i, "");
+  return `${stem}.${EXTENSION_FOR_TYPE[type]}`.replace(/[<>:"/\\|?*]+/g, "_");
 }

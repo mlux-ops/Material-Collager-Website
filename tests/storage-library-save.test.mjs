@@ -42,3 +42,24 @@ test("a history row that fails to insert takes its new R2 object with it", async
   assert.notEqual(response.status, 200);
   assert.equal(OUTPUTS.objects.size, before);
 });
+
+test("JPEG and WebP outputs keep their real type in R2 and in the history record (R12)", async () => {
+  for (const [format, mime, extension] of [["jpeg", "image/jpeg", "jpg"], ["webp", "image/webp", "webp"]]) {
+    const bytes = await sharp({ create: { width: 4, height: 4, channels: 3, background: "#808080" } })[format]().toBuffer();
+    const response = await save(bytes, { type: mime, filename: "board.png" });
+    assert.equal(response.status, 200, `${format} save failed`);
+    const { jobId } = await response.json();
+    const row = await DB.prepare("SELECT output_key, output_format, filename FROM generation_jobs WHERE id = ?").bind(jobId).first();
+    assert.match(row.output_key, new RegExp(`\\.${extension}$`));
+    assert.equal(row.output_format, extension);
+    assert.equal(row.filename, `board.${extension}`);
+    assert.equal(OUTPUTS.objects.get(row.output_key).httpMetadata.contentType, mime);
+  }
+});
+
+test("bytes that are not PNG, JPEG or WebP are refused before anything is stored", async () => {
+  const before = OUTPUTS.puts.length;
+  const response = await save(new TextEncoder().encode("GIF89a not really an image"), { type: "image/gif" });
+  assert.notEqual(response.status, 200);
+  assert.equal(OUTPUTS.puts.length, before);
+});
