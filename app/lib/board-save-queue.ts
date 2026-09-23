@@ -15,8 +15,8 @@
 //   the second write's own (later, more current) failure — or success.
 // - flush() is the barrier a paid render waits on: it forces anything pending
 //   out now (cancelling its debounce), rides through the current write and
-//   any it goes on to trigger, and rejects if the attempt it makes itself
-//   fails — so a render can only start once the queue has genuinely emptied.
+//   any it goes on to trigger, and rejects if that fails — so a render can
+//   only start once the queue has genuinely emptied.
 //
 // A failed write's patch is merged back beneath `pending` rather than on top
 // of it, and only for the fields whose control still shows the edit (the
@@ -55,7 +55,7 @@ function keepEditedFields(patch: BoardPatch): BoardPatch {
 // A failed dropdown-only patch keeps nothing (keepEditedFields drops every
 // field it had), and merging "nothing" beneath a `pending` that is itself
 // null would otherwise leave `pending` as `{}` — truthy, so every check
-// against `pending === null` above would treat it as unfinished work and try
+// against `pending === null` below would treat it as unfinished work and try
 // to resend an empty patch, forever, if the resend also failed.
 function normalizePending(patch: BoardPatch): BoardPatch | null {
   return Object.keys(patch).length > 0 ? patch : null;
@@ -66,9 +66,9 @@ export type BoardSaveQueue = {
   saveSoon(patch: BoardPatch): void;
   /** Sends `patch`, with anything pending, now. Resolves false on failure (reported through onError). */
   saveNow(patch: BoardPatch): Promise<boolean>;
-  /** Sends anything pending and waits for every write in flight; rejects if the last write failed. */
+  /** Sends anything pending and waits for every write in flight; rejects if the write it makes (or the one it only waited on) failed. */
   flush(): Promise<void>;
-  /** Removes and returns what has not been sent yet, for a last-chance send on unmount. */
+  /** Removes and returns what has not been sent yet, without sending it. Used by tests; production code flushes instead, so nothing bypasses the queue. */
   takePending(): BoardPatch | null;
 };
 
@@ -85,6 +85,14 @@ export function createBoardSaveQueue(options: {
   // current write settles (a debounce tick, saveNow riding along on someone
   // else's write) can await it without a try/catch of its own.
   let inFlight: Promise<void> | null = null;
+  // Counts every failure that dropped a dropdown value keepEditedFields will
+  // never resend. drainOrThrow compares this against its own starting count
+  // to tell "a write I only waited on just failed silently" from "nothing
+  // has gone wrong since I started" — a dropdown failure that empties
+  // `pending` would otherwise be invisible to a waiter who made no attempt
+  // of its own.
+  let dropped = 0;
+  let droppedError: Error | null = null;
 
   const clearTimer = () => {
     if (timer) {
@@ -102,51 +110,80 @@ export function createBoardSaveQueue(options: {
     if (inFlight || pending === null) return null;
     const patch = pending;
     pending = null;
-    const attempt: Promise<void> = options.send(patch).then(
+    // send() is documented to return a Promise, but a synchronous throw (a
+    // non-async implementation, or one that throws before its first await)
+    // must not lose this patch, and must not escape uncaught from the plain
+    // setTimeout callback that can also reach here — normalize it into a
+    // rejection so the failure handler below runs exactly as it would for an
+    // async one.
+    let sending: Promise<void>;
+    try {
+      sending = options.send(patch);
+    } catch (cause) {
+      sending = Promise.reject(cause);
+    }
+    const attempt: Promise<void> = sending.then(
       () => {
         inFlight = null;
-        pump(); // keep draining whatever accumulated while this write was out
+        // A no-op while typing is still debouncing — that timer owns
+        // `pending` until it fires and calls pump() itself (see saveSoon).
+        // Draining here unconditionally is what let a steady typist's own
+        // debounce get run over by every write finishing in turn.
+        if (timer === null) pump();
       },
       (cause: unknown) => {
-        // Newer edits made while this was in flight are the only things that
-        // belong in `pending` now; the failed patch (filtered to the fields
-        // still shown as edited) goes back in beneath them, never on top, so
-        // a stale value can never outrank an edit typed after it.
-        pending = normalizePending(mergeBoardPatch(keepEditedFields(patch), pending ?? {}));
-        const error = cause instanceof Error ? cause : new Error(String(cause));
-        options.onError?.(error);
-        inFlight = null;
-        // No auto-resend: the kept edit waits for the next save or flush.
-        // Rethrown so `attempt` itself rejects — a direct awaiter (flush)
-        // learns THIS attempt failed, instead of looping on a `pending` that
-        // this same handler just refilled.
-        throw error;
+        try {
+          const error = cause instanceof Error ? cause : new Error(String(cause));
+          // A dropdown value this attempt carried is filtered out below, so
+          // no later attempt will ever resend it. If that leaves nothing
+          // pending, record it so a waiter with no attempt of its own still
+          // learns the write failed (see drainOrThrow).
+          if (patch.quality !== undefined || patch.background !== undefined || patch.heroItemId !== undefined) {
+            dropped += 1;
+            droppedError = error;
+          }
+          // Newer edits made while this was in flight are the only things
+          // that belong in `pending` now; the failed patch (filtered to the
+          // fields still shown as edited) goes back in beneath them, never
+          // on top, so a stale value can never outrank an edit typed after
+          // it.
+          pending = normalizePending(mergeBoardPatch(keepEditedFields(patch), pending ?? {}));
+          options.onError?.(error);
+          // No auto-resend: the kept edit waits for the next save or flush.
+          // Rethrown so `attempt` itself rejects — a direct awaiter (flush)
+          // learns THIS attempt failed, instead of looping on a `pending`
+          // that this same handler just refilled.
+          throw error;
+        } finally {
+          // In a finally, not after onError/String(cause) above: either one
+          // throwing must still clear this, or a wedged `inFlight` spins
+          // every later drain forever on an already-settled promise.
+          inFlight = null;
+        }
       },
     );
     inFlight = attempt.catch(() => undefined);
     return attempt;
   }
 
-  // Waits for anything already out, then forces the rest of `pending` out
-  // (cancelling its debounce first) and rides through however many writes
-  // that takes — pump()'s success handler keeps chaining while more keeps
-  // arriving. Resolves once both `inFlight` and `pending` are empty; rejects
-  // with whatever error the LAST attempt it made itself raised (no automatic
-  // retry after that). Shared by saveNow and flush so "did my save land" is
-  // answered by the attempt's own outcome, never guessed from what `pending`
-  // happens to hold afterward — a dropdown-only failure legitimately empties
-  // `pending` (keepEditedFields keeps nothing), which is not the same as
-  // succeeding.
+  // Waits for anything already out, forces the rest of `pending` out
+  // (cancelling its debounce), and rides through however many writes that
+  // takes. Shared by saveNow and flush: rejects if the attempt it makes
+  // itself fails, or if a write it only waited on dropped a dropdown value
+  // that left nothing pending (`dropped`, above) — either way, no automatic
+  // retry after.
   async function drainOrThrow(): Promise<void> {
+    const droppedAtStart = dropped;
     for (;;) {
       while (inFlight) await inFlight;
-      if (pending === null) return;
+      if (pending === null) {
+        if (dropped !== droppedAtStart) throw droppedError;
+        return;
+      }
       clearTimer(); // a save made during the wait above may have armed its own timer
       const attempt = pump();
-      // pump() always starts an attempt here: nothing is in flight (the
-      // while loop just confirmed it) and pending is non-null (just
-      // checked), so the only way to reach this line is the branch where it
-      // returns a real promise, not null.
+      // Always starts an attempt: inFlight is null and pending isn't, so
+      // pump() can't return null here.
       await attempt;
     }
   }
@@ -157,8 +194,6 @@ export function createBoardSaveQueue(options: {
       clearTimer();
       timer = setTimeout(() => {
         timer = null;
-        // A no-op while a write is already out — that write's own success
-        // handler drains `pending` once it settles (see pump, above).
         pump();
       }, options.debounceMs);
     },
