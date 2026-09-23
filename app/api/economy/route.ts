@@ -93,9 +93,26 @@ export async function POST(request: Request) {
         .catch(() => undefined);
       throw error;
     }
-    await DB.prepare("UPDATE generation_jobs SET status = ?, openai_batch_id = ?, updated_at = ? WHERE id = ?")
-      .bind(batch.status || "validating", batch.id, Date.now(), jobId)
-      .run();
+    try {
+      await DB.prepare("UPDATE generation_jobs SET status = ?, openai_batch_id = ?, updated_at = ? WHERE id = ?")
+        .bind(batch.status || "validating", batch.id, Date.now(), jobId)
+        .run();
+    } catch {
+      // One retry of the WRITE only — never the paid call. The batch is
+      // already bought; losing its id here would strand it, tracked by
+      // nothing, while the response below tells the user to look for it
+      // rather than resubmit.
+      try {
+        await DB.prepare("UPDATE generation_jobs SET status = ?, openai_batch_id = ?, updated_at = ? WHERE id = ?")
+          .bind(batch.status || "validating", batch.id, Date.now(), jobId)
+          .run();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Batch ${batch.id} was created for job ${jobId} but could not be recorded (${message}). Do not resubmit — check OpenAI's Batches page for metadata material_collager_job = ${jobId}, or retry recording once storage recovers.`,
+        );
+      }
+    }
     return Response.json({ ok: true, jobId, status: batch.status, estimatedUsd: null });
   } catch (error) {
     return errorResponse(error);
@@ -114,8 +131,23 @@ export async function GET() {
     const pending = await DB.prepare("SELECT * FROM generation_jobs WHERE mode = 'economy' AND output_key IS NULL AND openai_batch_id IS NOT NULL AND status NOT IN ('failed', 'expired', 'cancelled') ORDER BY updated_at ASC LIMIT 2")
       .all<JobRow>();
     // Refresh jobs independently: one job with an unreadable batch output must
-    // not take down the whole history listing for its six-month lifetime.
-    await Promise.allSettled(pending.results.map((row: JobRow) => refreshJob(row)));
+    // not take down the whole history listing for its six-month lifetime. A
+    // row whose status check itself rejects (a moved key, a batch OpenAI can
+    // no longer find) throws before any UPDATE runs, so without the bump
+    // below its updated_at would never move — it would sort first again on
+    // every GET and starve every other pending job.
+    const settled = await Promise.allSettled(pending.results.map((row: JobRow) => refreshJob(row)));
+    const bumpStamp = Date.now();
+    // Skip a 'finalizing' row: its updated_at is the stale-claim lease
+    // refreshJob reads to decide when a claim is reclaimable, not a fairness
+    // timestamp, and bumping it here would keep the lease from ever expiring.
+    await Promise.allSettled(
+      settled.flatMap((result, index) => {
+        const row = pending.results[index];
+        if (result.status !== "rejected" || row.status === "finalizing") return [];
+        return [DB.prepare("UPDATE generation_jobs SET updated_at = ? WHERE id = ?").bind(bumpStamp, row.id).run()];
+      }),
+    );
     const jobs = await DB.prepare("SELECT * FROM generation_jobs ORDER BY created_at DESC LIMIT 30").all<JobRow>();
     return Response.json({ ok: true, jobs: jobs.results.map(publicJob) });
   } catch (error) {

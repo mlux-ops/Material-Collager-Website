@@ -3,14 +3,24 @@ import test from "node:test";
 import { createFakeD1, createFakeR2, installWorkerEnv } from "./helpers/fake-worker-env.mjs";
 
 let failJobInsert = false;
+// Counts down from N to 0, throwing on each of the next N matching writes.
+// Lets a test ask for exactly one write failure (the original fails, the
+// retry succeeds) or two (the retry fails too, both attempts exhausted).
+let failBatchIdUpdate = 0;
+const BATCH_ID_UPDATE = /^\s*UPDATE generation_jobs SET status = \?, openai_batch_id = \?/i;
 const DB = createFakeD1({
   beforeStatement: (_kind, sql) => {
     if (failJobInsert && /^\s*INSERT INTO generation_jobs/i.test(sql)) throw new Error("D1 unavailable");
+    if (failBatchIdUpdate > 0 && BATCH_ID_UPDATE.test(sql)) {
+      failBatchIdUpdate -= 1;
+      throw new Error("D1 unavailable");
+    }
   },
 });
 installWorkerEnv({ DB, OUTPUTS: createFakeR2() });
 process.env["OPENAI_API_KEY"] = "test-only";
 const { GET, POST } = await import("../app/api/economy/route.ts");
+const { ensureJobStorage } = await import("../app/lib/generation-jobs.ts");
 
 const payload = {
   collageType: "bathroom_fixture_collage",
@@ -29,7 +39,10 @@ const submit = () => POST(new Request("http://localhost/api/economy", {
 }));
 
 // OpenAI's two submission endpoints: the JSONL upload, then the batch itself.
-function mockOpenAI(t, { failBatch = false } = {}) {
+// onBatchCall runs while the batch POST is in flight — exactly the window
+// where the row is committed as 'submitting' but not yet updated with a
+// result — so a test can observe that mid-flight state directly.
+function mockOpenAI(t, { failBatch = false, onBatchCall } = {}) {
   const calls = { files: 0, batches: 0 };
   t.mock.method(globalThis, "fetch", async (url) => {
     if (String(url).endsWith("/v1/files")) {
@@ -38,6 +51,7 @@ function mockOpenAI(t, { failBatch = false } = {}) {
     }
     if (String(url).endsWith("/v1/batches")) {
       calls.batches += 1;
+      await onBatchCall?.();
       if (failBatch) return Response.json({ error: { message: "upstream unavailable" } }, { status: 503 });
       return Response.json({ id: `batch_${calls.batches}`, status: "validating" });
     }
@@ -49,15 +63,27 @@ function mockOpenAI(t, { failBatch = false } = {}) {
 test("if the job can't be recorded, no batch is bought (R09)", async (t) => {
   const calls = mockOpenAI(t);
   failJobInsert = true;
-  const response = await submit();
-  failJobInsert = false;
-  assert.notEqual(response.status, 200);
-  assert.equal(calls.batches, 0);
+  try {
+    const response = await submit();
+    assert.notEqual(response.status, 200);
+    assert.equal(calls.batches, 0);
+  } finally {
+    failJobInsert = false;
+  }
 });
 
 test("an accepted batch is recorded with its provider id (R09)", async (t) => {
-  mockOpenAI(t);
+  let midFlight;
+  mockOpenAI(t, {
+    // The insert already ran (submitEconomyBatch is called after it); the
+    // update that will set the real status/batch id has not, because that
+    // only happens once this very call returns.
+    onBatchCall: async () => {
+      midFlight = await DB.prepare("SELECT status, openai_batch_id FROM generation_jobs WHERE mode = 'economy' ORDER BY rowid DESC LIMIT 1").first();
+    },
+  });
   const response = await submit();
+  assert.deepEqual(midFlight, { status: "submitting", openai_batch_id: null });
   assert.equal(response.status, 200);
   const { jobId } = await response.json();
   const row = await DB.prepare("SELECT status, openai_batch_id FROM generation_jobs WHERE id = ?").bind(jobId).first();
@@ -65,16 +91,48 @@ test("an accepted batch is recorded with its provider id (R09)", async (t) => {
 });
 
 test("a failed submission leaves a failed row that says how to check before paying again", async (t) => {
-  mockOpenAI(t, { failBatch: true });
+  const calls = mockOpenAI(t, { failBatch: true });
   const response = await submit();
   assert.notEqual(response.status, 200);
+  assert.equal(calls.batches, 1);
   const row = await DB.prepare("SELECT id, status, error, openai_batch_id FROM generation_jobs WHERE mode = 'economy' ORDER BY rowid DESC LIMIT 1").first();
   assert.equal(row.status, "failed");
   assert.equal(row.openai_batch_id, null);
   assert.match(row.error, new RegExp(`material_collager_job = ${row.id}`));
 });
 
+test("the batch id write is retried once before giving up (R09)", async (t) => {
+  failBatchIdUpdate = 1;
+  try {
+    const calls = mockOpenAI(t);
+    const response = await submit();
+    assert.equal(response.status, 200);
+    assert.equal(calls.batches, 1, "the paid call itself must never be retried");
+    const { jobId } = await response.json();
+    const row = await DB.prepare("SELECT status, openai_batch_id FROM generation_jobs WHERE id = ?").bind(jobId).first();
+    assert.deepEqual(row, { status: "validating", openai_batch_id: "batch_1" });
+  } finally {
+    failBatchIdUpdate = 0;
+  }
+});
+
+test("a batch id write that fails twice reports the batch as already created, not a plain failure (R09)", async (t) => {
+  failBatchIdUpdate = 2;
+  try {
+    const calls = mockOpenAI(t);
+    const response = await submit();
+    assert.notEqual(response.status, 200);
+    assert.equal(calls.batches, 1, "the paid call itself must never be retried");
+    const body = await response.json();
+    assert.match(body.error, /batch_1/);
+    assert.match(body.error, /do not resubmit/i);
+  } finally {
+    failBatchIdUpdate = 0;
+  }
+});
+
 test("history refreshes at most two pending batches per request, oldest first, and skips rows with no batch", async (t) => {
+  await ensureJobStorage();
   await DB.prepare("DELETE FROM generation_jobs").run();
   const now = Date.now();
   const insert = (id, status, batchId, updatedAt) => DB.prepare(`INSERT INTO generation_jobs
@@ -91,4 +149,65 @@ test("history refreshes at most two pending batches per request, oldest first, a
   const response = await GET();
   assert.equal(response.status, 200);
   assert.deepEqual(polled, ["batch-0", "batch-1"]);
+});
+
+test("a status check that keeps failing doesn't starve another pending job (R09)", async (t) => {
+  await ensureJobStorage();
+  await DB.prepare("DELETE FROM generation_jobs").run();
+  const now = Date.now();
+  const insert = (id, batchId, updatedAt) => DB.prepare(`INSERT INTO generation_jobs
+      (id, mode, status, openai_batch_id, filename, format, prompt, payload_json, reference_ids_json, created_at, updated_at, expires_at)
+      VALUES (?, 'economy', 'in_progress', ?, 'f.png', '1536x1024', 'p', '{}', '[]', ?, ?, ?)`)
+    .bind(id, batchId, now, updatedAt, now + 1e9).run();
+  // The two oldest rows always sort first under LIMIT 2; both permanently
+  // 404 (a moved key, a batch OpenAI can no longer find), which throws
+  // before any UPDATE runs. Without a fix their updated_at never moves, so
+  // they would keep sorting first forever and job-ok would never be reached.
+  await insert("job-fail-1", "batch-fail-1", now - 30);
+  await insert("job-fail-2", "batch-fail-2", now - 20);
+  await insert("job-ok", "batch-ok", now - 10);
+  let polled = [];
+  t.mock.method(globalThis, "fetch", async (url) => {
+    const id = String(url).split("/").pop();
+    polled.push(id);
+    if (id === "batch-fail-1" || id === "batch-fail-2") return Response.json({ error: { message: "not found" } }, { status: 404 });
+    return Response.json({ id, status: "in_progress" });
+  });
+  assert.equal((await GET()).status, 200);
+  assert.deepEqual(polled, ["batch-fail-1", "batch-fail-2"]);
+  polled = [];
+  assert.equal((await GET()).status, 200);
+  assert.ok(polled.includes("batch-ok"), "a status check that keeps failing must not starve the other pending job");
+});
+
+test("a fresh submitting row is still reported as pending, not failed (R09)", async (t) => {
+  await ensureJobStorage();
+  await DB.prepare("DELETE FROM generation_jobs").run();
+  const now = Date.now();
+  await DB.prepare(`INSERT INTO generation_jobs
+      (id, mode, status, openai_batch_id, filename, format, prompt, payload_json, reference_ids_json, created_at, updated_at, expires_at)
+      VALUES ('job-fresh', 'economy', 'submitting', NULL, 'f.png', '1536x1024', 'p', '{}', '[]', ?, ?, ?)`)
+    .bind(now, now, now + 1e9).run();
+  // No batch id yet, so nothing should ever be fetched for this row.
+  t.mock.method(globalThis, "fetch", async (url) => { throw new Error(`unexpected fetch ${url}`); });
+  const { jobs } = await (await GET()).json();
+  const job = jobs.find((entry) => entry.id === "job-fresh");
+  assert.equal(job.status, "submitting");
+  assert.equal(job.error, null);
+});
+
+test("a submitting row stuck past the stale threshold reads as failed, with guidance (R09)", async (t) => {
+  await ensureJobStorage();
+  await DB.prepare("DELETE FROM generation_jobs").run();
+  const now = Date.now();
+  const staleUpdatedAt = now - 6 * 60 * 1000;
+  await DB.prepare(`INSERT INTO generation_jobs
+      (id, mode, status, openai_batch_id, filename, format, prompt, payload_json, reference_ids_json, created_at, updated_at, expires_at)
+      VALUES ('job-stale', 'economy', 'submitting', NULL, 'f.png', '1536x1024', 'p', '{}', '[]', ?, ?, ?)`)
+    .bind(staleUpdatedAt, staleUpdatedAt, now + 1e9).run();
+  t.mock.method(globalThis, "fetch", async (url) => { throw new Error(`unexpected fetch ${url}`); });
+  const { jobs } = await (await GET()).json();
+  const job = jobs.find((entry) => entry.id === "job-stale");
+  assert.equal(job.status, "failed");
+  assert.match(job.error, /material_collager_job = job-stale/);
 });
