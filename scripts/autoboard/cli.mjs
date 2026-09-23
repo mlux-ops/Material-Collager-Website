@@ -1196,22 +1196,50 @@ async function commandBatchStatus(values) {
   // count, for the same reason. Repeats are close to free: with QA disabled
   // (see refreshJob in that route), a refresh only checks status and, once,
   // downloads a result.
-  const pollStartedAt = Date.now();
+  // Baseline for "checked this run": the server's own clock (from the first
+  // response's Date header), not this machine's — against a deployed
+  // Worker, a local clock that runs slow would make an old, never-touched
+  // job's real updatedAt look like it is still ahead of a too-early local
+  // baseline, counting a stale job as confirmed. HTTP's Date header is only
+  // second-precision (RFC 7231 §7.1.1.2), so it is backed off by a further
+  // second: a job THIS very first response itself just refreshed must still
+  // count as checked, not look like it predates the baseline by a rounding
+  // artifact. Falls back to the unadjusted local clock only if a response
+  // never carries a Date header at all (unusual, but not fetch's job to
+  // guarantee).
+  let pollStartedAt = Date.now();
+  let pollStartedAtIsLocal = true;
   const isSettled = (job) => !job || TERMINAL_ECONOMY_STATUSES.has(job.status) || job.updatedAt >= pollStartedAt;
   let jobsById = new Map();
+  let hadSuccessfulRound = false;
   for (let poll = 0; ; poll++) {
     let json;
+    let response;
     try {
-      const response = await fetch(`${baseUrl}/api/economy`, { headers: activeAccessHeaders });
+      response = await fetch(`${baseUrl}/api/economy`, { headers: activeAccessHeaders });
       json = await response.json().catch(() => null);
       if (!response.ok || !json?.ok) throw new Error(json?.error ?? `HTTP ${response.status} from /api/economy`);
     } catch (error) {
-      // Keep whatever the last successful round already learned instead of
-      // discarding it: a transient failure here must not cost outputs that
+      if (!hadSuccessfulRound) {
+        // Nothing learned yet to fall back to: every tracked job would
+        // otherwise be reported "not found (may have expired)" below, which
+        // reads as "the jobs are gone" and invites a paid resubmit. Surface
+        // the real failure (an Access rejection, a D1 outage) and exit
+        // non-zero instead, exactly as before this loop could repeat at all.
+        throw error;
+      }
+      // A round already succeeded: keep what it learned instead of
+      // discarding it — a transient failure here must not cost outputs that
       // are already confirmed completed by an earlier, successful round.
       console.log(`  batch-status: a status check failed (${error instanceof Error ? error.message : error}); continuing with the last successful read.`);
       break;
     }
+    if (pollStartedAtIsLocal) {
+      const serverNow = Date.parse(response.headers.get("date") ?? "");
+      if (Number.isFinite(serverNow)) pollStartedAt = serverNow - 1000;
+      pollStartedAtIsLocal = false;
+    }
+    hadSuccessfulRound = true;
     jobsById = new Map(json.jobs.map((job) => [job.id, job]));
     if (entries.every(([, submission]) => isSettled(jobsById.get(submission.jobId)))) break;
     const pendingElsewhere = json.jobs.filter((job) => !TERMINAL_ECONOMY_STATUSES.has(job.status)).length;

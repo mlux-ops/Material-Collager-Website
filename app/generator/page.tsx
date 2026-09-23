@@ -1326,8 +1326,10 @@ export default function Home() {
         // A batch that reached the server before the abort landed still
         // needs its row shown in History right away, not after the next
         // poll — a resubmit from someone who sees nothing new would buy a
-        // second batch. Refreshing costs nothing when there is none.
-        if (mode === "economy") await refreshJobs();
+        // second batch. Refreshing costs nothing when there is none. Not
+        // awaited: the UI unlocks (finally, below) as soon as the panel text
+        // is set, instead of staying locked until History reloads.
+        if (mode === "economy") void refreshJobs();
       } else {
         // Surface the failed request's diagnostics so Troubleshooting shows the
         // failing stage instead of stale data from the previous draft render.
@@ -1372,7 +1374,9 @@ export default function Home() {
         // A failed Economy submit can still leave a history row behind (see
         // POST /api/economy) — with its own guidance on what to check before
         // resubmitting. Show it immediately rather than after the next poll.
-        if (mode === "economy") await refreshJobs();
+        // Not awaited: same reason as the abort branch above — the UI
+        // shouldn't stay locked until History reloads.
+        if (mode === "economy") void refreshJobs();
       }
     } finally {
       setIsWorking(false);

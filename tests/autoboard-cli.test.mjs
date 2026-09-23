@@ -187,7 +187,13 @@ test("CLI batch-status keeps polling until every tracked job is confirmed, not j
       `board--${String.fromCharCode(65 + index)}`, { jobId: id, status: "in_progress" },
     ])),
   }, null, 2));
-  const state = new Map(ids.map((id, index) => [id, { status: "in_progress", updatedAt: now - (ids.length - index) * 1000 }]));
+  // A full minute apart, not a second: the CLI's settlement baseline comes
+  // from the first response's Date header minus a 1s margin (see cli.mjs),
+  // and Node's own auto-generated Date header can itself read up to ~1s
+  // stale relative to Date.now() (it is cached and refreshed roughly once a
+  // second) — spacing this tight would make an untouched job's age
+  // indistinguishable from that combined slop and flake.
+  const state = new Map(ids.map((id, index) => [id, { status: "in_progress", updatedAt: now - (ids.length - index) * 60_000 }]));
   const PNG = Buffer.from(
     "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de0000000c4944415408d763f8cfc0c0c0c40000000704fe07b3ee7e0000000049454e44ae426082",
     "hex",
@@ -283,6 +289,87 @@ test("CLI batch-status keeps what it already learned if a later GET fails, rathe
     assert.match(result.stdout, /status check failed/);
     const results = JSON.parse(readFileSync(path.join(runDir, "results.json"), "utf8"));
     assert.equal(results.economy["board--A"].status, "in_progress");
+  } finally {
+    await close(server);
+    rmSync(runDir, { recursive: true, force: true });
+  }
+});
+
+test("CLI batch-status fails loudly if no round ever succeeds, instead of reporting every job as expired", async () => {
+  const runId = `run-cli-batch-status-down-${process.pid}-${Date.now()}`;
+  const runDir = path.join(process.cwd(), "autoboard-runs", runId);
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(path.join(runDir, "plan.json"), JSON.stringify({ runId, source: "offline-manifest", variants: [], boards: [] }, null, 2));
+  writeFileSync(path.join(runDir, "results.json"), JSON.stringify({
+    candidates: {},
+    finals: {},
+    economy: { "board--A": { jobId: "job-a", status: "in_progress" } },
+  }, null, 2));
+
+  // Every /api/economy call fails (an Access rejection or a D1 outage would
+  // look like this). With no successful round, jobsById stays empty, and
+  // reporting every tracked job as "not found (may have expired)" reads as
+  // "the jobs are gone" — inviting a paid resubmit. The command must instead
+  // surface the real failure and exit non-zero, as it did before this loop
+  // could repeat at all.
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/economy") {
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+    response.writeHead(500, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ ok: false, error: "Internal error" }));
+  });
+  await listen(server);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const result = await runBatchStatus(runId, baseUrl);
+    assert.notEqual(result.status, 0, result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout, /not found \(may have expired/);
+    assert.match(result.stdout + result.stderr, /Internal error/);
+  } finally {
+    await close(server);
+    rmSync(runDir, { recursive: true, force: true });
+  }
+});
+
+test("CLI batch-status's cap-exhaustion path prints the still-unconfirmed jobs", async () => {
+  const runId = `run-cli-batch-status-cap-${process.pid}-${Date.now()}`;
+  const runDir = path.join(process.cwd(), "autoboard-runs", runId);
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(path.join(runDir, "plan.json"), JSON.stringify({ runId, source: "offline-manifest", variants: [], boards: [] }, null, 2));
+  writeFileSync(path.join(runDir, "results.json"), JSON.stringify({
+    candidates: {},
+    finals: {},
+    economy: { "board--A": { jobId: "job-a", status: "in_progress" } },
+  }, null, 2));
+
+  // A single tracked job whose updatedAt the fake server never advances: it
+  // can never look "checked this run", so the loop can only ever stop by
+  // hitting the cap (the minimum, 4, since there is only ever one
+  // non-terminal job in the response).
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/economy") {
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+    const jobs = [{
+      id: "job-a", status: "in_progress", updatedAt: Date.now() - 60_000, error: null,
+      libraryVisible: false, model: null, quality: null, background: "opaque", outputFormat: "png", usage: null, costUsd: null,
+    }];
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ ok: true, jobs }));
+  });
+  await listen(server);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const result = await runBatchStatus(runId, baseUrl);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /stopped after 4 rounds with 1 job\(s\) not yet confirmed: board--A/);
   } finally {
     await close(server);
     rmSync(runDir, { recursive: true, force: true });
