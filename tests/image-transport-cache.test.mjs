@@ -34,6 +34,23 @@ test("mapWithLimit keeps order and never runs more than `limit` at once", async 
   assert.equal(peak, 2);
 });
 
+test("mapWithLimit with a limit of 0 still runs (one worker), instead of returning holes", async () => {
+  assert.deepEqual(await mapWithLimit([1, 2, 3], 0, async (item) => item * 2), [2, 4, 6]);
+});
+
+test("transportCacheKey needs crypto.subtle, which is why optimizeReferenceForTransport skips its cache without it", async () => {
+  // Plain http (a LAN address during a draft, say) leaves crypto.subtle
+  // undefined; globalThis.crypto is an accessor with no setter, so it has to
+  // be swapped via defineProperty, not assignment, and restored the same way.
+  const original = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  try {
+    Object.defineProperty(globalThis, "crypto", { value: { subtle: undefined }, configurable: true, writable: true, enumerable: true });
+    await assert.rejects(() => transportCacheKey(new File([new Uint8Array([1, 2, 3])], "x.png"), 1000));
+  } finally {
+    Object.defineProperty(globalThis, "crypto", original);
+  }
+});
+
 test("the transport cache evicts oldest entries once it holds more bytes than its budget", () => {
   const cache = createByteBudgetCache(10);
   const file = (size) => new File([new Uint8Array(size)], "x.jpg", { type: "image/jpeg" });

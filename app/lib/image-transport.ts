@@ -171,7 +171,9 @@ export async function mapWithLimit<T, R>(items: T[], limit: number, run: (item: 
       results[index] = await run(items[index], index);
     }
   };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  // A limit of 0 (Math.min below would pick 0 workers) must still make
+  // progress, not silently return an array of holes.
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, limit), items.length) }, worker));
   return results;
 }
 
@@ -190,6 +192,12 @@ export async function transportCacheKey(file: File, targetBytes: number): Promis
 
 export async function optimizeReferenceForTransport(file: File, targetBytes: number) {
   if (file.size <= targetBytes) return file;
+  // crypto.subtle (used by transportCacheKey) is only exposed in a secure
+  // context, so plain http — a LAN address during a draft, say — leaves
+  // `globalThis.crypto.subtle` undefined; mirror the globalThis.crypto?.
+  // guard used for randomUUID elsewhere and just skip the cache rather than
+  // let every oversized reference throw.
+  if (!globalThis.crypto?.subtle) return compressReferenceForTransport(file, targetBytes);
   const cacheKey = await transportCacheKey(file, targetBytes);
   const cached = transportCache.get(cacheKey);
   if (cached) return cached;
