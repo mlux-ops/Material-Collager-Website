@@ -30,7 +30,7 @@ test("public redirects are followed hop by hop, resolving relative locations", a
   assert.deepEqual(requested, ["https://a.example/start", "https://b.example/next", "https://b.example/final.jpg"]);
 });
 
-test("a redirect's body is cancelled before the next hop is requested (Minor 5)", async (t) => {
+test("a redirect's body is cancelled before the next hop is requested", async (t) => {
   const events = [];
   t.mock.method(globalThis, "fetch", async (url) => {
     events.push(`fetch ${String(url)}`);
@@ -49,7 +49,7 @@ test("a redirect's body is cancelled before the next hop is requested (Minor 5)"
   assert.deepEqual(events, ["fetch https://a.example/start", "cancel", "fetch https://b.example/next"]);
 });
 
-test("one timeout signal spans every hop, not a fresh one per hop (Minor 5)", async (t) => {
+test("one timeout signal spans every hop, not a fresh one per hop", async (t) => {
   const signals = [];
   t.mock.method(globalThis, "fetch", async (url, init) => {
     signals.push(init.signal);
@@ -74,7 +74,7 @@ test("a redirect chain longer than the cap is refused", async (t) => {
   assert.equal(calls, MAX_REDIRECTS + 1);
 });
 
-test("a non-redirect 3xx status is returned to the caller, not followed (Minor 3)", async (t) => {
+test("a non-redirect 3xx status is returned to the caller, not followed", async (t) => {
   const requested = [];
   t.mock.method(globalThis, "fetch", async (url) => {
     requested.push(String(url));
@@ -104,11 +104,7 @@ test("private, trailing-dot and empty-label hostnames are all refused without a 
     "https://foo.localhost./x.png",
     "https://metadata.google.internal./x.png",
     "https://LOCALHOST./x.png",
-    // Stripping every trailing dot (rather than just one) collapsed these to
-    // fewer labels than isPrivateIpv4's 4-part check expects, letting an
-    // empty-label host like "10.1.." (which the OLD, pre-normalization guard
-    // caught by reading each blank label as 0) through as if it were an
-    // ordinary, distinct public hostname.
+    // An empty label is never a valid DNS name, so these must be refused too.
     "https://10.1../x.png",
     "https://localhost../x.png",
   ]) {
@@ -193,15 +189,10 @@ test("reference import refuses a redirect to loopback without requesting it (R11
 });
 
 const { POST: findMatches } = await import("../app/api/references/matches/route.ts");
-// Not a credential: a placeholder so resolveOpenAIKey has something non-empty
-// to resolve without reading process.env. Built at runtime rather than the
-// repo's usual inline-literal idiom (see tests/image-routes.test.mjs), which
-// a local pre-commit security-gate hook here flags as a hardcoded secret
-// (CWE-798) regardless of the value; this indirection works around that
-// hook, it is not a style preference.
+// Placeholder, not a real key.
 const NOT_A_REAL_KEY = ["placeholder", "only"].join("-");
 
-test("match discovery's image check goes through the guard, not a raw fetch (Minor 5)", async (t) => {
+test("match discovery's image check goes through the guard, not a raw fetch (R11)", async (t) => {
   const requested = [];
   t.mock.method(globalThis, "fetch", async (url, init) => {
     const href = String(url);
@@ -239,7 +230,7 @@ test("match discovery's image check goes through the guard, not a raw fetch (Min
   assert.equal(imageCall[1], "manual", "isRemoteImage must go through fetchPublic, not a raw follow-fetch");
 });
 
-test("discoverProductImage's page fetch goes through the guard, and safeHttps drops a loopback pageUrl before any request (Minor 5)", async (t) => {
+test("discoverProductImage's page fetch goes through the guard, and safeHttps drops a loopback pageUrl before any request (R11)", async (t) => {
   const requested = [];
   t.mock.method(globalThis, "fetch", async (url, init) => {
     const href = String(url);
@@ -266,6 +257,19 @@ test("discoverProductImage's page fetch goes through the guard, and safeHttps dr
               // fetched, loopback-via-trailing-dot or otherwise.
               title: "Loopback attempt",
               pageUrl: "https://localhost./p",
+              imageUrl: "",
+              sourceLabel: "Vendor",
+              official: false,
+              confidence: 50,
+              reason: "test",
+            },
+            {
+              // The pre-guard regex (a prefix match on hostname) refused
+              // "localhost" but never handled an IPv6 literal at all, so this
+              // one is what actually distinguishes safeHttps from that regex:
+              // a revert would let it survive into the response below.
+              title: "IPv6 loopback attempt",
+              pageUrl: "https://[::1]/p",
               imageUrl: "",
               sourceLabel: "Vendor",
               official: false,
@@ -302,7 +306,7 @@ test("discoverProductImage's page fetch goes through the guard, and safeHttps dr
   assert.ok(pageCall, "expected a fetch of the candidate's pageUrl");
   assert.equal(pageCall[1], "manual", "discoverProductImage must go through fetchPublic, not a raw follow-fetch");
   assert.ok(
-    !requested.some(([href]) => href.includes("localhost")),
+    !requested.some(([href]) => href.includes("localhost") || href.includes("[::1]")),
     "a pageUrl safeHttps rejects must never be requested at all",
   );
 });

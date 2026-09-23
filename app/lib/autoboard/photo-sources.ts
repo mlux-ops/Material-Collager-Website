@@ -70,11 +70,9 @@ export function assertFetchableUrl(raw: unknown): URL {
   // A single trailing dot (or its percent-encoded form, "%2e") is a no-op in
   // DNS — "localhost." and "localhost" name the same host — but the URL
   // parser keeps it, so every literal-hostname and suffix check below would
-  // miss it without stripping exactly one. Stripping every trailing dot
-  // instead (not just one) would collapse an empty-label host like "10.1.."
-  // to "10.1", losing the label isPrivateIpv4's 4-part check relies on to
-  // catch it — so any remaining empty label (from a second trailing dot, or
-  // one anywhere else) is refused outright rather than silently folded away.
+  // miss it without stripping exactly one. An empty label is never a valid
+  // DNS name, so one left after stripping that single dot — or anywhere else
+  // in the hostname — is refused outright.
   const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
   if (!hostname || hostname.split(".").includes("")) {
     throw new Error(`"${hostname}" is not a public host.`);
