@@ -942,21 +942,24 @@ export default function WorkbenchApp() {
 
   // issue-1: pending-autosave bookkeeping so a graph switch/create can flush
   // instead of silently losing whatever's still inside a debounce window.
-  // Refs (not state) so switchGraph -- a useCallback with a stable identity
-  // -- always reads the LATEST values when it's actually invoked, however
-  // long after it was defined.
+  // Timer ids are refs (not state) so switchGraph -- a useCallback with a
+  // stable identity -- always reads the LATEST value when it's actually
+  // invoked, however long after it was defined.
   const structureTimeoutRef = useRef<number | null>(null);
   const blobTimeoutRef = useRef<number | null>(null);
-  // True from the moment a save is SCHEDULED until it is actually ATTEMPTED
-  // (by its own debounce timer firing, or by an early flush) -- cleared only
-  // on a SUCCESSFUL attempt, so a failed attempt leaves it set and a later
-  // switch's flush tries again rather than silently skipping it.
-  // Counted, not boolean: see createDirtyChannel (persistence.ts).
+  // Dirty from the moment a save is SCHEDULED until it actually lands --
+  // covers a debounce timer firing or an early flush, and a FAILED attempt
+  // leaves it dirty so a later switch's flush tries again rather than
+  // silently skipping it. Counted, not boolean: see createDirtyChannel
+  // (persistence.ts).
   const [structureDirty] = useState(createDirtyChannel);
   const [blobDirty] = useState(createDirtyChannel);
-  // Autosaves still writing. A flush waits for them before deciding what is
-  // owed, so it never races an older write for the same graph's records and
-  // never re-writes one that is about to land.
+  // Autosaves still writing. flushPendingSaves awaits these before deciding
+  // what's owed, routes its own save through here too (so a later flush,
+  // after this one times out, still waits for it instead of racing it), and
+  // re-cancels any timer an edit armed during that wait -- so it never races
+  // an older write for the same graph's records, and no during-wait edit's
+  // own timer fires after the flush already decided.
   const inFlightSavesRef = useRef(new Set<Promise<void>>());
   const trackSave = useCallback((save: Promise<void>) => {
     inFlightSavesRef.current.add(save);
@@ -1088,17 +1091,25 @@ export default function WorkbenchApp() {
   }, []);
 
   // issue-1: performs, RIGHT NOW, whatever save is still owed for the
-  // CURRENT graph instead of waiting out its debounce window --
+  // CURRENT graph instead of waiting out its debounce window -- first
+  // awaiting any autosave already in flight (see inFlightSavesRef above),
+  // since only then do the channels know what's actually still owed.
   // decidePendingSave (persistence.ts) picks structure-only/full/none from
-  // the two dirty flags so this can never fire a redundant double save (see
-  // its own doc comment). Throws on failure (propagated from saveGraph/
-  // saveGraphStructure) WITHOUT clearing the dirty flag, so switchGraph's
-  // caller can abort the switch and a later retry still attempts the save.
+  // the two channels' dirty state so this can never fire a redundant double
+  // save (see its own doc comment). Throws on failure (propagated from
+  // saveGraph/saveGraphStructure) WITHOUT settling the channel, so
+  // switchGraph's caller can abort the switch and a later retry still
+  // attempts the save.
   const flushPendingSaves = useCallback(async (): Promise<void> => {
     cancelPendingTimers();
     // Let autosaves already writing land (or fail) first; only then do the
     // channels say what is still owed.
     await Promise.allSettled([...inFlightSavesRef.current]);
+    // An edit during that wait can have armed a fresh debounce timer (its
+    // channel.edit() already ran); cancel it too, or its autosave could fire
+    // alongside -- a second, overlapping IDB transaction for the same graph
+    // -- the save this function is about to perform below.
+    cancelPendingTimers();
     const decision = decidePendingSave(structureDirty.dirty, blobDirty.dirty);
     if (decision === "none") return;
     const structureBegun = structureDirty.begin();
@@ -1108,15 +1119,17 @@ export default function WorkbenchApp() {
     const edges = state.edges;
     const graphId = graphIdRef.current;
     if (decision === "full") {
-      await saveGraph(graphId, nodes, edges);
-      blobDirty.settle(blobBegun);
-      structureDirty.settle(structureBegun);
-      setSavedAt(Date.now());
+      await trackSave(
+        saveGraph(graphId, nodes, edges).then(() => {
+          blobDirty.settle(blobBegun);
+          structureDirty.settle(structureBegun);
+          setSavedAt(Date.now());
+        }),
+      );
       return;
     }
-    await saveGraphStructure(graphId, nodes, edges);
-    structureDirty.settle(structureBegun);
-  }, [cancelPendingTimers, structureDirty, blobDirty]);
+    await trackSave(saveGraphStructure(graphId, nodes, edges).then(() => structureDirty.settle(structureBegun)));
+  }, [cancelPendingTimers, structureDirty, blobDirty, trackSave]);
 
   // issue-1 (root fix): graph creation/switching used to update the active
   // graph id and reload IMMEDIATELY, so an edit still inside the 900ms

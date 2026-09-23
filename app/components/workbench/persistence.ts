@@ -605,7 +605,17 @@ export type DirtyChannel = {
   edit(): void;
   /** A save is reading the store now; hand the result to settle() when it succeeds. */
   begin(): number;
-  /** The save that began at `begun` succeeded: everything up to it is stored. */
+  /**
+   * The save that began at `begun` just committed, so `begun` is now what
+   * the store holds -- replacing whatever an earlier settle recorded.
+   * Settles land in COMMIT order, not begin order: saveGraph awaits a
+   * thumbnail before its transaction even opens, so a saveGraphStructure
+   * call that began later can commit first and settle first. Recording the
+   * latest commit (not the max `begun` seen) means an out-of-order commit
+   * correctly reopens the channel, since the store's content no longer
+   * matches the newest edit; the cost is at most one redundant save, never
+   * a lost edit.
+   */
   settle(begun: number): void;
   readonly dirty: boolean;
 };
@@ -621,7 +631,10 @@ export function createDirtyChannel(): DirtyChannel {
       return edits;
     },
     settle(begun) {
-      if (begun > saved) saved = begun;
+      // Last commit wins -- see settle's doc comment. Not a max: an older
+      // save committing after a newer one must be able to lower `saved`
+      // again, or the newer edit it just overwrote would read as saved.
+      saved = begun;
     },
     get dirty() {
       return edits > saved;

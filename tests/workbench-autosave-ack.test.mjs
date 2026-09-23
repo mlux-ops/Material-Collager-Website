@@ -12,7 +12,12 @@ test("a save that lands after a newer edit leaves that edit owed", () => {
   assert.equal(decidePendingSave(structure.dirty, false), "structure");
 });
 
-test("an older save settling after a newer one does not un-save anything", () => {
+test("an older save settling after a newer one leaves the channel dirty (its write landed last, overwriting the newer save)", () => {
+  // saveGraph awaits a thumbnail before its transaction opens, so a
+  // structure-only save that began later can still commit -- and settle --
+  // first. Settles arrive in commit order, not begin order, so the older
+  // save's later settle must win and reopen the channel: the store's
+  // content no longer matches the edit the newer settle thought was saved.
   const channel = createDirtyChannel();
   channel.edit();
   const older = channel.begin();
@@ -20,6 +25,17 @@ test("an older save settling after a newer one does not un-save anything", () =>
   const newer = channel.begin();
   channel.settle(newer);
   channel.settle(older);
+  assert.equal(channel.dirty, true);
+});
+
+test("settles that land in begin order read clean", () => {
+  const channel = createDirtyChannel();
+  channel.edit();
+  const first = channel.begin();
+  channel.settle(first);
+  channel.edit();
+  const second = channel.begin();
+  channel.settle(second);
   assert.equal(channel.dirty, false);
 });
 
