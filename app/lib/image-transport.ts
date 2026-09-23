@@ -115,6 +115,14 @@ export async function optimizeReferencesForTransport(files: File[], budget = DIR
   return mapWithLimit(files, TRANSPORT_CONCURRENCY, (file) => optimizeReferenceForTransport(file, targetBytes));
 }
 
+// How many references went out as a re-encoded copy. optimizeReferenceForTransport
+// returns the very same File when a reference fit its budget untouched and a new
+// one when it had to be resized or re-encoded (and flattened onto white), so
+// identity says which ones the model received at full quality.
+export function compressedReferenceCount(originals: File[], sent: File[]): number {
+  return sent.filter((file, index) => file !== originals[index]).length;
+}
+
 // Bounded by bytes, not entries: 64 small thumbnails and 64 near-budget
 // references are very different amounts of memory.
 const TRANSPORT_CACHE_BYTES = 64 * 1024 * 1024;

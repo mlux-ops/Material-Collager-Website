@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fileFingerprint, transportCacheKey, mapWithLimit, createByteBudgetCache } from "../app/lib/image-transport.ts";
+import { fileFingerprint, transportCacheKey, mapWithLimit, createByteBudgetCache, compressedReferenceCount } from "../app/lib/image-transport.ts";
 
 test("two different images that share a fingerprint get different transport cache keys", async () => {
   // How Workbench builds every reference (fileFromCacheKey): a fixed
@@ -50,4 +50,12 @@ test("an entry larger than the whole budget is still kept on its own", () => {
   const cache = createByteBudgetCache(10);
   cache.set("big", new File([new Uint8Array(20)], "x.jpg", { type: "image/jpeg" }));
   assert.ok(cache.get("big"));
+});
+
+test("compressedReferenceCount counts the references that were replaced by a re-encoded copy", () => {
+  const a = new File([new Uint8Array([1])], "a.png", { type: "image/png" });
+  const b = new File([new Uint8Array([2])], "b.png", { type: "image/png" });
+  const bCompressed = new File([new Uint8Array([2])], "b-optimized.jpg", { type: "image/jpeg" });
+  assert.equal(compressedReferenceCount([a, b], [a, b]), 0);
+  assert.equal(compressedReferenceCount([a, b], [a, bCompressed]), 1);
 });

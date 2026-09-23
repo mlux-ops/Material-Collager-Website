@@ -45,6 +45,7 @@ import {
   FINAL_REQUEST_BODY_BUDGET,
   LAYOUT_MASTER_TRANSPORT_BUDGET,
   base64ImageToObjectUrl,
+  compressedReferenceCount,
   dataUrlFile,
   fileFingerprint,
   formatBytes,
@@ -1293,8 +1294,13 @@ export default function Home() {
       const costMessage = typeof response.costUsd === "number" && Number.isFinite(response.costUsd)
         ? `Usage cost: $${response.costUsd.toFixed(4)} based on completed usage.`
         : "Generation cost unavailable because completed usage was not returned.";
+      // Only claim full quality when every product reference went out untouched.
+      const compressed = compressedReferenceCount(productFiles, transportFiles);
+      const referenceNote = compressed === 0
+        ? "Full-quality product references were used."
+        : `${compressed} of ${productFiles.length} product references were compressed to fit this request's size limit, so their finest detail and any transparency may be reduced. The Economy final render uploads each reference at full quality.`;
       setPanelText([
-        `Final ${finalFormat} render complete${response.notice ? "" : ` at ${finalSizeLabel}`}. Full-quality product references were used.`,
+        `Final ${finalFormat} render complete${response.notice ? "" : ` at ${finalSizeLabel}`}. ${referenceNote}`,
         costMessage,
         response.notice,
       ].filter(Boolean).join("\n\n"));
