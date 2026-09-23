@@ -20,6 +20,14 @@ if (run.error || run.signal || (run.status !== 0 && count === 0)) {
   console.log(output);
   process.exit(1);
 }
+// Every baseline error has a location ("path(line,col): error TS…"). One with
+// none — a missing @types package, a bad tsconfig — means tsc never checked the
+// project as configured, so a count under the baseline proves nothing.
+const unlocated = output.split(/\r?\n/).filter((line) => /^error TS\d+/.test(line.trim()));
+if (unlocated.length > 0) {
+  console.log(`tsc could not check the project:\n${unlocated.join("\n")}`);
+  process.exit(1);
+}
 console.log(`tsc: ${count} error(s); baseline allows ${allowed}.`);
 if (count > allowed) {
   console.log(output);
