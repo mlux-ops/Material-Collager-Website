@@ -31,11 +31,11 @@ test("an older save settling after a newer one leaves the channel dirty (its wri
 test("settles that land in begin order read clean", () => {
   const channel = createDirtyChannel();
   channel.edit();
-  const first = channel.begin();
-  channel.settle(first);
-  channel.edit();
-  const second = channel.begin();
-  channel.settle(second);
+  const a = channel.begin();   // a's autosave reads the store
+  channel.edit();               // edit made while a's save is still in flight
+  const b = channel.begin();   // b's autosave reads the store before a settles -- the two overlap
+  channel.settle(a);
+  channel.settle(b);
   assert.equal(channel.dirty, false);
 });
 
