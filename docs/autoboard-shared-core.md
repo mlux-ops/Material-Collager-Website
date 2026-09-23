@@ -392,10 +392,23 @@ ids and primary flag as its fixture.
 A URL from a Smartsheet cell is untrusted input, and a Worker's `fetch` reaches
 the network from inside the perimeter. `assertFetchableUrl` pins the scheme to
 https and refuses loopback, link-local (including `169.254.169.254`, the cloud
-metadata endpoint), RFC-1918, CGNAT, and `.local`/`.internal` hosts. Because
-`redirect: "follow"` means a redirect has already happened by the time you see
-it, the **final** URL is re-checked before any body is read, and both the HTML
-and image reads are size-capped.
+metadata endpoint), RFC-1918, CGNAT, and `.local`/`.internal` hosts.
+`assertFetchableUrl` also normalizes the hostname before any of those checks
+run: lowercased, one trailing dot stripped (a DNS no-op the URL parser
+otherwise keeps), and any resulting empty label refused.
+
+`redirect: "follow"` would already have contacted a redirect's target by the
+time its final URL could be checked, so `app/lib/guarded-fetch.ts`'s
+`fetchPublic` uses `redirect: "manual"` instead and validates every `Location`
+with `assertFetchableUrl` **before** requesting it — never just the final URL.
+It follows only 301, 302, 303, 307 and 308 (every other 3xx goes back to the
+caller's own `!response.ok` handling), up to 5 hops, all under one timeout for
+the whole chain, and cancels each redirect's body before requesting the next
+hop. Headers are sent to every hop, including one that redirected to a
+different host, so callers must never pass credentials through it. Both the
+HTML and image reads go through `readCapped`, which streams against a byte cap
+— cancelling the download the moment it's exceeded rather than buffering the
+whole thing first — and honours a declared Content-Length.
 
 Names that *resolve* into a private range are not caught — that needs the
 resolution the fetch itself performs. The https pin is what makes that

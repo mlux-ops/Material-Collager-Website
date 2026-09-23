@@ -136,6 +136,21 @@ worktrees cannot share the one dev server.
   own comment) and **must stay non-dismissable** in any later change that
   gives it a focus trap; only a Retry that actually succeeds may let the user
   out of it.
+- **Three node-editor dialogs outside this pass's scope entirely** (not
+  inline-conditional -- each is its own component -- so nothing here explains
+  why they were skipped; they simply were), found by `grep -rn 'role="dialog"'
+  app/components/workbench/nodes/`. Each uses `useModalDismiss` for its close
+  animation but never `useModalFocus`: no Tab containment, no focus-in on
+  open, no restore-focus-on-close, and each already has its own `window`-level
+  `keydown` handler for Escape that a later `useModalFocus` wiring would need
+  to reconcile, not just add to -- the three do not agree on what Escape does:
+  - `crop-editor.tsx`, `aria-label="Crop the image"`. A draft polygon in
+    progress absorbs Escape (clears it); otherwise Escape closes the dialog.
+  - `maskedEdit.tsx`, `aria-label="Draw the mask to edit"`. Escape only ever
+    clears a draft polygon (a no-op if there isn't one) and never closes the
+    dialog -- its Cancel/Apply buttons are the only close path.
+  - `viewImage.tsx`, `aria-label="Full-resolution image"`. No polygon
+    concept; Escape always closes.
 
 ## Fix round 1 — Escape wiring corrected
 
@@ -164,7 +179,7 @@ Escape-to-close:
   `useModalDismiss`'s `requestClose` ignores a repeat call while already
   closing (its `timeoutRef` guard).
 
-## Browser checks not yet performed (skipped per controller instruction; for the controller to run)
+## Browser checks not yet performed (skipped per controller instruction; now the user's post-merge checks, not a controller/CI gate)
 
 - Template chooser: after it opens on an empty canvas,
   `document.activeElement.closest('[role="dialog"]') !== null`; Tab x10 stays

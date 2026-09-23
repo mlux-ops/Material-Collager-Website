@@ -145,10 +145,15 @@ export type RenderDeps = {
    */
   origin: string;
   /**
-   * The incoming request's signal. A render the reviewer has already abandoned
-   * stops before anything is read or paid for; once dispatched, the generate
-   * route passes it on to the image API. Aborting cannot un-bill a request
-   * OpenAI already accepted.
+   * The incoming request's signal; once dispatched, the generate route passes
+   * it on to the image API, and aborting can never un-bill a request OpenAI
+   * already accepted. In principle this stops a render the reviewer has
+   * already abandoned before anything is read or paid for -- but an incoming
+   * request's `signal` only fires on a client disconnect when workerd's
+   * `enable_request_signal` compatibility flag is on, and wrangler.jsonc does
+   * not set it (see CLAUDE.md Gotchas). So today this fires for an injected
+   * signal (the tests abort their own AbortController), not a real abandoned
+   * request in production.
    */
   signal?: AbortSignal;
 };

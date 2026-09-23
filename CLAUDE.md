@@ -231,3 +231,19 @@ localhost to mint a JWT. Blank both in `.dev.vars`, which overrides
   dashboard survive `wrangler deploy`. Without it a Text-type dashboard variable
   is deleted on every push to `main` (secrets are kept either way) — which is how
   a token that was "put in Cloudflare" can be gone after the next deploy.
+- An incoming request's `signal` only fires on a client disconnect when
+  workerd's `enable_request_signal` compatibility flag is on, and
+  `wrangler.jsonc` does not set it — so a route's abandoned-request check
+  (`autoboard-renders.ts`'s `signal`) fires for an injected signal (the
+  tests) but not a real disconnect in production today. The flag stays off
+  deliberately: it would change `request.signal` for every route, and
+  aborting mid-call can leave an accepted, billed edit unrecorded.
+- Any paid board action (a render) must `await` the board save queue's
+  `flush()` first (see `renderDraft` in `BoardWorkflow.tsx`). That's how a
+  render sees exactly what was typed, and a failed save stops the render.
+- An Economy row stays `submitting` until its batch id is recorded.
+  `publicJob` reads a `submitting` row older than 5 minutes as failed, with
+  `material_collager_job = <id>` guidance, and the row itself isn't changed.
+- Economy history refreshes only the 2 oldest pending rows per request. A
+  rejected refresh bumps `updated_at` (except for `finalizing` rows), so a
+  stuck row can't pin a slot.
