@@ -140,19 +140,18 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
     });
   }, [projectId, board.id]);
 
-  // Flush on unmount or board switch, so leaving mid-sentence does not discard
-  // what was typed. keepalive lets the request outlive a closing tab.
+  // Flush on unmount or board switch, so leaving mid-sentence does not
+  // discard what was typed. This only covers an actual React unmount (for
+  // example switching to a different open board): React runs no effect
+  // cleanup on a tab close or reload, so a keystroke right before either of
+  // those can still be lost. Going through the queue (rather than firing a
+  // separate fetch here) keeps this in the same one-at-a-time order as every
+  // other save, instead of racing whatever the queue itself has in flight.
   useEffect(() => {
     return () => {
-      const queued = queue.takePending();
-      if (queued) {
-        void fetch(
-          `/api/autoboard/projects/${encodeURIComponent(projectId)}/boards/${encodeURIComponent(board.id)}`,
-          { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(queued), keepalive: true },
-        );
-      }
+      void queue.flush().catch(() => {});
     };
-  }, [queue, projectId, board.id]);
+  }, [queue]);
 
   // A render made before the board changed is not "an older version" — it no
   // longer shows what the board says. renderRecordIsStale's two comparisons,
