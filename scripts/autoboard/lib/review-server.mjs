@@ -195,12 +195,11 @@ export async function startReviewServer({
       const record = ensureRenders(results, board.id);
       const currentHash = selectionHash(board, record.instruction);
       selectionHashes[board.id] = currentHash;
-      // The `v` token is what makes a re-render visible in the browser. Render
-      // ids restart at 0001 after a reset, so a fresh draft lands on the same
-      // boards/<id>/drafts/d-0001.png path as the one it replaced — and
-      // /render-image answers with Cache-Control: max-age=3600, so without a
-      // per-render token the board shows the DELETED render's picture for an
-      // hour and the new one looks identical to the old.
+      // The `v` token is what makes a re-render visible in the browser.
+      // /render-image answers with Cache-Control: max-age=3600, and results
+      // written before nextRenderId kept a high-water mark could reuse a
+      // deleted render's id — and so its path — for a new picture. New ids are
+      // never reused; the token keeps those older ones showing the right image.
       const decorate = (entry, kind) => ({
         ...entry,
         stale: entry.selectionHash !== currentHash || renderRecordIsStale(board, entry, kind, record.instruction),

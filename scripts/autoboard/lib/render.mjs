@@ -259,8 +259,23 @@ export function ensureRenders(results, boardId) {
 const LIST_FOR_PREFIX = { d: "drafts", c: "confirmed", f: "finals" };
 const DIR_FOR_KIND = { draft: "drafts", confirm: "confirmed", final: "finals" };
 
+function idNumber(id) {
+  const value = Number.parseInt(String(id ?? "").slice(2), 10);
+  return Number.isFinite(value) ? value : 0;
+}
+
+// Ids are never reissued. Counting the renders that survive — or even taking
+// the highest survivor — hands a deleted render's id, and so its file name, to
+// the next render: the write overwrites a picture another record still points
+// at, and findRender's first-match lookup then resolves the old metadata over
+// new bytes. `lastIssued` remembers the highest id ever handed out per kind; a
+// record written before it existed starts after its highest surviving id,
+// which is the best a record that never kept one can do.
 export function nextRenderId(renders, prefix) {
-  return `${prefix}-${String(renders[LIST_FOR_PREFIX[prefix]].length + 1).padStart(4, "0")}`;
+  const surviving = renders[LIST_FOR_PREFIX[prefix]].map((entry) => idNumber(entry.id));
+  const next = Math.max(renders.lastIssued?.[prefix] ?? 0, ...surviving) + 1;
+  renders.lastIssued = { ...renders.lastIssued, [prefix]: next };
+  return `${prefix}-${String(next).padStart(4, "0")}`;
 }
 
 export function renderFilePath(runDir, boardId, kind, id) {

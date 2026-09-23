@@ -1,6 +1,6 @@
 // tests/autoboard-render.test.mjs
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -261,6 +261,49 @@ test("ensureRenders creates the per-board record once and nextRenderId zero-pads
   renders.drafts.push({ id: "d-0001" }, { id: "d-0002" });
   assert.equal(nextRenderId(renders, "d"), "d-0003");
   assert.equal(nextRenderId(renders, "c"), "c-0001");
+});
+
+test("nextRenderId never reissues an id, even after the newest render is deleted or the board is reset", () => {
+  const results = { candidates: {}, finals: {} };
+  const renders = ensureRenders(results, "b");
+  for (let n = 0; n < 3; n++) renders.drafts.push({ id: nextRenderId(renders, "d") });
+  assert.deepEqual(renders.drafts.map((entry) => entry.id), ["d-0001", "d-0002", "d-0003"]);
+  renders.drafts.splice(1, 1); // delete d-0002 from the middle
+  const fourth = nextRenderId(renders, "d");
+  assert.equal(fourth, "d-0004");
+  renders.drafts.push({ id: fourth });
+  renders.drafts.pop(); // delete d-0004, the newest
+  assert.equal(nextRenderId(renders, "d"), "d-0005");
+  renders.drafts = []; // what resetNonFinalRenders leaves behind
+  assert.equal(nextRenderId(renders, "d"), "d-0006");
+});
+
+test("a render record written before the high-water mark existed continues after its highest surviving id", () => {
+  const renders = { instruction: "", pickedDraftId: null, approvedConfirmedId: null, drafts: [{ id: "d-0001" }, { id: "d-0007" }], confirmed: [], finals: [] };
+  assert.equal(nextRenderId(renders, "d"), "d-0008");
+  assert.equal(nextRenderId(renders, "c"), "c-0001");
+});
+
+test("deleting a middle draft and rendering again leaves every surviving file's bytes untouched", async (t) => {
+  const { runDir, plan, results } = scratchRun();
+  const boardId = plan.boards[0].id;
+  let call = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    call += 1;
+    // A different trailing byte per render, so an overwrite is detectable.
+    const image = Buffer.concat([PNG, Buffer.from([call])]).toString("base64");
+    return Response.json({ ok: true, imageBase64: image, mimeType: "image/png", jobId: `job-${call}` });
+  });
+  const ctx = { plan, results, runDir, baseUrl: "https://w.example", accessHeaders: {}, signal: new AbortController().signal, onProgress: () => {}, persist: async () => {} };
+  await runRenderJob({ jobId: "q1", boardId, kind: "draft", variant: "A", count: 3, instructionSnapshot: "", selectionHash: "h" }, ctx);
+  const bytesOf = (id) => readFileSync(path.join(runDir, results.renders[boardId].drafts.find((entry) => entry.id === id).path));
+  const third = bytesOf("d-0003");
+  await removeRender(results, runDir, boardId, "draft", "d-0002");
+  await runRenderJob({ jobId: "q2", boardId, kind: "draft", variant: "A", count: 1, instructionSnapshot: "", selectionHash: "h" }, ctx);
+  const ids = results.renders[boardId].drafts.map((entry) => entry.id);
+  assert.deepEqual(ids, ["d-0001", "d-0003", "d-0004"]);
+  assert.deepEqual(bytesOf("d-0003"), third);
+  rmSync(runDir, { recursive: true, force: true });
 });
 
 test("saveRenderImage writes under boards/<board>/<kind dir> and returns a run-relative forward-slash path", async () => {
