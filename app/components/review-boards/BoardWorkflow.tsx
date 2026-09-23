@@ -13,7 +13,8 @@
  * on screen is what would go out, not a summary of it.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createBoardSaveQueue } from "@/app/lib/board-save-queue";
 import { DitherReveal } from "../DitherReveal";
 import { DEFAULT_VARIANTS } from "@/app/lib/autoboard/variants";
 import styles from "./review-boards.module.css";
@@ -98,59 +99,60 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [renderingVariant, setRenderingVariant] = useState<string | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pending = useRef<Record<string, unknown> | null>(null);
+  const onSavedRef = useRef(onSaved);
+  useEffect(() => {
+    onSavedRef.current = onSaved;
+  }, [onSaved]);
 
-  const save = useCallback(
-    async (patch: Record<string, unknown>) => {
-      setSaving(true);
-      setError("");
-      try {
-        const response = await fetch(
-          `/api/autoboard/projects/${encodeURIComponent(projectId)}/boards/${encodeURIComponent(board.id)}`,
-          { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) },
-        );
-        const payload = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-        if (!response.ok || !payload?.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
-        await onSaved();
-      } catch (cause) {
-        setError((cause as Error).message);
-      } finally {
-        setSaving(false);
-      }
-    },
-    [projectId, board.id, onSaved],
-  );
+  // Every edit reaches the server through one queue per board
+  // (app/lib/board-save-queue.ts): notes coalesce per slot, writes go out one
+  // at a time, and a render waits on flush() so it never starts before what
+  // was typed is stored.
+  const queue = useMemo(() => {
+    const url = `/api/autoboard/projects/${encodeURIComponent(projectId)}/boards/${encodeURIComponent(board.id)}`;
+    // onSavedRef is read only once send() actually runs (on a debounce timer,
+    // or from saveNow/flush in an event handler) — never synchronously here
+    // while the memo itself is being computed — so a stale closure over
+    // onSaved is not possible; the lint rule cannot see that the read is
+    // deferred, since it flags any ref reachable from a value built in useMemo.
+    // eslint-disable-next-line react-hooks/refs
+    return createBoardSaveQueue({
+      debounceMs: SAVE_DEBOUNCE_MS,
+      onError: (cause) => setError(cause.message),
+      send: async (patch) => {
+        setSaving(true);
+        setError("");
+        try {
+          const response = await fetch(url, {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(patch),
+          });
+          const payload = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+          if (!response.ok || !payload?.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
+        } finally {
+          setSaving(false);
+        }
+        // The patch is stored at this point. A failed reload is reported but is
+        // not a failed save, so it must not put the patch back in the queue.
+        await Promise.resolve(onSavedRef.current()).catch((cause: unknown) => setError((cause as Error).message));
+      },
+    });
+  }, [projectId, board.id]);
 
-  const saveSoon = useCallback(
-    (patch: Record<string, unknown>) => {
-      pending.current = { ...(pending.current ?? {}), ...patch };
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => {
-        const queued = pending.current;
-        pending.current = null;
-        timer.current = null;
-        if (queued) void save(queued);
-      }, SAVE_DEBOUNCE_MS);
-    },
-    [save],
-  );
-
-  // Flush on unmount, so switching tabs or projects mid-sentence does not
-  // discard what was typed.
+  // Flush on unmount or board switch, so leaving mid-sentence does not discard
+  // what was typed. keepalive lets the request outlive a closing tab.
   useEffect(() => {
     return () => {
-      if (timer.current) clearTimeout(timer.current);
-      const queued = pending.current;
-      pending.current = null;
+      const queued = queue.takePending();
       if (queued) {
         void fetch(
           `/api/autoboard/projects/${encodeURIComponent(projectId)}/boards/${encodeURIComponent(board.id)}`,
-          { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(queued) },
+          { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(queued), keepalive: true },
         );
       }
     };
-  }, [projectId, board.id]);
+  }, [queue, projectId, board.id]);
 
   // A render made before the board changed is not "an older version" — it no
   // longer shows what the board says. renderRecordIsStale's two comparisons,
@@ -168,6 +170,14 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
     setRenderingVariant(variantKey);
     setError("");
     try {
+      // The render route builds the prompt from what D1 holds, so an unsaved
+      // note or instruction would be missing from a render the reviewer pays
+      // for. A save that fails stops the render.
+      try {
+        await queue.flush();
+      } catch (cause) {
+        throw new Error(`Not rendered: your latest changes could not be saved (${(cause as Error).message}).`);
+      }
       const response = await fetch(
         `/api/autoboard/projects/${encodeURIComponent(projectId)}/boards/${encodeURIComponent(board.id)}/renders`,
         { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ variant: variantKey }) },
@@ -180,7 +190,7 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
     } finally {
       setRenderingVariant(null);
     }
-  }, [projectId, board.id, onSaved]);
+  }, [projectId, board.id, onSaved, queue]);
 
   const setRenderStatus = useCallback(
     async (renderId: string, status: string) => {
@@ -217,7 +227,7 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
             placeholder="Warmer metals throughout; keep the tile cool."
             onChange={(event) => {
               setInstruction(event.target.value);
-              saveSoon({ instruction: event.target.value });
+              queue.saveSoon({ instruction: event.target.value });
             }}
           />
         </div>
@@ -228,7 +238,7 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
             className={styles.select}
             aria-label="Render quality"
             value={board.state.quality ?? ""}
-            onChange={(event) => void save({ quality: event.target.value })}
+            onChange={(event) => void queue.saveNow({ quality: event.target.value })}
           >
             <option value="">quality: stage default ({board.renderOptions.quality})</option>
             {QUALITIES.map((quality) => (
@@ -241,7 +251,7 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
             className={styles.select}
             aria-label="Background"
             value={board.state.background ?? ""}
-            onChange={(event) => void save({ background: event.target.value })}
+            onChange={(event) => void queue.saveNow({ background: event.target.value })}
           >
             <option value="">background: opaque</option>
             {BACKGROUNDS.map((background) => (
@@ -254,7 +264,7 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
             className={styles.select}
             aria-label="Hero slot"
             value={board.state.heroItemId ?? ""}
-            onChange={(event) => void save({ heroItemId: event.target.value })}
+            onChange={(event) => void queue.saveNow({ heroItemId: event.target.value })}
           >
             <option value="">hero: by board type</option>
             {board.items.map((item) => (
@@ -299,7 +309,7 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
                   onChange={(event) => {
                     const next = { ...notes, [item.slotId]: event.target.value };
                     setNotes(next);
-                    saveSoon({ notes: { [item.slotId]: event.target.value } });
+                    queue.saveSoon({ notes: { [item.slotId]: event.target.value } });
                   }}
                 />
                 {item.rowId && onRemoveRow ? (
