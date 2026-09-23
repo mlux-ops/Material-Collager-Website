@@ -1798,12 +1798,26 @@ body {
   width: 16px;
 }
 
-.field-help {
-  left: auto;
-  right: 20px;
-  top: -7px;
-  transform-origin: 100% 14px;
-  width: 210px;
+/* Help bubbles in an item card grow up and to the right from the label's own
+   left edge, so they stay inside the card and so inside the scrolling
+   reference tray, whose overflow clipped a bubble that grew leftward out of
+   the first column's card. (Phones keep the fixed bubble set in the
+   .generator-shell media block further down.) */
+.item-fields .field-label {
+  position: relative;
+}
+
+.item-fields .help-wrap {
+  position: static;
+}
+
+.item-fields .field-help {
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: auto;
+  top: auto;
+  transform-origin: 0 100%;
+  width: min(210px, 100%);
 }
 
 .investigation-status,
