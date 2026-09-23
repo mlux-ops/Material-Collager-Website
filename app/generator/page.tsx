@@ -1187,6 +1187,10 @@ export default function Home() {
     setOverallProgress(0);
     setReferenceProgress({});
     let transportFilesForReport: File[] | undefined;
+    // Only true once the Economy POST is actually about to go out, not
+    // during the uploads that precede it — a Cancel before that point is
+    // certain to have reached nothing.
+    let economySubmissionDispatched = false;
     const finalQuality: Quality = quality === "xhigh" || quality === "max" ? quality : "high";
     try {
       const layoutFile = await dataUrlFile(result.dataUrl, "approved-draft.png");
@@ -1213,6 +1217,7 @@ export default function Home() {
         };
         validateCollageRequest(economyPayload);
         setWorkingStage("Sending final render to Economy");
+        economySubmissionDispatched = true;
         const queued = await fetch("/api/economy", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1308,13 +1313,21 @@ export default function Home() {
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         // Economy's paid submission may have already reached the server (and
-        // OpenAI) before the abort landed — unlike the immediate path, "your
-        // draft and references are unchanged" would be a guess, not a fact.
+        // OpenAI) once the POST was actually dispatched — unlike the
+        // immediate path, "your draft and references are unchanged" would be
+        // a guess, not a fact, from that point on. Before dispatch (still
+        // uploading references), nothing has reached the server yet, so the
+        // plain message still holds.
         setPanelText(
-          mode === "economy"
+          mode === "economy" && economySubmissionDispatched
             ? "Final rendering cancelled. A batch may still have been created — check History before resubmitting."
             : "Final rendering cancelled. Your draft and references are unchanged.",
         );
+        // A batch that reached the server before the abort landed still
+        // needs its row shown in History right away, not after the next
+        // poll — a resubmit from someone who sees nothing new would buy a
+        // second batch. Refreshing costs nothing when there is none.
+        if (mode === "economy") await refreshJobs();
       } else {
         // Surface the failed request's diagnostics so Troubleshooting shows the
         // failing stage instead of stale data from the previous draft render.

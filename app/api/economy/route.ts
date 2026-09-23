@@ -80,17 +80,21 @@ export async function POST(request: Request) {
     } catch (error) {
       // Terminal, so history stops polling it. The request may still have
       // reached OpenAI before the error (a timeout, a dropped connection), so
-      // the record says how to check before paying for another. The batch
-      // carries this id as metadata (submitEconomyBatch).
+      // both the record AND this response say how to check before paying for
+      // another — an ambiguous failure like this one only ever shows the bare
+      // provider message otherwise, and the person deciding whether to
+      // resubmit is looking at this response right now, not history. The
+      // batch carries this id as metadata (submitEconomyBatch).
       const message = error instanceof Error ? error.message : String(error);
+      const fullMessage = `Submission did not complete (${message}). Before resubmitting, check OpenAI's Batches page for metadata material_collager_job = ${jobId}.`;
       await DB.prepare("UPDATE generation_jobs SET status = 'failed', error = ?, updated_at = ? WHERE id = ?")
-        .bind(
-          `Submission did not complete (${message}). Before resubmitting, check OpenAI's Batches page for metadata material_collager_job = ${jobId}.`,
-          Date.now(),
-          jobId,
-        )
+        .bind(fullMessage, Date.now(), jobId)
         .run()
         .catch(() => undefined);
+      // Reuse the same error (never a new plain Error): an OpenAIRequestError's
+      // status and Retry-After handling in errorResponse must survive this —
+      // only its displayed message grows the guidance above.
+      if (error instanceof Error) error.message = fullMessage;
       throw error;
     }
     try {
@@ -109,7 +113,7 @@ export async function POST(request: Request) {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(
-          `Batch ${batch.id} was created for job ${jobId} but could not be recorded (${message}). Do not resubmit — check OpenAI's Batches page for metadata material_collager_job = ${jobId}, or retry recording once storage recovers.`,
+          `Batch ${batch.id} was created for job ${jobId} but could not be recorded (${message}). Do not resubmit — check OpenAI's Batches page for metadata material_collager_job = ${jobId}.`,
         );
       }
     }
@@ -126,8 +130,9 @@ export async function GET() {
     // Two per request: each refresh can wait on OpenAI (a status check, then
     // possibly a result download) before history can answer. The page polls
     // every 30 s while anything is pending, and a refreshed row's updated_at
-    // moves it to the back, so every pending job still gets its turn. A row
-    // with no batch id has nothing to check (see POST).
+    // moves it to the back — successfully or not (see the bump below) — so
+    // every pending job still gets its turn. A row with no batch id has
+    // nothing to check (see POST).
     const pending = await DB.prepare("SELECT * FROM generation_jobs WHERE mode = 'economy' AND output_key IS NULL AND openai_batch_id IS NOT NULL AND status NOT IN ('failed', 'expired', 'cancelled') ORDER BY updated_at ASC LIMIT 2")
       .all<JobRow>();
     // Refresh jobs independently: one job with an unreadable batch output must
@@ -141,11 +146,15 @@ export async function GET() {
     // Skip a 'finalizing' row: its updated_at is the stale-claim lease
     // refreshJob reads to decide when a claim is reclaimable, not a fairness
     // timestamp, and bumping it here would keep the lease from ever expiring.
+    // Guarded again in the UPDATE itself, not just the in-memory row.status
+    // above: that snapshot is from the SELECT at the top of this request, and
+    // an overlapping poll (another tab, the CLI) can have claimed the row for
+    // finalizing in the meantime.
     await Promise.allSettled(
       settled.flatMap((result, index) => {
         const row = pending.results[index];
         if (result.status !== "rejected" || row.status === "finalizing") return [];
-        return [DB.prepare("UPDATE generation_jobs SET updated_at = ? WHERE id = ?").bind(bumpStamp, row.id).run()];
+        return [DB.prepare("UPDATE generation_jobs SET updated_at = ? WHERE id = ? AND status != 'finalizing'").bind(bumpStamp, row.id).run()];
       }),
     );
     const jobs = await DB.prepare("SELECT * FROM generation_jobs ORDER BY created_at DESC LIMIT 30").all<JobRow>();

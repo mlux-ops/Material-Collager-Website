@@ -95,10 +95,18 @@ test("a failed submission leaves a failed row that says how to check before payi
   const response = await submit();
   assert.notEqual(response.status, 200);
   assert.equal(calls.batches, 1);
+  // Consumed before the DB lookup below: the row's id names this exact
+  // submission, and the response body must carry the same guidance the row
+  // does, not just the bare provider message — an ambiguous failure (a
+  // timeout, a dropped connection) may mean OpenAI already accepted the
+  // batch, and the person deciding whether to resubmit is looking at this
+  // response right now, not the history row.
+  const body = await response.json();
   const row = await DB.prepare("SELECT id, status, error, openai_batch_id FROM generation_jobs WHERE mode = 'economy' ORDER BY rowid DESC LIMIT 1").first();
   assert.equal(row.status, "failed");
   assert.equal(row.openai_batch_id, null);
   assert.match(row.error, new RegExp(`material_collager_job = ${row.id}`));
+  assert.match(body.error, new RegExp(`material_collager_job = ${row.id}`));
 });
 
 test("the batch id write is retried once before giving up (R09)", async (t) => {
@@ -126,6 +134,9 @@ test("a batch id write that fails twice reports the batch as already created, no
     const body = await response.json();
     assert.match(body.error, /batch_1/);
     assert.match(body.error, /do not resubmit/i);
+    // No mechanism retries the D1 write again later on its own — saying so
+    // beside "do not resubmit" would invite exactly the wrong reading.
+    assert.doesNotMatch(body.error, /retry recording/i);
   } finally {
     failBatchIdUpdate = 0;
   }
@@ -210,4 +221,27 @@ test("a submitting row stuck past the stale threshold reads as failed, with guid
   const job = jobs.find((entry) => entry.id === "job-stale");
   assert.equal(job.status, "failed");
   assert.match(job.error, /material_collager_job = job-stale/);
+});
+
+test("a bump never clobbers a row that became 'finalizing' since it was selected (R09)", async (t) => {
+  await ensureJobStorage();
+  await DB.prepare("DELETE FROM generation_jobs").run();
+  const now = Date.now();
+  const leaseUpdatedAt = now - 30;
+  await DB.prepare(`INSERT INTO generation_jobs
+      (id, mode, status, openai_batch_id, filename, format, prompt, payload_json, reference_ids_json, created_at, updated_at, expires_at)
+      VALUES ('job-race', 'economy', 'in_progress', 'batch-race', 'f.png', '1536x1024', 'p', '{}', '[]', ?, ?, ?)`)
+    .bind(now, leaseUpdatedAt, now + 1e9).run();
+  t.mock.method(globalThis, "fetch", async () => {
+    // Simulate another concurrent poll claiming this row for finalizing
+    // between when THIS GET selected it (status was 'in_progress' then) and
+    // when its own status check settles — the row's CURRENT state, not the
+    // stale in-memory snapshot from the SELECT, must gate the bump.
+    await DB.prepare("UPDATE generation_jobs SET status = 'finalizing' WHERE id = 'job-race'").run();
+    return Response.json({ error: { message: "not found" } }, { status: 404 });
+  });
+  assert.equal((await GET()).status, 200);
+  const row = await DB.prepare("SELECT status, updated_at FROM generation_jobs WHERE id = 'job-race'").first();
+  assert.equal(row.status, "finalizing");
+  assert.equal(row.updated_at, leaseUpdatedAt, "a row claimed as finalizing mid-check must keep its stale-claim lease timestamp");
 });
