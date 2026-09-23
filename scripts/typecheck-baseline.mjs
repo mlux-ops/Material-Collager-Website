@@ -11,6 +11,15 @@ const tsc = createRequire(import.meta.url).resolve("typescript/bin/tsc");
 const run = spawnSync(process.execPath, [tsc, "--noEmit"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 const output = `${run.stdout ?? ""}${run.stderr ?? ""}`;
 const count = (output.match(/error TS\d+/g) ?? []).length;
+// tsc exits non-zero exactly when it reports errors. A run that never started,
+// was killed, or exited non-zero without a single diagnostic (its help text when
+// no tsconfig.json is found, a crash) must not read as a clean 0: that would
+// wave through the broken setup this gate exists to catch.
+if (run.error || run.signal || (run.status !== 0 && count === 0)) {
+  console.log(`tsc did not run cleanly (${run.error?.message ?? run.signal ?? `exit ${run.status}`}).`);
+  console.log(output);
+  process.exit(1);
+}
 console.log(`tsc: ${count} error(s); baseline allows ${allowed}.`);
 if (count > allowed) {
   console.log(output);
