@@ -121,9 +121,22 @@ export async function optimizeReferencesForTransport(files: File[], budget = DIR
 const transportCache = new Map<string, File>();
 const TRANSPORT_CACHE_LIMIT = 64;
 
+// Keyed on the bytes. fileFingerprint (name, size, date, type) is not identity
+// here: Workbench hands every reference over as a fresh `input.<ext>` File
+// stamped in the same millisecond (fileFromCacheKey), so two different images
+// of one type and byte length would share a key, and a paid render would
+// receive the other image's compressed copy. Hashing costs far less than the
+// decode and re-encode this cache exists to skip.
+export async function transportCacheKey(file: File, targetBytes: number): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", await file.arrayBuffer()));
+  let hex = "";
+  for (const byte of digest) hex += byte.toString(16).padStart(2, "0");
+  return `${hex}|${targetBytes}`;
+}
+
 export async function optimizeReferenceForTransport(file: File, targetBytes: number) {
   if (file.size <= targetBytes) return file;
-  const cacheKey = `${fileFingerprint(file)}|${targetBytes}`;
+  const cacheKey = await transportCacheKey(file, targetBytes);
   const cached = transportCache.get(cacheKey);
   if (cached) return cached;
   const optimized = await compressReferenceForTransport(file, targetBytes);
