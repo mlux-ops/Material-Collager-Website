@@ -1816,6 +1816,18 @@ body {
   width: min(210px, 100%);
 }
 
+/* The item card's <details> clips vertical overflow even while open
+   (details::details-content { overflow-y: clip }, never reset by the [open]
+   rule), and the first field has no room above it inside that box, so its
+   bubble opens downward instead of upward. The :where() keeps this at the
+   same (0,2,0) specificity as the rule above, so the phone rule in the
+   .generator-shell media block below still wins under 760px. */
+.item-fields :where(.item-field:first-child) .field-help {
+  bottom: auto;
+  top: calc(100% + 6px);
+  transform-origin: 0 0;
+}
+
 .investigation-status,
 .investigation-panel {
   margin-top: 7px;

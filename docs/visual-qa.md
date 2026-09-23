@@ -487,9 +487,15 @@ direct child of a `<label>` in the new markup, confirmed by grep.
   neither `@media (max-width: 1240px)` (~1183) nor either `@media (max-width:
   1280px)` block (~2347, ~3271) touches `.material-item`/`.items-list`/
   `.item-fields`/`.field-label`/`.help-wrap`/`.field-help`.
-- **Vertical.** `bottom: calc(100% + 6px)` grows the bubble upward; item 1's first
-  field has ~233px of clearance to the tray's top, well more than the old bubble's
-  own height (62px).
+- **Vertical (superseded by the fix round below).** `bottom: calc(100% + 6px)`
+  grows the bubble upward, and this argument only checked clearance to the
+  tray's top. It missed a closer clipping ancestor: the item's own `<details>`.
+  `details::details-content { overflow-y: clip }` (globals.css ~798-808) applies
+  whether or not the details is `[open]` — the `[open]` rule (~810-814) sets
+  `block-size`/`filter`/`opacity` only, never `overflow-y` — so vertical overflow
+  is clipped from both paint and hit-testing at that box's edge, well before the
+  bubble ever reaches the tray. Item 1's first field has no room *above* that box,
+  so its bubble was clipped away entirely; see the fix round.
 - **390x844 (phone) — corrected after review.** The phone media query's
   `.generator-shell .field-help` ties on specificity with `.item-fields
   .field-help` but wins by source order for every property it sets. It did not
@@ -506,9 +512,67 @@ direct child of a `<label>` in the new markup, confirmed by grep.
   card's width and the measured `fieldBox` width affects neither argument (R16: no
   sizing property changed; R20: containment holds regardless of actual width).
 
+## R20 - accordion clip, first bubble invisible on desktop (fix round, 2026-09-23)
+
+The "Vertical" bullet above missed that `.item-fields` lives inside the item's
+`<details>`, whose `::details-content` box clips vertical overflow (`overflow-y:
+clip`) regardless of `[open]`. The first field's bubble opens upward from
+`.field-label` with no field above it to give it room inside that box, so it
+sits entirely above the clip line and is removed from paint and hit-testing;
+the second field's bubble loses its top ~6px (padding only, text unaffected).
+
+Fix: directly after `.item-fields .field-help`, added
+`.item-fields :where(.item-field:first-child) .field-help { bottom: auto; top:
+calc(100% + 6px); transform-origin: 0 0; }` (globals.css ~1810-1826), so the
+first field's bubble opens downward, into the clip box, instead of upward past
+its top. `:where()` holds this at the same (0,2,0) specificity as the rule it
+sits next to, so `.generator-shell .field-help` in the `@media (max-width:
+760px)` block (also (0,2,0), and later in source order) still wins under 760px
+— confirmed by reading both selectors, not just reasoning about them.
+
+**Verification method — static harness, not the running app.** Checked with a
+standalone HTML file (`r20-repro.html` / `r20-verify.html`, outside this repo)
+that inlines the relevant rules copied verbatim from `app/globals.css` plus the
+item-card markup from `app/generator/page.tsx` — no dev server, no `.dev.vars`,
+no live app. Because a `file://` path outside the project renders in the
+browser pane only as an inert static snapshot (no script execution, no
+`elementFromPoint`), the harness was loaded by navigating to a real page and
+using `document.open()`/`document.write()` to replace the document with the
+harness's markup and styles, which does execute scripts normally.
+
+Per-bubble check used `document.elementFromPoint` at three points on each
+bubble's vertical extent (top edge + 2px, middle, bottom edge − 2px, all
+horizontally centered) rather than `getBoundingClientRect()` alone, because
+`overflow: clip` removes the clipped pixels from hit-testing too, not just
+paint — a bounding rect doesn't show that. Run at 1440x900, 1280x900 and
+1024x900 (`resize_window`, reset to `desktop` after): identical at all three
+widths, since nothing in this card is responsive below the 760px phone
+breakpoint the harness doesn't include.
+
+| Bubble | Before fix | After fix (isolated, one bubble shown — matches real `:hover`/`:focus-within`, which only ever shows one at a time) |
+| --- | --- | --- |
+| 1st field ("Item type") | All 3 points miss (rect fully above the clip line) | All 3 points hit at all 3 widths — **fixed** |
+| 2nd field ("Product / model") | `top+2` misses, `middle`/`bottom-2` hit | Unchanged: `top+2` still misses (~6.2px of the bubble's 8px top padding is clipped; text starts well below it and is unaffected) — left as-is per the approved fix scope |
+| 3rd field ("Brand") | All 3 points hit | Unchanged — all 3 points hit |
+
+Forcing *all* bubbles visible at once — the harness's own screenshot
+convention (`body.force`), not a real state — makes the first bubble's new
+downward extent overlap the second bubble's upward extent (both fill the
+narrow band between the two fields, from opposite directions), and the later
+bubble in DOM order paints on top at equal `z-index`. Isolating each bubble one
+at a time (simulating real `:hover`/`:focus-within`, which only one `.help-wrap`
+can have at once) confirms this never occurs in the app: the table above is the
+isolated result. This is a property of the static harness's all-at-once
+convention, not a regression.
+
+This static-harness check is stronger than pure CSS-cascade tracing (it
+executes the real cascade and hit-tests real geometry) but is still not the
+running app. The live check remains the user's post-merge check, below.
+
 ## Pending - live browser check (post-merge)
 
-Nothing above was observed in a running browser.
+Nothing above was observed in a running browser. These are the user's checks
+to run after merge, not a controller/CI gate.
 
 - Re-run the R16 snippet; confirm the "after" column; click label text (focus ->
   input); click "?" (focus -> button, bubble shows); reorder/remove an item (ids
@@ -519,3 +583,7 @@ Nothing above was observed in a running browser.
   (the zero-height regression this fix round corrected).
 - The two known-gap dialogs from Task 3B.2 are unrelated and remain as recorded in
   the WP-3B entry above.
+- Confirm the first field's help bubble in the live app with real `:hover`/
+  `:focus-within`, on the actual `<details>` accordion (not the static
+  harness's copy) at 1440, 1280 and 1024.
+- hit-test (elementFromPoint), not bounding rects.
