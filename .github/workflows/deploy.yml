@@ -12,6 +12,9 @@ jobs:
   # allowed up to scripts/typecheck-baseline.json.
   verify:
     runs-on: ubuntu-latest
+    # A test stuck in a microtask loop starves node:test's own timers, so only
+    # the job limit can end it; the default is six hours.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
