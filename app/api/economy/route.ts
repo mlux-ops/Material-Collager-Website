@@ -42,19 +42,18 @@ export async function POST(request: Request) {
     const prompt = buildGenerationPrompt(payload);
     validateImagePrompt(prompt);
     const jobId = crypto.randomUUID();
-    const batch = await submitEconomyBatch(apiKey, jobId, prompt, allImageIds, resolvedSize(payload), payload.quality, resolvedBackground(payload));
-
     const now = Date.now();
     const DB = await ensureJobStorage();
+    // Recorded BEFORE the paid call. A batch OpenAI accepted must never exist
+    // without a row here — nothing would ever poll, finalize or show it — and
+    // storage that is down right now means no batch is bought at all.
     await DB.prepare(`INSERT INTO generation_jobs
       (id, mode, status, openai_batch_id, output_key, filename, format, prompt, payload_json, reference_ids_json,
        render_kind, collage_type, library_visible, title, estimated_usd, usage_json, qa_json, error,
        model, quality, background, output_format, cost_usd, created_at, updated_at, expires_at)
-      VALUES (?, 'economy', ?, ?, NULL, ?, ?, ?, ?, ?, 'final', ?, 1, ?, NULL, NULL, NULL, NULL, ?, ?, ?, ?, NULL, ?, ?, ?)`)
+      VALUES (?, 'economy', 'submitting', NULL, NULL, ?, ?, ?, ?, ?, 'final', ?, 1, ?, NULL, NULL, NULL, NULL, ?, ?, ?, ?, NULL, ?, ?, ?)`)
       .bind(
         jobId,
-        batch.status || "validating",
-        batch.id,
         finalFilename(payload.outputFilename),
         resolvedSize(payload),
         prompt,
@@ -74,6 +73,29 @@ export async function POST(request: Request) {
         now,
         now + RETENTION_MS,
       ).run();
+
+    let batch: BatchResponse;
+    try {
+      batch = await submitEconomyBatch(apiKey, jobId, prompt, allImageIds, resolvedSize(payload), payload.quality, resolvedBackground(payload));
+    } catch (error) {
+      // Terminal, so history stops polling it. The request may still have
+      // reached OpenAI before the error (a timeout, a dropped connection), so
+      // the record says how to check before paying for another. The batch
+      // carries this id as metadata (submitEconomyBatch).
+      const message = error instanceof Error ? error.message : String(error);
+      await DB.prepare("UPDATE generation_jobs SET status = 'failed', error = ?, updated_at = ? WHERE id = ?")
+        .bind(
+          `Submission did not complete (${message}). Before resubmitting, check OpenAI's Batches page for metadata material_collager_job = ${jobId}.`,
+          Date.now(),
+          jobId,
+        )
+        .run()
+        .catch(() => undefined);
+      throw error;
+    }
+    await DB.prepare("UPDATE generation_jobs SET status = ?, openai_batch_id = ?, updated_at = ? WHERE id = ?")
+      .bind(batch.status || "validating", batch.id, Date.now(), jobId)
+      .run();
     return Response.json({ ok: true, jobId, status: batch.status, estimatedUsd: null });
   } catch (error) {
     return errorResponse(error);
