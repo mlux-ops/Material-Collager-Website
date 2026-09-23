@@ -6,6 +6,13 @@ on:
   pull_request:
   workflow_dispatch: {}
 
+# Pushes and manual runs share one production group and run in commit order;
+# each pull request gets its own group, where a newer push cancels the older
+# run instead of queuing behind it.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('verify-pr-{0}', github.event.pull_request.number) || 'deploy-production' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # Runs on every pull request and before every deploy. A red test, a lint
   # error or a NEW type error stops the deploy; pre-existing type errors are
@@ -38,11 +45,6 @@ jobs:
   deploy:
     needs: verify
     if: github.event_name != 'pull_request'
-    # Moved here from the workflow level so pull-request verify runs never
-    # queue behind (or hold up) a production deploy.
-    concurrency:
-      group: deploy-production
-      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
