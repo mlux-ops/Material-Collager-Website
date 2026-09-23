@@ -76,7 +76,7 @@ function safeErrorMessage(cause: unknown): string {
 export type BoardSaveQueue = {
   /** Coalesces `patch` with anything pending; sends after `debounceMs` of quiet. */
   saveSoon(patch: BoardPatch): void;
-  /** Sends `patch`, with anything pending, now. The result reflects whichever write actually ends up carrying it, not just this call's own send: false only when the attempt drainOrThrow itself starts and awaits fails outright; a failure on a write it merely rode along on (one a success handler started) can be silently requeued and retried within the same call, still resolving true. Either way, onError already reported the failure. */
+  /** Sends `patch`, with anything pending, now. Resolves false if the attempt it makes fails, or if a write it only waited on failed on a dropdown value nothing newer replaced — the same rule flush follows, in boolean form; true otherwise. Either way, onError already reported the failure. */
   saveNow(patch: BoardPatch): Promise<boolean>;
   /** Sends anything pending and waits for every write in flight; rejects if the attempt it makes fails, or if a write it only waited on failed on a dropdown value nothing newer replaced. */
   flush(): Promise<void>;
@@ -150,9 +150,8 @@ export function createBoardSaveQueue(options: {
           // the only place a dropdown field's failure can still be told
           // apart from one a newer edit already replaced. A replaced value
           // is not something any drain should reject over: the newer one
-          // is what a drain attempts instead (see drainOrThrow) — though
-          // which write ends up resolving a caller's saveNow still depends
-          // on timing (see its doc above).
+          // is what a drain attempts instead (see drainOrThrow) — the same
+          // rule saveNow's own doc above now states in boolean form.
           const droppedUnreplaced =
             (patch.quality !== undefined && pending?.quality === undefined) ||
             (patch.background !== undefined && pending?.background === undefined) ||
