@@ -21,7 +21,7 @@ const DB = createFakeD1({
   },
 });
 installWorkerEnv({ DB });
-const { listBoardState, saveBoardState } = await import("../app/lib/autoboard-board-state.ts");
+const { ensureBoardStateStorage, listBoardState, saveBoardState } = await import("../app/lib/autoboard-board-state.ts");
 
 test("two partial saves that overlap keep both fields (R06)", async () => {
   holdNextWrite = true;
@@ -65,4 +65,44 @@ test("an invalid patch is rejected before anything is written", async () => {
   await assert.rejects(saveBoardState("p-invalid", "b", { instruction: "after", quality: "ultra" }), /quality must be one of/);
   await assert.rejects(saveBoardState("p-invalid", "b", { instruction: "after", notes: ["x"] }), /notes must be an object/);
   assert.equal((await listBoardState("p-invalid")).get("b").instruction, "before");
+});
+
+// Minor 3: the SQL guards notes_json with `json_valid` before handing it to
+// json_patch, so a row whose stored value is not a valid JSON object (never
+// written by saveBoardState itself, but possible from an older row or manual
+// edit) restarts from {} instead of failing every later save.
+test("a stored notes_json that is invalid JSON restarts from {} (Minor 3)", async () => {
+  const storage = await ensureBoardStateStorage();
+  await storage
+    .prepare("INSERT INTO autoboard_board_state (project_id, board_id, notes_json, updated_at) VALUES (?, ?, ?, ?)")
+    .bind("p-badjson", "b", "not json at all", Date.now())
+    .run();
+  const state = await saveBoardState("p-badjson", "b", { notes: { faucet: "brass" } });
+  assert.deepEqual(state.notes, { faucet: "brass" });
+});
+
+test("a stored notes_json that is syntactically valid but not an object (a JSON array) also restarts from {} (Minor 3)", async () => {
+  const storage = await ensureBoardStateStorage();
+  await storage
+    .prepare("INSERT INTO autoboard_board_state (project_id, board_id, notes_json, updated_at) VALUES (?, ?, ?, ?)")
+    .bind("p-arrjson", "b", "[1,2,3]", Date.now())
+    .run();
+  const state = await saveBoardState("p-arrjson", "b", { notes: { tile: "grey" } });
+  assert.deepEqual(state.notes, { tile: "grey" });
+});
+
+// Minor 3: slot ids are free text (an item's own row id or a light fixture's
+// generated key), so they can carry characters JSON has to escape. json_patch
+// must still remove, update, and add them correctly.
+test("slot ids needing JSON escaping are removed, updated, and added correctly (Minor 3)", async () => {
+  const quote = 'say "hi"';
+  const slash = "back\\slash";
+  const control = "tab\ttab";
+  await saveBoardState("p-escape", "b", {
+    notes: { [quote]: "brass", [slash]: "grey", [control]: "x", keep: "k" },
+  });
+  const next = await saveBoardState("p-escape", "b", {
+    notes: { [quote]: "", [slash]: "oak", [control]: "", ["new \"q\""]: "round" },
+  });
+  assert.deepEqual(next.notes, { [slash]: "oak", keep: "k", ["new \"q\""]: "round" });
 });
