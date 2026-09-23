@@ -977,8 +977,10 @@ export default function WorkbenchApp() {
   // what's owed, routes its own save through here too (so a later flush,
   // after this one times out, still waits for it instead of racing it), and
   // re-cancels any timer an edit armed during that wait -- so it never races
-  // an older write for the same graph's records, and no during-wait edit's
-  // own timer fires after the flush already decided.
+  // an older write for the same graph's records. That re-cancel narrows, but
+  // cannot fully close, the window for a during-wait edit's own timer: one
+  // that fires between the snapshot below and the re-cancel can still start
+  // a new autosave that joins after this flush has already decided.
   const inFlightSavesRef = useRef(new Set<Promise<void>>());
   const trackSave = useCallback((save: Promise<void>) => {
     inFlightSavesRef.current.add(save);

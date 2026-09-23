@@ -34,10 +34,13 @@ export function Spotlight({ kinds, onPick, onClose, title, emptyHint }: Spotligh
   // handler only fires while the input has focus, but Tab containment now
   // keeps focus inside this dialog including on result buttons, where
   // Escape would otherwise do nothing. When the input DOES have focus, both
-  // handlers fire for the same keypress -- harmless, since useModalDismiss's
-  // requestClose ignores a repeat call while already closing (timeoutRef
-  // guard). initialFocus keeps the deliberate "focus the search box, not the
-  // Close button" behavior this component already had.
+  // handlers fire for the same keypress. With motion, useModalDismiss's
+  // timeoutRef guard drops the repeat; under prefers-reduced-motion it
+  // returns before ever setting timeoutRef, so the guard never engages and
+  // onClose runs twice -- harmless here, since it is setAddOpen(false), and
+  // a repeat call to a state setter is a no-op. initialFocus keeps the
+  // deliberate "focus the search box, not the Close button" behavior this
+  // component already had.
   useModalFocus(dialogRef, { initialFocus: inputRef, onEscape: requestClose });
 
   const results = useMemo(() => {

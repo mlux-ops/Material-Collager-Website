@@ -606,15 +606,15 @@ export type DirtyChannel = {
   /** A save is reading the store now; hand the result to settle() when it succeeds. */
   begin(): number;
   /**
-   * The save that began at `begun` just committed, so `begun` is now what
-   * the store holds -- replacing whatever an earlier settle recorded.
-   * Settles land in COMMIT order, not begin order: saveGraph awaits a
-   * thumbnail before its transaction even opens, so a saveGraphStructure
-   * call that began later can commit first and settle first. Recording the
-   * latest commit (not the max `begun` seen) means an out-of-order commit
-   * correctly reopens the channel, since the store's content no longer
-   * matches the newest edit; the cost is at most one redundant save, never
-   * a lost edit.
+   * Call this only from the save's own resolution, and only once that save
+   * has actually committed -- `begun` then becomes what the store holds,
+   * replacing whatever an earlier settle recorded. Settles land in COMMIT
+   * order, not begin order: saveGraph awaits a thumbnail before its
+   * transaction even opens, so a saveGraphStructure call that began later
+   * can commit first and settle first. Recording the latest commit (not the
+   * max `begun` seen) means an out-of-order commit correctly reopens the
+   * channel, since the store's content no longer matches the newest edit;
+   * the cost is at most one redundant save, never a lost edit.
    */
   settle(begun: number): void;
   readonly dirty: boolean;
