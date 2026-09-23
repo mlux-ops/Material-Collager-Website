@@ -66,7 +66,7 @@ export function Spotlight({ kinds, onPick, onClose, title, emptyHint }: Spotligh
           if (event.key === "Escape" && onClose) requestClose();
         }}
       />
-      <div className={styles.spotlightList} role="listbox" aria-label="Node types">
+      <div className={styles.spotlightList} role="group" aria-label="Node types">
         {results.map((kind) => (
           <button
             key={kind}
