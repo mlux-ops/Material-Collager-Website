@@ -112,14 +112,60 @@ export async function optimizeReferencesForTransport(files: File[], budget = DIR
   const surplus = files.reduce((sum, file) => sum + Math.max(0, fairShare - file.size), 0);
   const oversizedCount = files.filter((file) => file.size > fairShare).length;
   const targetBytes = fairShare + Math.floor(surplus / Math.max(oversizedCount, 1));
-  return Promise.all(files.map((file) => optimizeReferenceForTransport(file, targetBytes)));
+  return mapWithLimit(files, TRANSPORT_CONCURRENCY, (file) => optimizeReferenceForTransport(file, targetBytes));
 }
 
-// Compressing a reference is expensive (decode + multiple canvas encodes on
-// the main thread) and the same files are re-sent on every iterative
-// generation, so cache results per source file and target size.
-const transportCache = new Map<string, File>();
-const TRANSPORT_CACHE_LIMIT = 64;
+// Bounded by bytes, not entries: 64 small thumbnails and 64 near-budget
+// references are very different amounts of memory.
+const TRANSPORT_CACHE_BYTES = 64 * 1024 * 1024;
+
+export function createByteBudgetCache(limitBytes: number) {
+  const entries = new Map<string, File>();
+  let bytes = 0;
+  return {
+    get(key: string) {
+      return entries.get(key);
+    },
+    set(key: string, file: File) {
+      const previous = entries.get(key);
+      if (previous) {
+        entries.delete(key);
+        bytes -= previous.size;
+      }
+      entries.set(key, file);
+      bytes += file.size;
+      // Oldest first (Map keeps insertion order); the newest entry always stays.
+      for (const [oldestKey, oldest] of entries) {
+        if (bytes <= limitBytes || oldestKey === key) break;
+        entries.delete(oldestKey);
+        bytes -= oldest.size;
+      }
+    },
+    get bytes() {
+      return bytes;
+    },
+  };
+}
+
+const transportCache = createByteBudgetCache(TRANSPORT_CACHE_BYTES);
+
+// Each over-budget reference is decoded to a full bitmap on the main thread
+// (about 96 MB for a 24 MP photo), so they are prepared a couple at a time,
+// not all at once.
+export const TRANSPORT_CONCURRENCY = 2;
+
+export async function mapWithLimit<T, R>(items: T[], limit: number, run: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await run(items[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
 
 // Keyed on the bytes. fileFingerprint (name, size, date, type) is not identity
 // here: Workbench hands every reference over as a fresh `input.<ext>` File
@@ -140,10 +186,6 @@ export async function optimizeReferenceForTransport(file: File, targetBytes: num
   const cached = transportCache.get(cacheKey);
   if (cached) return cached;
   const optimized = await compressReferenceForTransport(file, targetBytes);
-  if (transportCache.size >= TRANSPORT_CACHE_LIMIT) {
-    const oldest = transportCache.keys().next().value;
-    if (oldest !== undefined) transportCache.delete(oldest);
-  }
   transportCache.set(cacheKey, optimized);
   return optimized;
 }
