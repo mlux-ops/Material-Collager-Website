@@ -106,7 +106,7 @@ No deploy, publish, or production-state write occurred during this QA pass.
 # Visual QA - Workbench dialog focus containment (WP-3B, R14)
 
 Date: 2026-09-22
-Status: **KNOWN GAPS RECORDED - BROWSER PASS PENDING**
+Status: **KNOWN GAPS RECORDED - BROWSER PASS DONE 2026-09-23**
 
 ## Scope
 
@@ -179,30 +179,35 @@ Escape-to-close:
   `useModalDismiss`'s `requestClose` ignores a repeat call while already
   closing (its `timeoutRef` guard).
 
-## Browser checks not yet performed (skipped per controller instruction; now the user's post-merge checks, not a controller/CI gate)
+## Live browser pass (2026-09-23)
 
-- Template chooser: after it opens on an empty canvas,
-  `document.activeElement.closest('[role="dialog"]') !== null`; Tab x10 stays
-  inside; Shift+Tab from the first control wraps to the last; Escape or
-  **Skip** closes it and focus is not left on a removed node.
-- Same two focus checks (open lands inside the dialog; Tab stays contained)
-  repeated for the Export dialog.
-- Task 3B.1 (R17): with `window.prompt` stubbed to return `null`, clicking
-  "+ New workbench" creates nothing -- the graph count in the manager is
-  unchanged and the active graph does not change.
-- Task 3B.3 (R15): `/workbench` still reaches the app normally (`read_page`
-  shows the canvas, not "Loading workbench…"). The failed-chunk branch itself
-  cannot be triggered in a preview without editing code, so it stays a code
-  read, not a browser check.
-- **Escape closes the Graph Manager outside a rename** (fix round 1): open
-  it, press Escape with no row being renamed, and confirm it closes like any
-  other Workbench dialog. Then reopen it, click Rename on a row, press
-  Escape, and confirm ONLY the rename cancels (input reverts to the
-  non-editing row) and the dialog itself stays open.
-- **Escape closes Spotlight's modal from a result button** (fix round 1):
-  open the compact "Add node" overlay, Tab past the search input to a node-
-  type result button, press Escape, and confirm the dialog closes (previously
-  did nothing once focus had moved off the search input).
+Environment: `vinext dev` from the main checkout at the merged remediation
+(PR #69), Chromium in the Claude browser pane, 1440x900 unless noted.
+
+- **Template chooser:** passed.
+  - Focus lands inside the dialog when it opens, and 10 Tabs stay inside.
+  - Shift+Tab from the first control (Skip) wraps to the last.
+  - Escape closes it, and focus is not left on a removed node.
+- **Export dialog:** passed. Focus lands inside when it opens (with one Note on
+  the canvas), 10 Tabs stay inside, and Escape closes it.
+- **Graph Manager (the toolbar's "Workbenches" button):** passed.
+  - Escape with no rename in progress closes it.
+  - During a rename, Escape cancels only the rename, and the dialog stays open.
+    A typed name is not saved.
+  - 15 Tabs stay inside.
+  - Found: when a rename ended from the keyboard, focus fell to `<body>`. Fixed
+    in the follow-up PR. Focus now returns to that row's Rename button, and
+    Enter no longer re-presses that button and reopens the rename. Clicking away
+    still saves.
+- **Task 3B.1 (R17):** passed. With `window.prompt` returning `null`, "+ New
+  workbench" creates nothing: the row count and the active workbench are
+  unchanged.
+- **Task 3B.3 (R15):** passed. `/workbench` reaches the app normally. The
+  failed-chunk branch stays a code read.
+- **Compact "+ Add" overlay (390x844):** passed. Escape closes it from a
+  node-type result button and from the search input. On desktop, the left-hand
+  "Add node" palette is a permanent panel, not a dialog, so Escape does nothing
+  there by design.
 
 ---
 
@@ -440,7 +445,7 @@ this task, outside the repository.
 # Visual QA - Generator item-field labels and help-bubble placement (WP-3C, R16/R20)
 
 Date: 2026-09-23
-Status: **STATIC CASCADE TRACE ONLY - BROWSER PASS PENDING**
+Status: **BROWSER PASS DONE 2026-09-23**
 
 ## Scope
 
@@ -584,21 +589,29 @@ This static-harness check is stronger than pure CSS-cascade tracing (it
 executes the real cascade and hit-tests real geometry) but is still not the
 running app. The live check remains the user's post-merge check, below.
 
-## Pending - live browser check (post-merge)
+## Live browser pass (2026-09-23)
 
-Nothing above was observed in a running browser. These are the user's checks
-to run after merge, not a controller/CI gate.
+Environment: `vinext dev` from the main checkout at the merged remediation
+(PR #69), Chromium in the Claude browser pane. The sections above were written
+before this pass, from the static trace.
 
-- Re-run the R16 snippet; confirm the "after" column; click label text (focus ->
-  input); click "?" (focus -> button, bubble shows); reorder/remove an item (ids
-  stay unique).
-- Re-run the R20 snippet at 1440x900, 1280x800, 1024x768, 390x844 on the first/last
-  field of the first/last visible card; confirm `inside: true` at the three desktop
-  sizes, and confirm the phone help bubble renders with its content at 390x844
-  (the zero-height regression this fix round corrected).
-- The two known-gap dialogs from Task 3B.2 are unrelated and remain as recorded in
-  the WP-3B entry above.
-- Confirm the first field's help bubble in the live app with real `:hover`/
-  `:focus-within`, on the actual `<details>` accordion (not the static
-  harness's copy) at 1440, 1280 and 1024.
-- hit-test (elementFromPoint), not bounding rects.
+- **R16:** passed.
+  - The label typography matches the before-measurements.
+  - Each field's label gives its input its accessible name ("Item type" and so
+    on). Clicking the label text focuses the input.
+  - "?" focuses its button and shows the bubble.
+  - Ids stay unique when items are added and removed.
+- **Found:** the label and input ids were built from each item's random key.
+  The server-rendered HTML and the browser's first render therefore disagreed,
+  and React logged a hydration mismatch on every `/generator` load. Fixed in the
+  follow-up PR: the ids now come from `useId()` plus the card's index, and a
+  fresh load logs no mismatch.
+- **R20:** passed.
+  - Checked with real focus on the live `<details>` accordion, on the first and
+    last field of the first card and of the last visible card, at 1440x900,
+    1280x800 and 1024x768.
+  - All 12 bubbles and all 36 `elementFromPoint` hit-tests (top, middle, bottom)
+    landed on the bubble, inside the card.
+  - At 390x844 the phone bubble renders at full height with its text (307x46.8 px).
+- The two known-gap dialogs from Task 3B.2 remain as recorded in the WP-3B entry
+  above.
