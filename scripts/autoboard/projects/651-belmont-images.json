@@ -355,8 +355,8 @@
           "bytes": 18515,
           "width": 1200,
           "height": 1200,
-          "sha256": "531c535f807321714018bb60d8cfc004f3bcd62e7b9eff279698b5298b3b0067",
-          "source": "Kitchen and Bath Authority product page"
+          "source": "Kitchen and Bath Authority product page",
+          "digestUnstable": "www.kbauthority.com serves this URL as either of two encodings of the same picture — an 18,515-byte progressive JPEG or a 31,092-byte baseline one, identical to within JPEG noise (checked 2026-09-23) — so repeat downloads differ in bytes and this file carries no digest to check against"
         }
       ]
     },
