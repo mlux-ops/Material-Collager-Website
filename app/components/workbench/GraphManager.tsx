@@ -113,10 +113,13 @@ export function GraphManager({ activeGraphId, onSwitch, onCancelPendingSaves, on
   };
 
   const handleCreate = async () => {
+    const answer = window.prompt("Name this workbench", "New workbench");
+    // null is Cancel: create, save and switch nothing. An accepted empty name
+    // still gets the default.
+    if (answer === null) return;
     setBusy(true);
     try {
-      const name = window.prompt("Name this workbench", "New workbench") || "New workbench";
-      const graphId = await createGraph(name);
+      const graphId = await createGraph(answer.trim() || "New workbench");
       refresh();
       await doSwitch(graphId);
     } finally {
