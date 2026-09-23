@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { isStaleSubmitting, staleSubmittingGuidance } from "./economy-submission-status.ts";
 import { calculateSunburstUsageCost } from "./sunburst.ts";
 
 export type RenderKind = "draft" | "studio" | "final" | "repair";
@@ -301,10 +302,17 @@ export async function listLibraryJobs() {
 }
 
 export function publicJob(row: JobRow): GenerationJob {
+  // A 'submitting' row whose paid call was interrupted (the request was
+  // cancelled, or the UPDATE that would have recorded its outcome itself
+  // failed — see POST in app/api/economy/route.ts) never moves on its own:
+  // it has no batch id yet, so the poller never picks it up. Read one old
+  // enough to be sure of that as failed instead of pending forever. The row
+  // itself is untouched; only what a reader is told changes.
+  const stale = isStaleSubmitting(row.status, row.updated_at);
   return {
     id: row.id,
     mode: row.mode,
-    status: row.status,
+    status: stale ? "failed" : row.status,
     openaiBatchId: row.openai_batch_id,
     outputKey: row.output_key,
     filename: row.filename,
@@ -321,7 +329,7 @@ export function publicJob(row: JobRow): GenerationJob {
     outputFormat: row.output_format ?? null,
     usage: parseJson(row.usage_json),
     qa: parseJson(row.qa_json),
-    error: row.error,
+    error: stale ? staleSubmittingGuidance(row.id) : row.error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     expiresAt: row.expires_at,
