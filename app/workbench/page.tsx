@@ -18,12 +18,12 @@ const WorkbenchApp = dynamic(() => import("@/app/components/workbench/WorkbenchA
  * here is what read as a "full-screen white flash" whenever the readiness
  * hold ran out before the chunk landed.
  */
-function WorkbenchVeil() {
+function WorkbenchVeil({ failed = false }: { failed?: boolean }) {
   return (
     <div style={{ height: "100dvh", paddingTop: 58, background: "var(--mono-off-white, #fafafa)", overflow: "hidden" }}>
       <SiteNavigation active="workbench" className="generator-navigation" />
       <div
-        aria-busy="true"
+        aria-busy={failed ? undefined : "true"}
         style={{
           height: "100%",
           display: "grid",
@@ -32,9 +32,34 @@ function WorkbenchVeil() {
           backgroundSize: "22px 22px",
         }}
       >
-        <p style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgb(0 0 0 / 45%)" }}>
-          Loading workbench…
-        </p>
+        {failed ? (
+          <div role="alert" style={{ display: "grid", gap: 10, justifyItems: "center", textAlign: "center" }}>
+            <p style={{ fontSize: 11, color: "#000000", margin: 0 }}>
+              The workbench could not load. Your saved workbenches are safe on this device.
+            </p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              style={{
+                fontSize: 8.4,
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                color: "#000000",
+                background: "transparent",
+                border: "1px solid #000000",
+                borderRadius: 0,
+                padding: "6px 12px",
+                cursor: "pointer",
+              }}
+            >
+              Reload
+            </button>
+          </div>
+        ) : (
+          <p style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgb(0 0 0 / 45%)" }}>
+            Loading workbench…
+          </p>
+        )}
       </div>
     </div>
   );
@@ -50,22 +75,26 @@ export default function WorkbenchPage() {
   // the wipe proceeds onto the designed veil instead (FR-007/FR-008), which
   // is also what a direct page load shows. Hover warming (SiteNavigation)
   // makes the hold imperceptible in the common case.
-  const [loaded, setLoaded] = useState(false);
+  const [chunk, setChunk] = useState<"loading" | "loaded" | "failed">("loading");
   useEffect(() => {
     let alive = true;
     void import("@/app/components/workbench/WorkbenchApp")
       .then(() => {
-        if (alive) setLoaded(true);
+        if (alive) setChunk("loaded");
       })
       .catch(() => {
-        // Chunk failure: leave the veil; the budget releases the wipe.
+        // Chunk failure (offline, or a deploy replaced the chunk): say so and
+        // offer a reload instead of a veil that never lifts. The readiness
+        // budget still releases the wipe onto this screen.
+        if (alive) setChunk("failed");
       });
     return () => {
       alive = false;
     };
   }, []);
 
-  if (!loaded) return <WorkbenchVeil />;
+  if (chunk === "failed") return <WorkbenchVeil failed />;
+  if (chunk !== "loaded") return <WorkbenchVeil />;
   return (
     <>
       <RouteReady path="/workbench" />

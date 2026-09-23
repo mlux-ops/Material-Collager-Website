@@ -58,6 +58,8 @@ export default function DitherLabPage() {
       i += 1;
       if (i >= stages.length) {
         clearInterval(id);
+        // Done: release the toggle so the next click replays from the start.
+        setAutoPlay(false);
         return;
       }
       setProgress(stages[i]);
@@ -78,8 +80,6 @@ export default function DitherLabPage() {
         padding: "40px",
       }}
     >
-      <div className="grain-overlay" aria-hidden />
-
       <h1
         style={{
           fontSize: "14px",

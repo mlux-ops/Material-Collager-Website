@@ -67,7 +67,16 @@ export function assertFetchableUrl(raw: unknown): URL {
     throw new Error(`Only https URLs can be fetched; got "${url.protocol}".`);
   }
 
-  const hostname = url.hostname.toLowerCase();
+  // A single trailing dot (or its percent-encoded form, "%2e") is a no-op in
+  // DNS — "localhost." and "localhost" name the same host — but the URL
+  // parser keeps it, so every literal-hostname and suffix check below would
+  // miss it without stripping exactly one. An empty label is never a valid
+  // DNS name, so one left after stripping that single dot — or anywhere else
+  // in the hostname — is refused outright.
+  const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
+  if (!hostname || hostname.split(".").includes("")) {
+    throw new Error(`"${hostname}" is not a public host.`);
+  }
   if (BLOCKED_HOSTNAMES.has(hostname) || BLOCKED_HOST_SUFFIXES.some((suffix) => hostname.endsWith(suffix))) {
     throw new Error(`"${hostname}" is not a public host.`);
   }

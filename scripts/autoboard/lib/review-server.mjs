@@ -3,12 +3,13 @@
 // user, direct filesystem access — this is a developer tool, not a deployed
 // service, so it's kept dependency-free (plain node:http, no framework).
 
+import { createHash } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 
-import { addSlot, applySelection, buildRoomIndex, CUSTOM_ID_PREFIX, libraryOptionsForSlot, removeSlot, replaceItemImage, resetSelection, roomKeyFor, slotKind } from "./review-core.mjs";
+import { addSlot, applySelection, buildRoomIndex, CUSTOM_ID_PREFIX, libraryOptionsForSlot, recordImageDigest, removeSlot, replaceItemImage, resetSelection, roomKeyFor, slotKind } from "./review-core.mjs";
 import { makeDiskImageResolver } from "./match.mjs";
 import { readNoteOverrides } from "./notes.mjs";
 import { resolveAccessHeaders } from "./access.mjs";
@@ -195,12 +196,11 @@ export async function startReviewServer({
       const record = ensureRenders(results, board.id);
       const currentHash = selectionHash(board, record.instruction);
       selectionHashes[board.id] = currentHash;
-      // The `v` token is what makes a re-render visible in the browser. Render
-      // ids restart at 0001 after a reset, so a fresh draft lands on the same
-      // boards/<id>/drafts/d-0001.png path as the one it replaced — and
-      // /render-image answers with Cache-Control: max-age=3600, so without a
-      // per-render token the board shows the DELETED render's picture for an
-      // hour and the new one looks identical to the old.
+      // The `v` token is what makes a re-render visible in the browser.
+      // /render-image answers with Cache-Control: max-age=3600, and results
+      // written before nextRenderId kept a high-water mark could reuse a
+      // deleted render's id — and so its path — for a new picture. New ids are
+      // never reused; the token keeps those older ones showing the right image.
       const decorate = (entry, kind) => ({
         ...entry,
         stale: entry.selectionHash !== currentHash || renderRecordIsStale(board, entry, kind, record.instruction),
@@ -445,11 +445,15 @@ export async function startReviewServer({
           matchesCurrentItem = item.rowId === rowId;
         }
 
+        // Same path, new bytes: without the digest, every render made from the
+        // old photo would still pass renderRecordIsStale.
+        recordImageDigest(plan, imagePath, createHash("sha256").update(buffer).digest("hex"));
         if (matchesCurrentItem) {
           const updated = replaceItemImage({ board, slotId, imagePath });
           await persistPlan();
           sendJson(response, 200, { item: serializeItem(updated) });
         } else {
+          await persistPlan();
           sendJson(response, 200, { imagePath });
         }
         return;
@@ -635,6 +639,7 @@ export async function startReviewServer({
           instructionSnapshot: record.instruction, selectionHash: selectionHash(board, record.instruction),
           renderOptionsSnapshot: options, dedupeKey,
           force: Boolean(body.force),
+          source: sourceIdentity,
         });
         sendJson(response, 200, { jobId, position, duplicate, accessError: access.error });
         return;

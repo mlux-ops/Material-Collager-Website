@@ -112,25 +112,96 @@ export async function optimizeReferencesForTransport(files: File[], budget = DIR
   const surplus = files.reduce((sum, file) => sum + Math.max(0, fairShare - file.size), 0);
   const oversizedCount = files.filter((file) => file.size > fairShare).length;
   const targetBytes = fairShare + Math.floor(surplus / Math.max(oversizedCount, 1));
-  return Promise.all(files.map((file) => optimizeReferenceForTransport(file, targetBytes)));
+  return mapWithLimit(files, TRANSPORT_CONCURRENCY, (file) => optimizeReferenceForTransport(file, targetBytes));
 }
 
-// Compressing a reference is expensive (decode + multiple canvas encodes on
-// the main thread) and the same files are re-sent on every iterative
-// generation, so cache results per source file and target size.
-const transportCache = new Map<string, File>();
-const TRANSPORT_CACHE_LIMIT = 64;
+// How many references went out as a re-encoded copy. optimizeReferenceForTransport
+// returns the very same File when a reference fit its budget untouched and a new
+// one when it had to be resized or re-encoded (and flattened onto white), so
+// identity says which ones the model received at full quality.
+export function compressedReferenceCount(originals: File[], sent: File[]): number {
+  return sent.filter((file, index) => file !== originals[index]).length;
+}
+
+// Bounded by bytes, not entries: 64 small thumbnails and 64 near-budget
+// references are very different amounts of memory.
+const TRANSPORT_CACHE_BYTES = 64 * 1024 * 1024;
+
+export function createByteBudgetCache(limitBytes: number) {
+  const entries = new Map<string, File>();
+  let bytes = 0;
+  return {
+    get(key: string) {
+      return entries.get(key);
+    },
+    set(key: string, file: File) {
+      const previous = entries.get(key);
+      if (previous) {
+        entries.delete(key);
+        bytes -= previous.size;
+      }
+      entries.set(key, file);
+      bytes += file.size;
+      // Oldest first (Map keeps insertion order); the newest entry always stays.
+      for (const [oldestKey, oldest] of entries) {
+        if (bytes <= limitBytes || oldestKey === key) break;
+        entries.delete(oldestKey);
+        bytes -= oldest.size;
+      }
+    },
+    get bytes() {
+      return bytes;
+    },
+  };
+}
+
+const transportCache = createByteBudgetCache(TRANSPORT_CACHE_BYTES);
+
+// Each over-budget reference is decoded to a full bitmap on the main thread
+// (about 96 MB for a 24 MP photo), so they are prepared a couple at a time,
+// not all at once.
+export const TRANSPORT_CONCURRENCY = 2;
+
+export async function mapWithLimit<T, R>(items: T[], limit: number, run: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await run(items[index], index);
+    }
+  };
+  // A limit of 0 (Math.min below would pick 0 workers) must still make
+  // progress, not silently return an array of holes.
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, limit), items.length) }, worker));
+  return results;
+}
+
+// Keyed on the bytes. fileFingerprint (name, size, date, type) is not identity
+// here: Workbench hands every reference over as a fresh `input.<ext>` File
+// stamped in the same millisecond (fileFromCacheKey), so two different images
+// of one type and byte length would share a key, and a paid render would
+// receive the other image's compressed copy. Hashing costs far less than the
+// decode and re-encode this cache exists to skip.
+export async function transportCacheKey(file: File, targetBytes: number): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", await file.arrayBuffer()));
+  let hex = "";
+  for (const byte of digest) hex += byte.toString(16).padStart(2, "0");
+  return `${hex}|${targetBytes}`;
+}
 
 export async function optimizeReferenceForTransport(file: File, targetBytes: number) {
   if (file.size <= targetBytes) return file;
-  const cacheKey = `${fileFingerprint(file)}|${targetBytes}`;
+  // crypto.subtle (used by transportCacheKey) is only exposed in a secure
+  // context, so plain http — a LAN address during a draft, say — leaves
+  // `globalThis.crypto.subtle` undefined; mirror the globalThis.crypto?.
+  // guard used for randomUUID elsewhere and just skip the cache rather than
+  // let every oversized reference throw.
+  if (!globalThis.crypto?.subtle) return compressReferenceForTransport(file, targetBytes);
+  const cacheKey = await transportCacheKey(file, targetBytes);
   const cached = transportCache.get(cacheKey);
   if (cached) return cached;
   const optimized = await compressReferenceForTransport(file, targetBytes);
-  if (transportCache.size >= TRANSPORT_CACHE_LIMIT) {
-    const oldest = transportCache.keys().next().value;
-    if (oldest !== undefined) transportCache.delete(oldest);
-  }
   transportCache.set(cacheKey, optimized);
   return optimized;
 }

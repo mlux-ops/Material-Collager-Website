@@ -4,8 +4,8 @@
 // has no Smartsheet sheet of its own — the 651 Belmont bathrooms are the
 // first — from a tracked project definition under scripts/autoboard/projects/.
 //
-//   node scripts/autoboard/scaffold-project.mjs --project 651-belmont
-//   node scripts/autoboard/scaffold-project.mjs --project 651-belmont --root "D:\\651 Belmont" --dry-run
+//   node --experimental-strip-types scripts/autoboard/scaffold-project.mjs --project 651-belmont
+//   node --experimental-strip-types scripts/autoboard/scaffold-project.mjs --project 651-belmont --root "D:\\651 Belmont" --dry-run
 //
 // What it writes into the library root:
 //   build_manifest_v2.csv               what `plan --offline` reads
@@ -27,6 +27,8 @@ import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+import { downloadImage } from "./lib/download-image.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PROJECTS_DIR = path.join(SCRIPT_DIR, "projects");
@@ -234,17 +236,6 @@ export async function loadImageManifest(project, projectsDir = PROJECTS_DIR) {
   return { images: manifest.images ?? {}, verifiedAt: manifest.verifiedAt, file };
 }
 
-// Node's fetch ignores HTTP_PROXY/HTTPS_PROXY unless NODE_USE_ENV_PROXY is set,
-// which matters only in sandboxes that require a proxy — a normal workstation
-// needs nothing.
-async function defaultDownload(url) {
-  const response = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, redirect: "follow" });
-  const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim();
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  if (!contentType.startsWith("image/")) throw new Error(`content-type ${contentType || "unknown"} is not an image`);
-  return { buffer: Buffer.from(await response.arrayBuffer()), contentType };
-}
-
 // A vendor's best photo of a material sometimes carries styling props — a bowl
 // of fruit, a dried stem, a hand holding a sample. The collage prompt forbids
 // props ("every visible object must come from a reference image"), so a
@@ -269,7 +260,7 @@ export async function fetchReferenceImages({
   manifest,
   root,
   force = false,
-  download = defaultDownload,
+  download = downloadImage,
   log = () => {},
 }) {
   const libraryRoot = path.resolve(root ?? definition.libraryRoot ?? ".");
@@ -358,8 +349,8 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Usage: node scripts/autoboard/scaffold-project.mjs --project <id> [--root <path>]
-                                                 [--fetch-images [--force]] [--dry-run]
+  console.log(`Usage: node --experimental-strip-types scripts/autoboard/scaffold-project.mjs --project <id> [--root <path>]
+                                                                            [--fetch-images [--force]] [--dry-run]
 
   --project <id>   A definition under scripts/autoboard/projects/ (e.g. 651-belmont), or a path to one.
   --root <path>    Library root to write into. Defaults to the definition's libraryRoot.

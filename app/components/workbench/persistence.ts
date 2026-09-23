@@ -594,6 +594,54 @@ export function decidePendingSave(structureDirty: boolean, blobDirty: boolean): 
   return "none";
 }
 
+// One autosave channel's dirty state, counted instead of flagged. A save
+// covers only the edits that existed when it read the store; an edit made
+// while it was in flight is still owed. With a boolean, that older save's
+// completion cleared the flag, a graph switch then decided nothing was
+// pending, skipped the save and reloaded the edit away. Pure and
+// framework-free, like decidePendingSave, so the ordering is unit-testable.
+export type DirtyChannel = {
+  /** An edit happened. */
+  edit(): void;
+  /** A save is reading the store now; hand the result to settle() when it succeeds. */
+  begin(): number;
+  /**
+   * Call this only from the save's own resolution, and only once that save
+   * has actually committed -- `begun` then becomes what the store holds,
+   * replacing whatever an earlier settle recorded. Settles land in COMMIT
+   * order, not begin order: saveGraph awaits a thumbnail before its
+   * transaction even opens, so a saveGraphStructure call that began later
+   * can commit first and settle first. Recording the latest commit (not the
+   * max `begun` seen) means an out-of-order commit correctly reopens the
+   * channel, since the store's content no longer matches the newest edit;
+   * the cost is at most one redundant save, never a lost edit.
+   */
+  settle(begun: number): void;
+  readonly dirty: boolean;
+};
+
+export function createDirtyChannel(): DirtyChannel {
+  let edits = 0;
+  let saved = 0;
+  return {
+    edit() {
+      edits += 1;
+    },
+    begin() {
+      return edits;
+    },
+    settle(begun) {
+      // Last commit wins -- see settle's doc comment. Not a max: an older
+      // save committing after a newer one must be able to lower `saved`
+      // again, or the newer edit it just overwrote would read as saved.
+      saved = begun;
+    },
+    get dirty() {
+      return edits > saved;
+    },
+  };
+}
+
 // Writes ONLY the graph + meta records -- no blob-store read or write at all.
 // Safe to call on every position drag: it can never touch a single blob.
 // The thumbnail (either shape -- see GraphMeta) is deliberately NOT

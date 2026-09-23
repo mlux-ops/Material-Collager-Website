@@ -86,5 +86,9 @@ def _make_openai_client() -> Any:
         raise RuntimeError(
             "The `openai` package is required. Install with: python -m pip install -e ."
         ) from exc
-    return OpenAI()
+    # Never retry a paid image call automatically. The SDK retries twice by
+    # default on timeouts and dropped connections, and an edit OpenAI already
+    # accepted is billed again on each retry. A failure goes back to the person,
+    # who decides whether to spend on another attempt.
+    return OpenAI(max_retries=0)
 

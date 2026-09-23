@@ -259,8 +259,23 @@ export function ensureRenders(results, boardId) {
 const LIST_FOR_PREFIX = { d: "drafts", c: "confirmed", f: "finals" };
 const DIR_FOR_KIND = { draft: "drafts", confirm: "confirmed", final: "finals" };
 
+function idNumber(id) {
+  const value = Number.parseInt(String(id ?? "").slice(2), 10);
+  return Number.isFinite(value) ? value : 0;
+}
+
+// Ids are never reissued. Counting the renders that survive — or even taking
+// the highest survivor — hands a deleted render's id, and so its file name, to
+// the next render: the write overwrites a picture another record still points
+// at, and findRender's first-match lookup then resolves the old metadata over
+// new bytes. `lastIssued` remembers the highest id ever handed out per kind; a
+// record written before it existed starts after its highest surviving id,
+// which is the best a record that never kept one can do.
 export function nextRenderId(renders, prefix) {
-  return `${prefix}-${String(renders[LIST_FOR_PREFIX[prefix]].length + 1).padStart(4, "0")}`;
+  const surviving = renders[LIST_FOR_PREFIX[prefix]].map((entry) => idNumber(entry.id));
+  const next = Math.max(renders.lastIssued?.[prefix] ?? 0, ...surviving) + 1;
+  renders.lastIssued = { ...renders.lastIssued, [prefix]: next };
+  return `${prefix}-${String(next).padStart(4, "0")}`;
 }
 
 export function renderFilePath(runDir, boardId, kind, id) {
@@ -447,6 +462,21 @@ function itemNotesOf(board) {
   return Object.fromEntries(board.items.filter((item) => String(item.note ?? "").trim()).map((item) => [item.slotId, String(item.note).trim()]));
 }
 
+// The render a queued confirm/final was enqueued against (job.source, set by
+// the review server). Resolving the pick again here would let a re-pick made
+// while the job waited silently change what the paid render is built from. A
+// source deleted in the meantime stops the job before anything is sent. Jobs
+// built without a source (direct callers, older fixtures) keep reading the
+// current pick.
+function queuedSource(results, boardId, { kind, id }) {
+  const record = ensureRenders(results, boardId)[DIR_FOR_KIND[kind]]?.find((entry) => entry.id === id);
+  if (!record) {
+    const label = kind === "confirm" ? "confirmed render" : "draft";
+    throw Object.assign(new Error(`The ${label} this job was queued from (${id}) was removed. Queue the step again.`), { status: 409 });
+  }
+  return { kind, record };
+}
+
 export async function runRenderJob(job, ctx) {
   const { plan, results, runDir } = ctx;
   const board = plan.boards.find((entry) => entry.id === job.boardId);
@@ -486,7 +516,7 @@ export async function runRenderJob(job, ctx) {
     return;
   }
 
-  const source = renderSource(results, board.id, job.kind);
+  const source = job.source ? queuedSource(results, board.id, job.source) : renderSource(results, board.id, job.kind);
   if (!source) {
     // Confirm can only ever be satisfied by a picked draft (see renderSource);
     // only Final may also be satisfied by an approved confirmed render.

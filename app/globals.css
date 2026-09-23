@@ -220,6 +220,21 @@ label > span,
   gap: 6px;
 }
 
+/* Generator item fields: the wrapper is a <div> (a <label> may hold only its
+   own control, not also the help <button>), so what `label > span` used to
+   give the label row is applied by class, and the grid item keeps the
+   min-width a <label> wrapper had. */
+.item-field {
+  min-width: 0;
+}
+
+.item-field > .field-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  margin-bottom: 5px;
+}
+
 .help-wrap {
   display: inline-flex;
   position: relative;
@@ -1773,22 +1788,44 @@ body {
   min-height: 62px;
 }
 
-.item-fields label > span {
-  font-size: 11px;
-}
-
 .help-button {
   height: 16px;
   min-height: 16px;
   width: 16px;
 }
 
-.field-help {
-  left: auto;
-  right: 20px;
-  top: -7px;
-  transform-origin: 100% 14px;
-  width: 210px;
+/* Help bubbles in an item card grow up and to the right from the label's own
+   left edge, so they stay inside the card and so inside the scrolling
+   reference tray, whose overflow clipped a bubble that grew leftward out of
+   the first column's card. (Phones keep the fixed bubble set in the
+   .generator-shell media block further down.) */
+.item-fields .field-label {
+  position: relative;
+}
+
+.item-fields .help-wrap {
+  position: static;
+}
+
+.item-fields .field-help {
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: auto;
+  top: auto;
+  transform-origin: 0 100%;
+  width: min(210px, 100%);
+}
+
+/* The item card's <details> clips vertical overflow even while open
+   (details::details-content { overflow-y: clip }, never reset by the [open]
+   rule), and the first field has no room above it inside that box, so its
+   bubble opens downward instead of upward. The :where() keeps this at the
+   same (0,2,0) specificity as the rule above, so the phone rule in the
+   .generator-shell media block below still wins under 760px. */
+.item-fields :where(.item-field:first-child) .field-help {
+  bottom: auto;
+  top: calc(100% + 6px);
+  transform-origin: 0 0;
 }
 
 .investigation-status,
@@ -3326,7 +3363,9 @@ button.site-wordmark {
     position: fixed;
     top: calc(58px + env(safe-area-inset-top));
     right: max(10px, env(safe-area-inset-right));
+    bottom: auto;
     left: max(10px, env(safe-area-inset-left));
+    transform-origin: 100% 14px;
     width: auto;
   }
   .generator-shell summary {

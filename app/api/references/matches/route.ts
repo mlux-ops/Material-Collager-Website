@@ -1,3 +1,5 @@
+import { assertFetchableUrl } from "@/app/lib/autoboard/photo-sources";
+import { fetchPublic, readCapped } from "@/app/lib/guarded-fetch";
 import { errorResponse, readOpenAIResponse, resolveOpenAIKey } from "@/app/lib/openai-server";
 
 export const runtime = "edge";
@@ -81,11 +83,11 @@ function extractOutputText(response: ResponsesOutput) {
   return (response.output ?? []).flatMap((output) => output.content ?? []).map((part) => part.text || "").join("\n");
 }
 
+// One guard for every server-side fetch (app/lib/autoboard/photo-sources.ts).
+// The regex this replaced let [::1], 0.0.0.0 and metadata hosts through.
 function safeHttps(value: unknown) {
   try {
-    const url = new URL(String(value || ""));
-    if (url.protocol !== "https:" || /^(localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(url.hostname)) return "";
-    return url.toString();
+    return assertFetchableUrl(value).toString();
   } catch {
     return "";
   }
@@ -111,15 +113,13 @@ async function hydrateCandidateImage(candidate: ReturnType<typeof normalizeCandi
 
 async function isRemoteImage(url: string) {
   try {
-    const response = await fetch(url, {
+    const { response } = await fetchPublic(url, {
       headers: { Accept: "image/png,image/jpeg,image/webp", Range: "bytes=0-0" },
-      redirect: "follow",
-      signal: AbortSignal.timeout(8_000),
+      timeoutMs: 8_000,
     });
-    const finalUrl = safeHttps(response.url);
     const contentType = (response.headers.get("content-type") || "").split(";")[0].trim();
     await response.body?.cancel();
-    return Boolean(finalUrl && response.ok && ["image/png", "image/jpeg", "image/webp"].includes(contentType));
+    return Boolean(response.ok && ["image/png", "image/jpeg", "image/webp"].includes(contentType));
   } catch {
     return false;
   }
@@ -127,43 +127,23 @@ async function isRemoteImage(url: string) {
 
 async function discoverProductImage(pageUrl: string) {
   try {
-    const response = await fetch(pageUrl, {
+    const { response, url } = await fetchPublic(pageUrl, {
       headers: { Accept: "text/html,application/xhtml+xml" },
-      redirect: "follow",
-      signal: AbortSignal.timeout(10_000),
+      timeoutMs: 10_000,
     });
-    if (!response.ok || !safeHttps(response.url)) return "";
     const contentType = response.headers.get("content-type") || "";
-    if (!contentType.includes("text/html")) return "";
-    // Content-Length is often absent on chunked/compressed responses, so cap
-    // the read itself instead of trusting the header.
-    const html = await readCappedText(response.body, 5 * 1024 * 1024);
+    if (!response.ok || !contentType.includes("text/html")) {
+      await response.body?.cancel();
+      return "";
+    }
+    // Content-Length is often absent on chunked/compressed responses, so the
+    // read itself is capped; metadata tags live near the top of the document.
+    const html = new TextDecoder().decode(await readCapped(response, 5 * 1024 * 1024, { onOverflow: "truncate" }));
     const metadataImage = extractOpenGraphImage(html) || extractJsonLdImage(html);
-    return metadataImage ? safeHttps(new URL(metadataImage, response.url).toString()) : "";
+    return metadataImage ? safeHttps(new URL(metadataImage, url).toString()) : "";
   } catch {
     return "";
   }
-}
-
-// Reads at most `limit` bytes of text, cancelling the stream once reached —
-// metadata tags live near the top of the document anyway.
-async function readCappedText(body: ReadableStream<Uint8Array> | null, limit: number) {
-  if (!body) return "";
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let text = "";
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    text += decoder.decode(value, { stream: true });
-    if (total >= limit) {
-      await reader.cancel();
-      break;
-    }
-  }
-  return text + decoder.decode();
 }
 
 function extractOpenGraphImage(html: string) {

@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NODE_SPECS } from "./nodes/index";
 import { useModalDismiss } from "./useModalDismiss";
+import { useModalFocus } from "./useModalFocus";
 import styles from "./workbench.module.css";
 import type { NodeKind } from "./types";
 
@@ -24,8 +25,23 @@ export type SpotlightProps = {
 export function Spotlight({ kinds, onPick, onClose, title, emptyHint }: SpotlightProps) {
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   // Exit animation for the modal variant (no-op when embedded — onClose absent).
   const { closing, requestClose } = useModalDismiss(() => onClose?.());
+  // dialogRef is only attached when onClose is set (the modal variant below),
+  // so this is a no-op for the embedded panel. onEscape is wired even though
+  // the search input already closes on Escape itself (below): that local
+  // handler only fires while the input has focus, but Tab containment now
+  // keeps focus inside this dialog including on result buttons, where
+  // Escape would otherwise do nothing. When the input DOES have focus, both
+  // handlers fire for the same keypress. With motion, useModalDismiss's
+  // timeoutRef guard drops the repeat; under prefers-reduced-motion it
+  // returns before ever setting timeoutRef, so the guard never engages and
+  // onClose runs twice -- harmless here, since it is setAddOpen(false), and
+  // a repeat call to a state setter is a no-op. initialFocus keeps the
+  // deliberate "focus the search box, not the Close button" behavior this
+  // component already had.
+  useModalFocus(dialogRef, { initialFocus: inputRef, onEscape: requestClose });
 
   const results = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -56,7 +72,7 @@ export function Spotlight({ kinds, onPick, onClose, title, emptyHint }: Spotligh
           if (event.key === "Escape" && onClose) requestClose();
         }}
       />
-      <div className={styles.spotlightList} role="listbox" aria-label="Node types">
+      <div className={styles.spotlightList} role="group" aria-label="Node types">
         {results.map((kind) => (
           <button
             key={kind}
@@ -77,7 +93,15 @@ export function Spotlight({ kinds, onPick, onClose, title, emptyHint }: Spotligh
   if (!onClose) return body;
 
   return (
-    <div className={`${styles.templateOverlay} ${closing ? styles.overlayClosing : ""}`} role="dialog" aria-modal="true" aria-label={title ?? "Add a node"} onClick={requestClose}>
+    <div
+      ref={dialogRef}
+      tabIndex={-1}
+      className={`${styles.templateOverlay} ${closing ? styles.overlayClosing : ""}`}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title ?? "Add a node"}
+      onClick={requestClose}
+    >
       <div className={styles.spotlightModal} onClick={(event) => event.stopPropagation()}>
         <header className={styles.templateHeader}>
           <h2>{title ?? "Add a node"}</h2>

@@ -115,73 +115,69 @@ function validOption(value: unknown, allowed: string[], field: string): string |
 
 // A patch, not a replacement: the UI saves one field at a time, and a partial
 // write that blanked the others would lose a reviewer's notes on every
-// keystroke elsewhere.
+// keystroke elsewhere. So the write names only the columns the patch carries,
+// and notes are merged by SQLite itself (json_patch) instead of being read,
+// merged here and written back. Two saves that overlap — a dropdown change
+// while a typed note is still in flight — must both land, and a
+// read-merge-write lets the later one restore the earlier one's stale snapshot.
+// The insert and the update run as one batch, which D1 executes atomically.
 export async function saveBoardState(
   projectId: string,
   boardId: string,
   patch: BoardStatePatch,
 ): Promise<BoardState> {
   const DB = await ensureBoardStateStorage();
-  const existing =
-    (await DB.prepare("SELECT * FROM autoboard_board_state WHERE project_id = ? AND board_id = ?")
-      .bind(projectId, boardId)
-      .first<StateRow>()) ?? null;
-  const current = existing ? publicState(existing) : emptyBoardState(boardId);
-
-  const notes = { ...current.notes };
+  const now = Date.now();
+  const sets = ["updated_at = ?"];
+  const values: (string | number | null)[] = [now];
+  if (patch.instruction !== undefined) {
+    sets.push("instruction = ?");
+    values.push(String(patch.instruction ?? "").trim());
+  }
+  if (patch.heroItemId !== undefined) {
+    sets.push("hero_item_id = ?");
+    values.push(String(patch.heroItemId ?? "").trim() || null);
+  }
+  if (patch.quality !== undefined) {
+    sets.push("quality = ?");
+    values.push(validOption(patch.quality, SUNBURST_QUALITY_OPTIONS, "quality"));
+  }
+  if (patch.background !== undefined) {
+    sets.push("background = ?");
+    values.push(validOption(patch.background, SUNBURST_BACKGROUND_OPTIONS, "background"));
+  }
   if (patch.notes !== undefined) {
-    if (!patch.notes || typeof patch.notes !== "object" || Array.isArray(patch.notes)) {
-      throw new Error("notes must be an object of slot id to note.");
-    }
-    for (const [slotId, note] of Object.entries(patch.notes as Record<string, unknown>)) {
-      const text = String(note ?? "").trim();
-      // An emptied note is removed rather than stored blank, so selectionHash
-      // sees the same material it saw before the note existed.
-      if (text) notes[slotId] = text;
-      else delete notes[slotId];
-    }
+    // A stored value that is not valid JSON restarts from {} rather than
+    // failing every later save, matching publicState, which reads it as none.
+    sets.push("notes_json = json_patch(CASE WHEN json_valid(notes_json) THEN notes_json ELSE '{}' END, ?)");
+    values.push(JSON.stringify(notesMergePatch(patch.notes)));
   }
 
-  const next: BoardState = {
-    boardId,
-    instruction: patch.instruction === undefined ? current.instruction : String(patch.instruction ?? "").trim(),
-    heroItemId:
-      patch.heroItemId === undefined
-        ? current.heroItemId
-        : String(patch.heroItemId ?? "").trim() || null,
-    quality: patch.quality === undefined ? current.quality : validOption(patch.quality, SUNBURST_QUALITY_OPTIONS, "quality"),
-    background:
-      patch.background === undefined
-        ? current.background
-        : validOption(patch.background, SUNBURST_BACKGROUND_OPTIONS, "background"),
-    notes,
-    updatedAt: Date.now(),
-  };
+  await DB.batch([
+    DB.prepare("INSERT OR IGNORE INTO autoboard_board_state (project_id, board_id, updated_at) VALUES (?, ?, ?)")
+      .bind(projectId, boardId, now),
+    DB.prepare(`UPDATE autoboard_board_state SET ${sets.join(", ")} WHERE project_id = ? AND board_id = ?`)
+      .bind(...values, projectId, boardId),
+  ]);
+  const row = await DB.prepare("SELECT * FROM autoboard_board_state WHERE project_id = ? AND board_id = ?")
+    .bind(projectId, boardId)
+    .first<StateRow>();
+  return row ? publicState(row) : emptyBoardState(boardId);
+}
 
-  await DB.prepare(
-    `INSERT INTO autoboard_board_state
-       (project_id, board_id, instruction, hero_item_id, quality, background, notes_json, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(project_id, board_id) DO UPDATE SET
-       instruction = excluded.instruction,
-       hero_item_id = excluded.hero_item_id,
-       quality = excluded.quality,
-       background = excluded.background,
-       notes_json = excluded.notes_json,
-       updated_at = excluded.updated_at`,
-  )
-    .bind(
-      projectId,
-      boardId,
-      next.instruction,
-      next.heroItemId,
-      next.quality,
-      next.background,
-      JSON.stringify(next.notes),
-      next.updatedAt,
-    )
-    .run();
-  return next;
+// The notes part of a patch as a JSON merge patch (RFC 7396), which is what
+// json_patch applies: a note sets its slot, and an emptied note becomes null,
+// which removes the slot. Removing rather than storing blank keeps
+// selectionHash seeing the same material it saw before the note existed.
+function notesMergePatch(notes: unknown): Record<string, string | null> {
+  if (!notes || typeof notes !== "object" || Array.isArray(notes)) {
+    throw new Error("notes must be an object of slot id to note.");
+  }
+  const merge: Record<string, string | null> = {};
+  for (const [slotId, note] of Object.entries(notes as Record<string, unknown>)) {
+    merge[slotId] = String(note ?? "").trim() || null;
+  }
+  return merge;
 }
 
 export async function deleteProjectBoardState(projectId: string): Promise<void> {

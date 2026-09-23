@@ -6,7 +6,7 @@
 // WorkbenchApp.tsx, which owns the active graphId ref and the load/save
 // effects.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createGraph,
   deleteGraph,
@@ -18,6 +18,7 @@ import {
   type GraphMeta,
 } from "./persistence";
 import { useModalDismiss } from "./useModalDismiss";
+import { useModalFocus } from "./useModalFocus";
 import styles from "./workbench.module.css";
 
 // issue-1: switching graphs may need to flush a pending debounced autosave
@@ -91,6 +92,21 @@ export function GraphManager({ activeGraphId, onSwitch, onCancelPendingSaves, on
   // if the flush fails and onSwitch declines to actually navigate away.
   const [switching, setSwitching] = useState(false);
   const { closing, requestClose } = useModalDismiss(onClose);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  // Guarded, not unconditional: a rename row binds its own Escape (to cancel
+  // just the rename, see its input's onKeyDown below), and useModalFocus's
+  // listener is a document-level capture handler that fires before that
+  // input's own bubble-phase handler ever sees the key. It only calls
+  // preventDefault(), never stopPropagation(), so the rename input's handler
+  // (which doesn't consult defaultPrevented) still runs afterward -- this
+  // guard just skips the dialog's own close while a rename is in progress,
+  // so Escape cancels ONLY the rename, not both. Outside a rename, Escape
+  // closes the dialog like every other Workbench dialog.
+  useModalFocus(dialogRef, {
+    onEscape: () => {
+      if (renamingId === null) requestClose();
+    },
+  });
 
   const refresh = () => {
     void listGraphs().then(setGraphs).catch(() => setGraphs([]));
@@ -113,10 +129,13 @@ export function GraphManager({ activeGraphId, onSwitch, onCancelPendingSaves, on
   };
 
   const handleCreate = async () => {
+    const answer = window.prompt("Name this workbench", "New workbench");
+    // null is Cancel: create, save and switch nothing. An accepted empty name
+    // still gets the default.
+    if (answer === null) return;
     setBusy(true);
     try {
-      const name = window.prompt("Name this workbench", "New workbench") || "New workbench";
-      const graphId = await createGraph(name);
+      const graphId = await createGraph(answer.trim() || "New workbench");
       refresh();
       await doSwitch(graphId);
     } finally {
@@ -167,7 +186,15 @@ export function GraphManager({ activeGraphId, onSwitch, onCancelPendingSaves, on
   };
 
   return (
-    <div className={`${styles.templateOverlay} ${closing ? styles.overlayClosing : ""}`} role="dialog" aria-modal="true" aria-label="Manage workbenches" onClick={requestClose}>
+    <div
+      ref={dialogRef}
+      tabIndex={-1}
+      className={`${styles.templateOverlay} ${closing ? styles.overlayClosing : ""}`}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Manage workbenches"
+      onClick={requestClose}
+    >
       <div className={styles.graphManager} onClick={(event) => event.stopPropagation()}>
         <header className={styles.templateHeader}>
           <h2>Your workbenches</h2>

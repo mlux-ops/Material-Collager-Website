@@ -45,6 +45,7 @@ import {
   FINAL_REQUEST_BODY_BUDGET,
   LAYOUT_MASTER_TRANSPORT_BUDGET,
   base64ImageToObjectUrl,
+  compressedReferenceCount,
   dataUrlFile,
   fileFingerprint,
   formatBytes,
@@ -255,13 +256,16 @@ function createReference(file: File, remote?: ReferenceUploadCache, metadata?: P
   };
 }
 
-function FieldLabel({ text, help }: { text: string; help: string }) {
+// The visible text is the field's <label>; the help button sits beside it,
+// not inside it (a <label> may hold only its own control), and the help text
+// is the input's description.
+function FieldLabel({ text, help, htmlFor }: { text: string; help: string; htmlFor: string }) {
   return (
     <span className="field-label">
-      {text}
+      <label htmlFor={htmlFor}>{text}</label>
       <span className="help-wrap">
         <button type="button" className="help-button" aria-label={`${text}: ${help}`}>?</button>
-        <span className="field-help" role="tooltip">{help}</span>
+        <span className="field-help" role="tooltip" id={`${htmlFor}-help`}>{help}</span>
       </span>
     </span>
   );
@@ -1183,6 +1187,10 @@ export default function Home() {
     setOverallProgress(0);
     setReferenceProgress({});
     let transportFilesForReport: File[] | undefined;
+    // Only true once the Economy POST is actually about to go out, not
+    // during the uploads that precede it — a Cancel before that point is
+    // certain to have reached nothing.
+    let economySubmissionDispatched = false;
     const finalQuality: Quality = quality === "xhigh" || quality === "max" ? quality : "high";
     try {
       const layoutFile = await dataUrlFile(result.dataUrl, "approved-draft.png");
@@ -1209,6 +1217,7 @@ export default function Home() {
         };
         validateCollageRequest(economyPayload);
         setWorkingStage("Sending final render to Economy");
+        economySubmissionDispatched = true;
         const queued = await fetch("/api/economy", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1290,15 +1299,37 @@ export default function Home() {
       const costMessage = typeof response.costUsd === "number" && Number.isFinite(response.costUsd)
         ? `Usage cost: $${response.costUsd.toFixed(4)} based on completed usage.`
         : "Generation cost unavailable because completed usage was not returned.";
+      // Only claim full quality when every product reference went out untouched.
+      const compressed = compressedReferenceCount(productFiles, transportFiles);
+      const referenceNote = compressed === 0
+        ? "Full-quality product references were used."
+        : `${compressed} of ${productFiles.length} product references were compressed to fit this request's size limit, so their finest detail and any transparency may be reduced. The Economy final render uploads each reference at full quality.`;
       setPanelText([
-        `Final ${finalFormat} render complete${response.notice ? "" : ` at ${finalSizeLabel}`}. Full-quality product references were used.`,
+        `Final ${finalFormat} render complete${response.notice ? "" : ` at ${finalSizeLabel}`}. ${referenceNote}`,
         costMessage,
         response.notice,
       ].filter(Boolean).join("\n\n"));
       await refreshJobs();
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        setPanelText("Final rendering cancelled. Your draft and references are unchanged.");
+        // Economy's paid submission may have already reached the server (and
+        // OpenAI) once the POST was actually dispatched — unlike the
+        // immediate path, "your draft and references are unchanged" would be
+        // a guess, not a fact, from that point on. Before dispatch (still
+        // uploading references), nothing has reached the server yet, so the
+        // plain message still holds.
+        setPanelText(
+          mode === "economy" && economySubmissionDispatched
+            ? "Final rendering cancelled. A batch may still have been created — check History before resubmitting."
+            : "Final rendering cancelled. Your draft and references are unchanged.",
+        );
+        // A batch that reached the server before the abort landed still
+        // needs its row shown in History right away, not after the next
+        // poll — a resubmit from someone who sees nothing new would buy a
+        // second batch. Refreshing costs nothing when there is none. Not
+        // awaited: the UI unlocks (finally, below) as soon as the panel text
+        // is set, instead of staying locked until History reloads.
+        if (mode === "economy") void refreshJobs();
       } else {
         // Surface the failed request's diagnostics so Troubleshooting shows the
         // failing stage instead of stale data from the previous draft render.
@@ -1340,6 +1371,12 @@ export default function Home() {
           });
         }
         setPanelText(`Final rendering failed: ${error instanceof Error ? error.message : "Unknown error."}`);
+        // A failed Economy submit can still leave a history row behind (see
+        // POST /api/economy) — with its own guidance on what to check before
+        // resubmitting. Show it immediately rather than after the next poll.
+        // Not awaited: same reason as the abort branch above — the UI
+        // shouldn't stay locked until History reloads.
+        if (mode === "economy") void refreshJobs();
       }
     } finally {
       setIsWorking(false);
@@ -1904,26 +1941,26 @@ export default function Home() {
                 <details className="item-details">
                   <summary>Item details</summary>
                   <div className="item-fields">
-                    <label>
-                      <FieldLabel text="Item type" help="What this object contributes to the collage, such as main bathroom tile, vanity faucet, or countertop stone." />
-                      <input value={item.role} onChange={(event) => updateItem(item.uiKey, { role: event.target.value })} />
-                    </label>
-                    <label>
-                      <FieldLabel text="Product / model" help="The exact collection, model number, or SKU when known. Leave blank when the image does not prove it." />
-                      <input value={item.name || ""} onChange={(event) => updateItem(item.uiKey, { name: event.target.value })} />
-                    </label>
-                    <label>
-                      <FieldLabel text="Brand" help="The manufacturer name, not the retailer or showroom." />
-                      <input value={item.brand || ""} onChange={(event) => updateItem(item.uiKey, { brand: event.target.value })} />
-                    </label>
-                    <label className="wide-field">
-                      <FieldLabel text="Finish / color" help="Use the manufacturer finish name when known, or describe the visible material color and sheen." />
-                      <input value={item.finish || ""} onChange={(event) => updateItem(item.uiKey, { finish: event.target.value })} />
-                    </label>
-                    <label className="wide-field">
-                      <FieldLabel text="Generation notes" help="Add exceptions the image cannot communicate, such as which face to show, details to preserve, or objects that must not appear." />
-                      <textarea value={item.notes || ""} onChange={(event) => updateItem(item.uiKey, { notes: event.target.value })} />
-                    </label>
+                    <div className="item-field">
+                      <FieldLabel htmlFor={`${item.uiKey}-role`} text="Item type" help="What this object contributes to the collage, such as main bathroom tile, vanity faucet, or countertop stone." />
+                      <input id={`${item.uiKey}-role`} aria-describedby={`${item.uiKey}-role-help`} value={item.role} onChange={(event) => updateItem(item.uiKey, { role: event.target.value })} />
+                    </div>
+                    <div className="item-field">
+                      <FieldLabel htmlFor={`${item.uiKey}-name`} text="Product / model" help="The exact collection, model number, or SKU when known. Leave blank when the image does not prove it." />
+                      <input id={`${item.uiKey}-name`} aria-describedby={`${item.uiKey}-name-help`} value={item.name || ""} onChange={(event) => updateItem(item.uiKey, { name: event.target.value })} />
+                    </div>
+                    <div className="item-field">
+                      <FieldLabel htmlFor={`${item.uiKey}-brand`} text="Brand" help="The manufacturer name, not the retailer or showroom." />
+                      <input id={`${item.uiKey}-brand`} aria-describedby={`${item.uiKey}-brand-help`} value={item.brand || ""} onChange={(event) => updateItem(item.uiKey, { brand: event.target.value })} />
+                    </div>
+                    <div className="item-field wide-field">
+                      <FieldLabel htmlFor={`${item.uiKey}-finish`} text="Finish / color" help="Use the manufacturer finish name when known, or describe the visible material color and sheen." />
+                      <input id={`${item.uiKey}-finish`} aria-describedby={`${item.uiKey}-finish-help`} value={item.finish || ""} onChange={(event) => updateItem(item.uiKey, { finish: event.target.value })} />
+                    </div>
+                    <div className="item-field wide-field">
+                      <FieldLabel htmlFor={`${item.uiKey}-notes`} text="Generation notes" help="Add exceptions the image cannot communicate, such as which face to show, details to preserve, or objects that must not appear." />
+                      <textarea id={`${item.uiKey}-notes`} aria-describedby={`${item.uiKey}-notes-help`} value={item.notes || ""} onChange={(event) => updateItem(item.uiKey, { notes: event.target.value })} />
+                    </div>
                   </div>
                 </details>
               </article>

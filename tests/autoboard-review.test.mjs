@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -11,6 +12,7 @@ import {
   buildRoomIndex,
   isStaleCandidate,
   libraryOptionsForSlot,
+  recordImageDigest,
   removeSlot,
   replaceItemImage,
   resetSelection,
@@ -557,12 +559,30 @@ test("POST /api/replace-image swaps a real row's photo and returns the updated i
     // Persisted to plan.json, same as every other mutating endpoint.
     const persisted = JSON.parse(readFileSync(planPath, "utf8"));
     assert.equal(persisted.boards[0].items[0].images[0], data.item.images[0]);
+    // Same path, new bytes: the digest is what lets selectionHash see it.
+    assert.equal(
+      persisted.boards[0].imageDigests?.[data.item.images[0]],
+      createHash("sha256").update(ONE_BY_ONE_PNG).digest("hex"),
+    );
   } finally {
     if (server) await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     rmSync(runDir, { recursive: true, force: true });
     rmSync(libraryRoot, { recursive: true, force: true });
     rmSync(path.join(uploadedImagesRoot, testRowId), { recursive: true, force: true });
   }
+});
+
+test("recordImageDigest stamps the replaced path on every board, so every board using it can go stale", () => {
+  const shared = "/lib/tiles/T1.png";
+  const plan = { boards: [
+    { id: "kitchen", items: [{ slotId: "floor_tile", images: [shared] }] },
+    { id: "bath", items: [{ slotId: "wall_tile", images: [shared] }] },
+    { id: "closet", items: [{ slotId: "shelf", images: ["/lib/other.png"] }] },
+  ] };
+  recordImageDigest(plan, shared, "a".repeat(64));
+  for (const entry of plan.boards) assert.equal(entry.imageDigests[shared], "a".repeat(64));
+  recordImageDigest(plan, shared, "b".repeat(64));
+  assert.equal(plan.boards[1].imageDigests[shared], "b".repeat(64));
 });
 
 const PNG_BYTES = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");

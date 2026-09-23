@@ -8,6 +8,7 @@ import { validateCollageRequest } from "../app/lib/collage.ts";
 import { csvObjects, emptyGaps, loadOfflineRows } from "../scripts/autoboard/lib/source.mjs";
 import { buildBoards, loadBuildLog, makeDiskImageResolver } from "../scripts/autoboard/lib/match.mjs";
 import { boardPayload, DEFAULT_VARIANTS } from "../scripts/autoboard/lib/variants.mjs";
+import { downloadImage } from "../scripts/autoboard/lib/download-image.mjs";
 import {
   fetchReferenceImages,
   folderFor,
@@ -316,5 +317,129 @@ test("fetchReferenceImages records a download failure instead of throwing", asyn
     assert.match(summary.failures[0].error, /404/);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Stands in for the network behind the DEFAULT download. Like a real fetch it
+// follows a redirect itself unless asked for redirect: "manual", so `requested`
+// is every URL a real run would have contacted — which is what these are about:
+// Node's fetch follows a vendor's redirect to loopback without complaint.
+function fakeNetwork(t, routes) {
+  const requested = [];
+  const fakeFetch = async (input, init = {}) => {
+    const url = String(input);
+    requested.push(url);
+    const response = routes[url]?.() ?? new Response("not found", { status: 404 });
+    const location = response.headers.get("location");
+    if (response.status >= 300 && response.status < 400 && location && init.redirect !== "manual") {
+      return fakeFetch(new URL(location, url), init);
+    }
+    return response;
+  };
+  t.mock.method(globalThis, "fetch", fakeFetch);
+  return requested;
+}
+
+const seafoamAt = (url) => ({ images: { "elm-palette-seafoam": { files: [{ url, kind: "face" }] } } });
+
+test("the default download never requests a private host a vendor URL redirects to", async (t) => {
+  const root = tempRoot();
+  try {
+    const definition = await belmont();
+    await scaffoldProject({ definition, root });
+    const requested = fakeNetwork(t, {
+      "https://cdn.vendor.example/seafoam.jpg": () =>
+        new Response(null, { status: 302, headers: { location: "https://169.254.169.254/latest/meta-data/" } }),
+      "https://169.254.169.254/latest/meta-data/": () => new Response(PNG, { headers: { "content-type": "image/png" } }),
+    });
+    const summary = await fetchReferenceImages({ definition, manifest: seafoamAt("https://cdn.vendor.example/seafoam.jpg"), root });
+    assert.deepEqual(requested, ["https://cdn.vendor.example/seafoam.jpg"]);
+    assert.equal(summary.downloaded, 0);
+    assert.match(summary.failures[0].error, /private address/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the default download refuses a manifest URL that is not public https, without requesting it", async (t) => {
+  const root = tempRoot();
+  try {
+    const definition = await belmont();
+    await scaffoldProject({ definition, root });
+    const requested = fakeNetwork(t, {});
+    for (const url of ["http://127.0.0.1:4790/seafoam.jpg", "https://localhost/seafoam.jpg", "https://10.0.0.8/seafoam.jpg"]) {
+      const summary = await fetchReferenceImages({ definition, manifest: seafoamAt(url), root });
+      assert.equal(summary.failures.length, 1, url);
+    }
+    assert.deepEqual(requested, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the default download still follows a vendor's redirect to another public host", async (t) => {
+  const root = tempRoot();
+  try {
+    const definition = await belmont();
+    await scaffoldProject({ definition, root });
+    const requested = fakeNetwork(t, {
+      "https://www.vendor.example/media/seafoam.jpg": () =>
+        new Response(null, { status: 301, headers: { location: "https://cdn.vendor.example/seafoam.jpg" } }),
+      "https://cdn.vendor.example/seafoam.jpg": () => new Response(PNG, { headers: { "content-type": "image/jpeg" } }),
+    });
+    const summary = await fetchReferenceImages({ definition, manifest: seafoamAt("https://www.vendor.example/media/seafoam.jpg"), root });
+    assert.deepEqual(summary.failures, []);
+    assert.equal(summary.downloaded, 1);
+    assert.deepEqual(requested, ["https://www.vendor.example/media/seafoam.jpg", "https://cdn.vendor.example/seafoam.jpg"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the default download cancels an oversized photo instead of buffering it whole", async (t) => {
+  const root = tempRoot();
+  try {
+    const definition = await belmont();
+    await scaffoldProject({ definition, root });
+    const mib = new Uint8Array(1024 * 1024);
+    let sent = 0;
+    fakeNetwork(t, {
+      // No Content-Length, so only reading the body can tell how big it is.
+      "https://cdn.vendor.example/seafoam.jpg": () =>
+        new Response(
+          new ReadableStream(
+            {
+              pull(controller) {
+                if (sent === 24) return controller.close();
+                sent += 1;
+                controller.enqueue(mib);
+              },
+            },
+            { highWaterMark: 0 },
+          ),
+          { headers: { "content-type": "image/jpeg" } },
+        ),
+    });
+    const summary = await fetchReferenceImages({ definition, manifest: seafoamAt("https://cdn.vendor.example/seafoam.jpg"), root });
+    assert.equal(summary.downloaded, 0);
+    assert.match(summary.failures[0].error, /MB/);
+    assert.ok(sent < 24, `read ${sent} of 24 MiB`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a stalled vendor server fails its download instead of hanging the run", { timeout: 5_000 }, async (t) => {
+  t.mock.method(globalThis, "fetch", (input, init) =>
+    new Promise((resolve, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason))));
+  // AbortSignal.timeout's timer is unref'd, and with fetch mocked there is no
+  // socket either, so nothing holds the event loop open: on Linux node:test
+  // cancels the test before the 50 ms timeout can fire. Hold it open until the
+  // download settles.
+  const keepAlive = setInterval(() => {}, 1_000);
+  try {
+    await assert.rejects(downloadImage("https://cdn.vendor.example/seafoam.jpg", { timeoutMs: 50 }), { name: "TimeoutError" });
+  } finally {
+    clearInterval(keepAlive);
   }
 });

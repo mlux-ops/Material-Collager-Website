@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { isStaleSubmitting, staleSubmittingGuidance } from "./economy-submission-status.ts";
 import { calculateSunburstUsageCost } from "./sunburst.ts";
 
 export type RenderKind = "draft" | "studio" | "final" | "repair";
@@ -188,9 +189,12 @@ export async function persistGenerationOutput(input: {
   const outputKey = existing?.output_key || `generation-outputs/${id}.${outputExtension(input.filename)}`;
   const now = Date.now();
   const title = outputTitle(input.filename, input.collageType);
-  const model = input.model ?? stringField(input.payload, "model");
-  const quality = input.quality ?? stringField(input.payload, "quality");
-  const background = input.background ?? stringField(input.payload, "background");
+  // Unknown stays unknown: D1 refuses to bind undefined, and a Workbench save
+  // carries no generation metadata at all. null is the honest value — never a
+  // guessed model or quality.
+  const model = input.model ?? stringField(input.payload, "model") ?? null;
+  const quality = input.quality ?? stringField(input.payload, "quality") ?? null;
+  const background = input.background ?? stringField(input.payload, "background") ?? null;
   const outputFormat = input.outputFormat ?? stringField(input.payload, "outputFormat") ?? outputExtension(input.filename);
   const costUsd = calculateSunburstUsageCost(input.usage);
   // Never persist the caller's OpenAI API key with the job record.
@@ -226,33 +230,42 @@ export async function persistGenerationOutput(input: {
         id,
       ).run();
   } else {
-    await DB.prepare(`INSERT INTO generation_jobs
-      (id, mode, status, openai_batch_id, output_key, filename, format, prompt, payload_json, reference_ids_json,
-       render_kind, collage_type, library_visible, title, estimated_usd, usage_json, qa_json, error,
-       model, quality, background, output_format, cost_usd, created_at, updated_at, expires_at)
-       VALUES (?, 'immediate', 'completed', NULL, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind(
-        id,
-        outputKey,
-        input.filename,
-        input.format,
-        input.prompt,
-        payloadJson,
-        input.renderKind,
-        input.collageType,
-        input.renderKind === "final" ? 1 : 0,
-        title,
-        JSON.stringify(input.usage ?? {}),
-        input.qa ? JSON.stringify(input.qa) : null,
-        model,
-        quality,
-        background,
-        outputFormat,
-        costUsd,
-        now,
-        now,
-        now + RETENTION_MS,
-      ).run();
+    try {
+      await DB.prepare(`INSERT INTO generation_jobs
+        (id, mode, status, openai_batch_id, output_key, filename, format, prompt, payload_json, reference_ids_json,
+         render_kind, collage_type, library_visible, title, estimated_usd, usage_json, qa_json, error,
+         model, quality, background, output_format, cost_usd, created_at, updated_at, expires_at)
+         VALUES (?, 'immediate', 'completed', NULL, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(
+          id,
+          outputKey,
+          input.filename,
+          input.format,
+          input.prompt,
+          payloadJson,
+          input.renderKind,
+          input.collageType,
+          input.renderKind === "final" ? 1 : 0,
+          title,
+          JSON.stringify(input.usage ?? {}),
+          input.qa ? JSON.stringify(input.qa) : null,
+          model,
+          quality,
+          background,
+          outputFormat,
+          costUsd,
+          now,
+          now,
+          now + RETENTION_MS,
+        ).run();
+    } catch (error) {
+      // The object above is new and only this call knows its key. Without a
+      // row nothing would ever show, expire or delete it (cleanupExpiredJobs
+      // sweeps by row), so it goes too. The replace path keeps its object:
+      // that key still belongs to the existing row.
+      await bucket.delete(outputKey).catch(() => undefined);
+      throw error;
+    }
   }
   const row = await DB.prepare("SELECT * FROM generation_jobs WHERE id = ?").bind(id).first<JobRow>();
   if (!row) throw new Error("The generated output was stored without a history record.");
@@ -289,10 +302,17 @@ export async function listLibraryJobs() {
 }
 
 export function publicJob(row: JobRow): GenerationJob {
+  // A 'submitting' row whose paid call was interrupted (the request was
+  // cancelled, or the UPDATE that would have recorded its outcome itself
+  // failed — see POST in app/api/economy/route.ts) never moves on its own:
+  // it has no batch id yet, so the poller never picks it up. Read one old
+  // enough to be sure of that as failed instead of pending forever. The row
+  // itself is untouched; only what a reader is told changes.
+  const stale = isStaleSubmitting(row.status, row.updated_at);
   return {
     id: row.id,
     mode: row.mode,
-    status: row.status,
+    status: stale ? "failed" : row.status,
     openaiBatchId: row.openai_batch_id,
     outputKey: row.output_key,
     filename: row.filename,
@@ -309,7 +329,7 @@ export function publicJob(row: JobRow): GenerationJob {
     outputFormat: row.output_format ?? null,
     usage: parseJson(row.usage_json),
     qa: parseJson(row.qa_json),
-    error: row.error,
+    error: stale ? staleSubmittingGuidance(row.id) : row.error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     expiresAt: row.expires_at,

@@ -167,6 +167,18 @@ export function replaceItemImage({ board, slotId, imagePath }) {
   return item;
 }
 
+// A replaced photo keeps its path (uploads.mjs writes a deterministic name), so
+// selectionHash can only see the new pixels through a digest. Recorded on
+// every board: whichever board uses this file — now, or after a later pick —
+// must hash the new bytes, not only the board the replacement was made from.
+// A board that never uses the path is unaffected; selectionHash only looks up
+// the images an item has.
+export function recordImageDigest(plan, imagePath, digest) {
+  for (const board of plan.boards) {
+    board.imageDigests = { ...(board.imageDigests ?? {}), [imagePath]: digest };
+  }
+}
+
 // The most recent slot-override timestamp on a board, or null if it's never
 // been touched since it was planned. A board's items can change after a
 // candidate was already rendered (most often via the review UI swapping a

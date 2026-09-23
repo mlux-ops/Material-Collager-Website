@@ -144,6 +144,18 @@ export type RenderDeps = {
    * network request is made to it.
    */
   origin: string;
+  /**
+   * The incoming request's signal; once dispatched, the generate route passes
+   * it on to the image API, and aborting can never un-bill a request OpenAI
+   * already accepted. In principle this stops a render the reviewer has
+   * already abandoned before anything is read or paid for -- but an incoming
+   * request's `signal` only fires on a client disconnect when workerd's
+   * `enable_request_signal` compatibility flag is on, and wrangler.jsonc does
+   * not set it (see CLAUDE.md Gotchas). So today this fires for an injected
+   * signal (the tests abort their own AbortController), not a real abandoned
+   * request in production.
+   */
+  signal?: AbortSignal;
 };
 
 /**
@@ -159,6 +171,7 @@ export async function renderBoardDraft(
   instruction: string,
   options: { variant?: Variant; kind?: RenderKind } & RenderDeps,
 ): Promise<BoardRender> {
+  options.signal?.throwIfAborted();
   const DB = await ensureRenderStorage();
   const kind = options.kind ?? "draft";
   const variant = options.variant ?? DEFAULT_VARIANTS[0];
@@ -193,7 +206,7 @@ export async function renderBoardDraft(
   }
 
   const response = await options.generate(
-    new Request(`${options.origin}/api/generate`, { method: "POST", body: form }),
+    new Request(`${options.origin}/api/generate`, { method: "POST", body: form, signal: options.signal }),
   );
   if (!response.ok) {
     const body = await response.text().catch(() => "");
@@ -266,14 +279,19 @@ export async function setRenderStatus(renderId: string, status: unknown): Promis
   const DB = await ensureRenderStorage();
   const row = await DB.prepare("SELECT * FROM autoboard_renders WHERE id = ?").bind(renderId).first<RenderRow>();
   if (!row) return null;
+  // One selection per board and kind. Clearing the others and marking this one
+  // go out as ONE batch, which D1 runs as a transaction: two picks made at the
+  // same time can no longer interleave into two selections, and a failure
+  // part-way can no longer leave the board with none.
+  const statements: D1PreparedStatement[] = [];
   if (status !== "candidate") {
-    await DB.prepare(
-      "UPDATE autoboard_renders SET status = 'candidate' WHERE project_id = ? AND board_id = ? AND kind = ? AND id != ?",
-    )
-      .bind(row.project_id, row.board_id, row.kind, renderId)
-      .run();
+    statements.push(
+      DB.prepare("UPDATE autoboard_renders SET status = 'candidate' WHERE project_id = ? AND board_id = ? AND kind = ? AND id != ?")
+        .bind(row.project_id, row.board_id, row.kind, renderId),
+    );
   }
-  await DB.prepare("UPDATE autoboard_renders SET status = ? WHERE id = ?").bind(status, renderId).run();
+  statements.push(DB.prepare("UPDATE autoboard_renders SET status = ? WHERE id = ?").bind(status, renderId));
+  await DB.batch(statements);
   return publicRender({ ...row, status: status as RenderStatus });
 }
 

@@ -1,6 +1,6 @@
 // tests/autoboard-render.test.mjs
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -261,6 +261,49 @@ test("ensureRenders creates the per-board record once and nextRenderId zero-pads
   renders.drafts.push({ id: "d-0001" }, { id: "d-0002" });
   assert.equal(nextRenderId(renders, "d"), "d-0003");
   assert.equal(nextRenderId(renders, "c"), "c-0001");
+});
+
+test("nextRenderId never reissues an id, even after the newest render is deleted or the board is reset", () => {
+  const results = { candidates: {}, finals: {} };
+  const renders = ensureRenders(results, "b");
+  for (let n = 0; n < 3; n++) renders.drafts.push({ id: nextRenderId(renders, "d") });
+  assert.deepEqual(renders.drafts.map((entry) => entry.id), ["d-0001", "d-0002", "d-0003"]);
+  renders.drafts.splice(1, 1); // delete d-0002 from the middle
+  const fourth = nextRenderId(renders, "d");
+  assert.equal(fourth, "d-0004");
+  renders.drafts.push({ id: fourth });
+  renders.drafts.pop(); // delete d-0004, the newest
+  assert.equal(nextRenderId(renders, "d"), "d-0005");
+  renders.drafts = []; // what resetNonFinalRenders leaves behind
+  assert.equal(nextRenderId(renders, "d"), "d-0006");
+});
+
+test("a render record written before the high-water mark existed continues after its highest surviving id", () => {
+  const renders = { instruction: "", pickedDraftId: null, approvedConfirmedId: null, drafts: [{ id: "d-0001" }, { id: "d-0007" }], confirmed: [], finals: [] };
+  assert.equal(nextRenderId(renders, "d"), "d-0008");
+  assert.equal(nextRenderId(renders, "c"), "c-0001");
+});
+
+test("deleting a middle draft and rendering again leaves every surviving file's bytes untouched", async (t) => {
+  const { runDir, plan, results } = scratchRun();
+  const boardId = plan.boards[0].id;
+  let call = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    call += 1;
+    // A different trailing byte per render, so an overwrite is detectable.
+    const image = Buffer.concat([PNG, Buffer.from([call])]).toString("base64");
+    return Response.json({ ok: true, imageBase64: image, mimeType: "image/png", jobId: `job-${call}` });
+  });
+  const ctx = { plan, results, runDir, baseUrl: "https://w.example", accessHeaders: {}, signal: new AbortController().signal, onProgress: () => {}, persist: async () => {} };
+  await runRenderJob({ jobId: "q1", boardId, kind: "draft", variant: "A", count: 3, instructionSnapshot: "", selectionHash: "h" }, ctx);
+  const bytesOf = (id) => readFileSync(path.join(runDir, results.renders[boardId].drafts.find((entry) => entry.id === id).path));
+  const third = bytesOf("d-0003");
+  await removeRender(results, runDir, boardId, "draft", "d-0002");
+  await runRenderJob({ jobId: "q2", boardId, kind: "draft", variant: "A", count: 1, instructionSnapshot: "", selectionHash: "h" }, ctx);
+  const ids = results.renders[boardId].drafts.map((entry) => entry.id);
+  assert.deepEqual(ids, ["d-0001", "d-0003", "d-0004"]);
+  assert.deepEqual(bytesOf("d-0003"), third);
+  rmSync(runDir, { recursive: true, force: true });
 });
 
 test("saveRenderImage writes under boards/<board>/<kind dir> and returns a run-relative forward-slash path", async () => {
@@ -541,5 +584,40 @@ test("runRenderJob renders a stale final anyway when job.force is true", async (
   await runRenderJob({ jobId: "q2", boardId, kind: "final", selectionHash: "new", force: true }, ctx);
   assert.equal(results.renders[boardId].finals.length, 1);
   assert.equal(results.finals[`${boardId}--A`].jobId, "job-force");
+  rmSync(runDir, { recursive: true, force: true });
+});
+
+test("a queued final renders from the source it was queued against, not whatever is picked when it runs", async (t) => {
+  const { runDir, plan, results } = scratchRun();
+  const boardId = plan.boards[0].id;
+  const fresh = selectionHash(plan.boards[0], "");
+  for (const id of ["d-0001", "d-0002"]) {
+    const rel = await saveRenderImage(runDir, boardId, "draft", id, PNG.toString("base64"));
+    recordDraft(results, boardId, { id, variant: "A", index: 1, path: rel, jobId: id, durationMs: 1, selectionHash: fresh, instruction: "", itemNotes: {} });
+  }
+  await pickDraft(results, runDir, boardId, "d-0001");
+  const queuedFrom = { kind: "draft", id: "d-0001" };
+  await pickDraft(results, runDir, boardId, "d-0002"); // re-picked while the final waited in the queue
+  t.mock.method(globalThis, "fetch", async () => Response.json({ ok: true, imageBase64: PNG.toString("base64"), mimeType: "image/png", jobId: "job-final", libraryVisible: true }));
+  const ctx = { plan, results, runDir, baseUrl: "https://w.example", accessHeaders: {}, signal: new AbortController().signal, onProgress: () => {}, persist: async () => {} };
+  await runRenderJob({ jobId: "q", boardId, kind: "final", instructionSnapshot: "", selectionHash: fresh, source: queuedFrom }, ctx);
+  assert.equal(results.renders[boardId].finals[0].fromRenderId, "d-0001");
+  rmSync(runDir, { recursive: true, force: true });
+});
+
+test("a queued final whose source was removed stops with 409 before any paid call", async (t) => {
+  const { runDir, plan, results } = scratchRun();
+  const boardId = plan.boards[0].id;
+  const rel = await saveRenderImage(runDir, boardId, "draft", "d-0002", PNG.toString("base64"));
+  recordDraft(results, boardId, { id: "d-0002", variant: "A", index: 1, path: rel, jobId: "j", durationMs: 1, selectionHash: selectionHash(plan.boards[0], ""), instruction: "", itemNotes: {} });
+  await pickDraft(results, runDir, boardId, "d-0002");
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async () => { calls += 1; return Response.json({ ok: true }); });
+  const ctx = { plan, results, runDir, baseUrl: "https://w.example", accessHeaders: {}, signal: new AbortController().signal, onProgress: () => {}, persist: async () => {} };
+  await assert.rejects(
+    runRenderJob({ jobId: "q", boardId, kind: "final", instructionSnapshot: "", selectionHash: "h", source: { kind: "draft", id: "d-0001" } }, ctx),
+    (error) => error.status === 409 && /was removed/.test(error.message),
+  );
+  assert.equal(calls, 0);
   rmSync(runDir, { recursive: true, force: true });
 });

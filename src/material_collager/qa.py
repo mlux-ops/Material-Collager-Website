@@ -159,5 +159,6 @@ def _make_openai_client() -> Any:
         raise RuntimeError(
             "The `openai` package is required. Install with: python -m pip install -e ."
         ) from exc
-    return OpenAI()
+    # QA review calls are paid too: same rule as the image client (client.py).
+    return OpenAI(max_retries=0)
 

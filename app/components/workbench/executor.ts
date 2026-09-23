@@ -40,6 +40,17 @@ function currentNode(id: string): WorkbenchNode {
   return node;
 }
 
+// The estimate and blocker passes read one snapshot (their GraphContext), so
+// they look nodes up there. currentNode scans the live store array — O(N) per
+// scheduled node — and these passes run on every render of the Run Workflow
+// button, drags included. Execution keeps using currentNode: it must see
+// statuses that change mid-run.
+function snapshotNode(context: GraphContext, id: string): WorkbenchNode {
+  const node = context.nodes.get(id);
+  if (!node) throw new Error("A connected node was removed mid-run.");
+  return node;
+}
+
 // Ordered upstream values arriving at one input port.
 function inputValues(context: GraphContext, nodeId: string, portId: string): NodeOutputValue[] {
   const edges = (context.incoming.get(nodeId) ?? []).filter((edge) => edge.targetHandle === portId);
@@ -62,7 +73,7 @@ function inputValues(context: GraphContext, nodeId: string, portId: string): Nod
 // stale-run aggregate and the per-node connected-image display always agree
 // on what a run would actually bill.
 function countConnectedImages(context: GraphContext, nodeId: string): number {
-  const node = currentNode(nodeId);
+  const node = snapshotNode(context, nodeId);
   const spec = specFor(node.data.kind);
   const imagePortIds = new Set(
     spec.inputs
@@ -73,7 +84,7 @@ function countConnectedImages(context: GraphContext, nodeId: string): number {
   let total = 0;
   for (const edge of context.incoming.get(nodeId) ?? []) {
     if (!imagePortIds.has(edge.targetHandle ?? "")) continue;
-    const source = currentNode(edge.source);
+    const source = snapshotNode(context, edge.source);
     const run = activeRunOf(source);
     if (!run) continue;
     const fallbackPort = specFor(source.data.kind).outputs[0]?.id ?? "";
@@ -84,10 +95,17 @@ function countConnectedImages(context: GraphContext, nodeId: string): number {
   return total;
 }
 
-function signatureContextFor(context: GraphContext, draft: boolean): SignatureContext {
+function signatureContextFor(
+  context: GraphContext,
+  draft: boolean,
+  liveNode?: (id: string) => WorkbenchNode | undefined,
+): SignatureContext {
+  // The estimate reads signatures from a snapshot context; a run reads live
+  // because a signature computed late in execution must see the runIds
+  // produced earlier in the same run.
   return {
     incoming: context.incoming,
-    liveNode: (id) => useWorkbenchStore.getState().nodes.find((candidate) => candidate.id === id),
+    liveNode: liveNode ?? ((id) => useWorkbenchStore.getState().nodes.find((candidate) => candidate.id === id)),
     draft,
   };
 }
@@ -287,13 +305,13 @@ function scheduledOrder(context: GraphContext, targetIds: string[]): string[] {
 export function estimateStaleCost(targetIds: string[]): { totalUsd: number | null; staleCount: number; costUnknown: boolean } {
   const { nodes, edges, draft } = useWorkbenchStore.getState();
   const context = buildContext(nodes, edges, new AbortController().signal);
-  const signatureContext = signatureContextFor(context, draft);
+  const signatureContext = signatureContextFor(context, draft, (id) => context.nodes.get(id));
   let total = 0;
   let counted = false;
   let costUnknown = false;
   let staleCount = 0;
   for (const id of scheduledOrder(context, targetIds)) {
-    const node = currentNode(id);
+    const node = snapshotNode(context, id);
     if (!isExecutable(node.data.kind) || isPinned(node)) continue;
     const signature = signatureFor(signatureContext, node);
     const cached = activeRunOf(node);
@@ -333,7 +351,7 @@ export function unmetRequiredInputs(targetIds: string[]): Array<{ nodeId: string
   const context = buildContext(nodes, edges, new AbortController().signal);
   const problems: Array<{ nodeId: string; label: string; missing: string[] }> = [];
   for (const id of scheduledOrder(context, targetIds)) {
-    const node = currentNode(id);
+    const node = snapshotNode(context, id);
     const spec = specFor(node.data.kind);
     const connected = new Set((context.incoming.get(id) ?? []).map((edge) => edge.targetHandle));
     // C1: a required port can also be satisfied by a param value with no

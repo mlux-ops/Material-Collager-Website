@@ -97,12 +97,22 @@ export function renderRecordIsStale(
 // stale detection and revision bumps. Bookkeeping fields (overriddenAt,
 // title, provenance, imageMeta) deliberately excluded.
 export function selectionHash(board: Board, instruction: unknown = ""): string {
+  const digests = board.imageDigests ?? {};
   const material = {
     instruction: String(instruction ?? "").trim(),
     // item.notes goes through modelNotes so an edit to a legacy provenance
     // sentence it strips anyway (see modelNotes/LEGACY_NOTE_PATTERNS in
     // variants.mjs) doesn't mark an otherwise-unchanged draft stale.
-    items: orderedBoardItems(board).map((item) => [item.slotId, item.images ?? [], modelNotes(item.notes) ?? "", String(item.note ?? "").trim()]),
+    items: orderedBoardItems(board).map((item) => {
+      const images = item.images ?? [];
+      const entry: unknown[] = [item.slotId, images, modelNotes(item.notes) ?? "", String(item.note ?? "").trim()];
+      // A photo replaced in place keeps its path, so only its digest shows the
+      // pixels changed. Appended only when one of this item's images has a
+      // digest, so every hash computed before digests existed is unchanged.
+      const imageDigests = images.map((image) => digests[image] ?? null);
+      if (imageDigests.some(Boolean)) entry.push(imageDigests);
+      return entry;
+    }),
   };
   return sha1Hex(JSON.stringify(material));
 }

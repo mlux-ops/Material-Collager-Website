@@ -87,6 +87,18 @@ test("enqueue threads force through to the job execute() receives and to snapsho
   await queue.idle;
 });
 
+test("enqueue keeps the source a confirm/final was queued against on the job, defaulting to null", async () => {
+  const seen = [];
+  const execute = (job) => { seen.push(job.source); return Promise.resolve(); };
+  const queue = new RenderQueue({ execute });
+  queue.enqueue({ boardId: "a", kind: "final", source: { kind: "draft", id: "d-0001" } });
+  await tick();
+  queue.enqueue({ boardId: "b", kind: "draft", variant: "A", count: 1 });
+  await tick();
+  assert.deepEqual(seen, [{ kind: "draft", id: "d-0001" }, null]);
+  await queue.idle;
+});
+
 test("enqueue deduplicates an identical queued render and returns its original job", async () => {
   const { execute, started, resolvers } = controllable();
   const queue = new RenderQueue({ execute });

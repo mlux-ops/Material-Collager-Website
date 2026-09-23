@@ -3,14 +3,48 @@ name: Deploy to Cloudflare
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch: {}
 
+# Pushes and manual runs share one production group and run in commit order;
+# each pull request gets its own group, where a newer push cancels the older
+# run instead of queuing behind it.
 concurrency:
-  group: deploy-production
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('verify-pr-{0}', github.event.pull_request.number) || 'deploy-production' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Runs on every pull request and before every deploy. A red test, a lint
+  # error or a NEW type error stops the deploy; pre-existing type errors are
+  # allowed up to scripts/typecheck-baseline.json.
+  verify:
+    runs-on: ubuntu-latest
+    # A test stuck in a microtask loop starves node:test's own timers, so only
+    # the job limit can end it; the default is six hours.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests
+        run: npm run test:transitions
+
+      - name: Typecheck (no new errors)
+        run: node scripts/typecheck-baseline.mjs
+
   deploy:
+    needs: verify
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

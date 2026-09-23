@@ -37,6 +37,10 @@ These are enforced by `tests/autoboard-parity.test.mjs`, because **nothing else
 produces a signal**: `npm run build`, `npm run lint` and `npm run typecheck` are
 all silent on every one of them.
 
+They also bind `app/lib/guarded-fetch.ts`. It sits outside this directory, but
+the CLI loads it all the same (`scripts/autoboard/lib/download-image.mjs`), so
+the parity test checks it alongside the modules here.
+
 1. **No `node:` builtin.** `app/lib` is compiled into the browser bundle as well
    as the Worker, and nothing else in `app/` or `worker/` imports one today.
    `nodejs_compat` in `wrangler.jsonc` is a workerd runtime flag and says
@@ -392,14 +396,34 @@ ids and primary flag as its fixture.
 A URL from a Smartsheet cell is untrusted input, and a Worker's `fetch` reaches
 the network from inside the perimeter. `assertFetchableUrl` pins the scheme to
 https and refuses loopback, link-local (including `169.254.169.254`, the cloud
-metadata endpoint), RFC-1918, CGNAT, and `.local`/`.internal` hosts. Because
-`redirect: "follow"` means a redirect has already happened by the time you see
-it, the **final** URL is re-checked before any body is read, and both the HTML
-and image reads are size-capped.
+metadata endpoint), RFC-1918, CGNAT, and `.local`/`.internal` hosts.
+`assertFetchableUrl` also normalizes the hostname before any of those checks
+run: lowercased, one trailing dot stripped (a DNS no-op the URL parser
+otherwise keeps), and any resulting empty label refused.
+
+`redirect: "follow"` would already have contacted a redirect's target by the
+time its final URL could be checked, so `app/lib/guarded-fetch.ts`'s
+`fetchPublic` uses `redirect: "manual"` instead and validates every `Location`
+with `assertFetchableUrl` **before** requesting it — never just the final URL.
+It follows only 301, 302, 303, 307 and 308 (every other 3xx goes back to the
+caller's own `!response.ok` handling), up to 5 hops, all under one timeout for
+the whole chain, and cancels each redirect's body before requesting the next
+hop. Headers are sent to every hop, including one that redirected to a
+different host, so callers must never pass credentials through it. Both the
+HTML and image reads go through `readCapped`, which streams against a byte cap
+— cancelling the download the moment it's exceeded rather than buffering the
+whole thing first — and honours a declared Content-Length.
 
 Names that *resolve* into a private range are not caught — that needs the
 resolution the fetch itself performs. The https pin is what makes that
 acceptable: the services worth reaching this way do not answer TLS.
+
+The CLI's vendor-photo downloads — `autoboard:scaffold --fetch-images` and
+`review-candidates.mjs` — go through the same two functions, via
+`scripts/autoboard/lib/download-image.mjs`. They run on a developer's machine,
+against URLs a maintainer wrote into an image manifest or that nobody has
+reviewed yet in a candidates list, but a vendor host can still redirect
+anywhere, and Node's `fetch` follows a redirect to loopback without complaint.
 
 ### Storage and identity
 
@@ -514,6 +538,13 @@ the original hashed — the pure version has to keep reproducing them, not merel
 be self-consistent.
 
 It is a change detector. Do not reach for it where collision resistance matters.
+
+## Image digests in selectionHash
+
+`selectionHash` appends an item's `[digest|null, …]` only when one of its images
+has an entry in `board.imageDigests`; this keeps every existing hash byte-identical.
+The digest is computed by the CLI review server (`node:crypto`), never in the
+shared core. The web board doesn't need it because its uploads are content-addressed.
 
 ### `basename` is injected, finally
 

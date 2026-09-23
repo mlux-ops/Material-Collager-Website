@@ -29,7 +29,7 @@ Node 22.13+ required (`engines` in `package.json`).
 ### Tests
 
 `npm run test:transitions` is misnamed: its glob is `tests/*.test.mjs`, so it runs
-the **entire** suite (466 tests), not just transitions. Use it as the run-all.
+the **entire** suite (859 tests), not just transitions. Use it as the run-all.
 
 Individual suites:
 
@@ -38,6 +38,7 @@ npm run test:collage
 npm run test:workbench            # uses --test-isolation=none: these suites share setup state
 npm run test:workbench-export-import
 npm run test:autoboard
+npm run test:storage
 npm run test:transitions
 npm run test:scene-lab
 npm run test:access
@@ -46,6 +47,15 @@ npm run test:release-readiness
 
 Node's built-in runner over `tests/*.test.mjs`. `tests/test_*.py` covers the legacy
 Python CLI and is deliberately not wired into npm.
+Run them with `PYTHONPATH=src python -m unittest discover -s tests -p "test_*.py"`;
+without `PYTHONPATH`, an installed `material_collager` elsewhere on the machine
+can shadow `src/` and the run tests the wrong code.
+
+Storage tests run real app modules against `tests/helpers/fake-worker-env.mjs`:
+a `node:sqlite` D1 double that is strict where D1 is strict (binding
+`undefined` throws; `batch()` is a transaction) and a Map-backed R2. Import
+the helper first and load app modules with a dynamic `await import(...)` —
+static imports resolve before its `cloudflare:workers` hook exists.
 
 ### Autoboard
 
@@ -101,6 +111,14 @@ Server-side URL fetching is an SSRF surface — a sheet cell is untrusted input.
 `app/lib/autoboard/photo-sources.ts` holds the guard; read it before touching
 anything that fetches. See `docs/autoboard-shared-core.md`.
 
+Every server-side fetch of a user-supplied URL goes through
+`app/lib/guarded-fetch.ts` (`fetchPublic` validates each redirect hop with
+`assertFetchableUrl` before requesting it; `readCapped` streams against a byte
+cap). CLI render ids are never reissued (`lastIssued` in each board's render
+record), a queued confirm/final runs from the source it was queued against,
+and an in-place photo replacement records a per-path digest
+(`board.imageDigests`) that `selectionHash` folds in.
+
 `npm run autoboard:seed-web -- --project 651-belmont [--select]` fills a running
 `/review-boards` from a tracked project definition and the library root the
 scaffold already built — the web board's D1/R2 state is per-machine, so a fresh
@@ -150,7 +168,9 @@ are enforced by `worker/access.ts`.
 
 Push to `main` triggers `.github/workflows/deploy.yml`, which resolves the real D1
 UUID via `wrangler d1 list` before `wrangler deploy` — the UUID in `wrangler.jsonc`
-is a local placeholder, so do not treat it as real. Repo secrets required:
+is a local placeholder, so do not treat it as real. A `verify` job (lint, the full
+node:test suite, the typecheck gate) runs on every pull request and before every
+deploy; `deploy` needs it. Repo secrets required:
 `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`. `OPENAI_API_KEY` is a runtime Worker
 secret set separately (`wrangler secret put`), and locally lives in git-ignored
 `.dev.vars`. `SMARTSHEET_ACCESS_TOKEN` is NOT a Worker secret: it lives in the
@@ -180,13 +200,21 @@ localhost to mint a JWT. Blank both in `.dev.vars`, which overrides
   value-position import of a type is a link-time `SyntaxError` that neither gate
   can see.
 - `npm run typecheck` is not a pass/fail gate: 14 errors pre-date this tree
-  (workbench, scene-lab, `db/index.ts`, and the `examples/` tree). The usable
-  criterion is that a change adds none. Cloudflare's own types come from
-  `@cloudflare/workers-types` via tsconfig `types`; that array also has to list
-  `node`, because naming it at all turns off automatic `@types/*` inclusion.
-  `db/index.ts` still errors because workers-types' generic `Env` has no
-  bindings — the fix is a generated `worker-configuration.d.ts` from
-  `wrangler types`, not a hand-written declaration.
+  (workbench, scene-lab, `db/index.ts`, and the `examples/` tree). The gate is
+  `node scripts/typecheck-baseline.mjs`: it fails when tsc reports more errors
+  than `scripts/typecheck-baseline.json` records, or when tsc does not run
+  cleanly. Pay debt down by lowering that number, never by raising it. A run
+  that stopped before type-checking fails too: an option error (a `types`
+  entry that does not resolve because `node_modules` is stale), a syntax error
+  or a missing global type makes tsc report a few errors, under the baseline,
+  having checked nothing. The gate runs `tsc --listFilesOnly` first to catch
+  the first two, since that pass reports option and syntax errors but no type
+  errors. Cloudflare's own types come from `@cloudflare/workers-types` via
+  tsconfig `types`; that array also has to list `node`, because naming it at all turns
+  off automatic `@types/*` inclusion. `db/index.ts` still errors because
+  workers-types' generic `Env` has no bindings — the fix is a generated
+  `worker-configuration.d.ts` from `wrangler types`, not a hand-written
+  declaration.
 - Request bodies cap at 32 MB (`next.config.ts` `serverActions.bodySizeLimit`), applied
   to route handlers too. Large reference sets must use the chunked transport rather
   than one request.
@@ -208,3 +236,19 @@ localhost to mint a JWT. Blank both in `.dev.vars`, which overrides
   dashboard survive `wrangler deploy`. Without it a Text-type dashboard variable
   is deleted on every push to `main` (secrets are kept either way) — which is how
   a token that was "put in Cloudflare" can be gone after the next deploy.
+- An incoming request's `signal` only fires on a client disconnect when
+  workerd's `enable_request_signal` compatibility flag is on, and
+  `wrangler.jsonc` does not set it — so a route's abandoned-request check
+  (`autoboard-renders.ts`'s `signal`) fires for an injected signal (the
+  tests) but not a real disconnect in production today. The flag stays off
+  deliberately: it would change `request.signal` for every route, and
+  aborting mid-call can leave an accepted, billed edit unrecorded.
+- Any paid board action (a render) must `await` the board save queue's
+  `flush()` first (see `renderDraft` in `BoardWorkflow.tsx`). That's how a
+  render sees exactly what was typed, and a failed save stops the render.
+- An Economy row stays `submitting` until its batch id is recorded.
+  `publicJob` reads a `submitting` row older than 5 minutes as failed, with
+  `material_collager_job = <id>` guidance, and the row itself isn't changed.
+- Economy history refreshes only the 2 oldest pending rows per request. A
+  rejected refresh bumps `updated_at` (except for `finalizing` rows), so a
+  stuck row can't pin a slot.

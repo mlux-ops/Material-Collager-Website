@@ -37,6 +37,10 @@ const FETCH_SHARE = 12;
 let hasRevealedThisSession = false;
 // A slow or hung image must never trap the visitor on the loading screen.
 const PRELOAD_TIMEOUT_MS = 12000;
+// The library request's own deadline. PRELOAD_TIMEOUT_MS only starts once
+// this request settles, so without one a hung /api/library held the loading
+// veil at 0% forever.
+const LIBRARY_FETCH_TIMEOUT_MS = 8000;
 
 export default function SceneWheelV2() {
   const trackRef = useRef<HTMLElement>(null);
@@ -174,6 +178,13 @@ export default function SceneWheelV2() {
 
   useEffect(() => {
     const controller = new AbortController();
+    let unmounted = false;
+    // Past the deadline the scene falls back to the lab fixtures, exactly as
+    // for any other failed fetch.
+    const deadline = window.setTimeout(
+      () => controller.abort(new DOMException("The library took too long to answer.", "TimeoutError")),
+      LIBRARY_FETCH_TIMEOUT_MS,
+    );
     const load = async () => {
       try {
         const response = await fetch("/api/library", { cache: "no-store", signal: controller.signal });
@@ -185,15 +196,22 @@ export default function SceneWheelV2() {
         setRecords(normalized);
         setLibraryState(normalized.length > 0 ? "ready" : "fallback");
       } catch (error) {
-        if (controller.signal.aborted) return;
+        // Unmounting aborts too; only a live component falls back.
+        if (unmounted) return;
         console.warn("Scene Wheel V2 is using the lab collage fixtures.", error);
         loadTargetRef.current = Math.max(loadTargetRef.current, FETCH_SHARE);
         setRecords([]);
         setLibraryState("fallback");
+      } finally {
+        window.clearTimeout(deadline);
       }
     };
     void load();
-    return () => controller.abort();
+    return () => {
+      unmounted = true;
+      window.clearTimeout(deadline);
+      controller.abort();
+    };
   }, []);
 
   useEffect(() => {

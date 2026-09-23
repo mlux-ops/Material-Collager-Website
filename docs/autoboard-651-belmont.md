@@ -89,8 +89,9 @@ recorded. Rejected on sight, and worth knowing because the same traps recur:
 
 The manifest records each file's dimensions and a `sha256` of the reviewed
 bytes; the fetch reports `CHANGED SINCE REVIEW` if a vendor re-publishes an
-asset. Home Depot's CDN re-encodes per request, so those entries carry
-`digestUnstable` and no digest.
+asset. Home Depot's CDN re-encodes per request, and Kitchen and Bath Authority
+serves the Kohler trim photo (B2-05) as either of two encodings, so those
+entries carry `digestUnstable` and no digest.
 
 These are third-party vendor product photographs, fetched for internal design
 reference. They are deliberately not committed to this repository, and they

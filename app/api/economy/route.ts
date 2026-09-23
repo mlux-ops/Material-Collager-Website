@@ -1,6 +1,6 @@
 import { activeItems, buildGenerationPrompt, resolvedBackground, resolvedOutputFormat, resolvedQuality, resolvedSize, validateCollageRequest, type CollageRequestInput } from "@/app/lib/collage";
 import { cleanupExpiredJobs, ensureJobStorage, publicJob, RETENTION_MS, runtimeStorage, type JobRow } from "@/app/lib/generation-jobs";
-import { errorResponse, readOpenAIResponse, resolveOpenAIKey } from "@/app/lib/openai-server";
+import { errorResponse, OpenAIRequestError, readOpenAIResponse, resolveOpenAIKey } from "@/app/lib/openai-server";
 import { validateImagePrompt } from "@/app/lib/image-edit";
 import { SUNBURST_MODEL, calculateSunburstUsageCost, resolveWireModel } from "@/app/lib/sunburst";
 
@@ -15,6 +15,13 @@ type BatchResponse = {
 };
 
 const COMPLETE_STATUSES = new Set(["completed", "failed", "expired", "cancelled"]);
+// Finalize claims a completed batch gets before it is failed (see refreshJob).
+const MAX_FINALIZE_ATTEMPTS = 3;
+// Economy jobs one GET may look up by id (see `tracked` in GET). An autoboard
+// run tracks far fewer; this only bounds what a single request can ask for.
+const MAX_TRACKED_IDS = 200;
+// D1 binds at most 100 parameters per statement.
+const D1_MAX_BOUND_PARAMETERS = 100;
 
 export async function POST(request: Request) {
   try {
@@ -42,19 +49,18 @@ export async function POST(request: Request) {
     const prompt = buildGenerationPrompt(payload);
     validateImagePrompt(prompt);
     const jobId = crypto.randomUUID();
-    const batch = await submitEconomyBatch(apiKey, jobId, prompt, allImageIds, resolvedSize(payload), payload.quality, resolvedBackground(payload));
-
     const now = Date.now();
     const DB = await ensureJobStorage();
+    // Recorded BEFORE the paid call. A batch OpenAI accepted must never exist
+    // without a row here — nothing would ever poll, finalize or show it — and
+    // storage that is down right now means no batch is bought at all.
     await DB.prepare(`INSERT INTO generation_jobs
       (id, mode, status, openai_batch_id, output_key, filename, format, prompt, payload_json, reference_ids_json,
        render_kind, collage_type, library_visible, title, estimated_usd, usage_json, qa_json, error,
        model, quality, background, output_format, cost_usd, created_at, updated_at, expires_at)
-      VALUES (?, 'economy', ?, ?, NULL, ?, ?, ?, ?, ?, 'final', ?, 1, ?, NULL, NULL, NULL, NULL, ?, ?, ?, ?, NULL, ?, ?, ?)`)
+      VALUES (?, 'economy', 'submitting', NULL, NULL, ?, ?, ?, ?, ?, 'final', ?, 1, ?, NULL, NULL, NULL, NULL, ?, ?, ?, ?, NULL, ?, ?, ?)`)
       .bind(
         jobId,
-        batch.status || "validating",
-        batch.id,
         finalFilename(payload.outputFilename),
         resolvedSize(payload),
         prompt,
@@ -74,26 +80,133 @@ export async function POST(request: Request) {
         now,
         now + RETENTION_MS,
       ).run();
+
+    let batch: BatchResponse;
+    try {
+      batch = await submitEconomyBatch(apiKey, jobId, prompt, allImageIds, resolvedSize(payload), payload.quality, resolvedBackground(payload));
+    } catch (error) {
+      // Terminal, so history stops polling it. The request may still have
+      // reached OpenAI before the error (a timeout, a dropped connection), so
+      // both the record AND this response say how to check before paying for
+      // another — an ambiguous failure like this one only ever shows the bare
+      // provider message otherwise, and the person deciding whether to
+      // resubmit is looking at this response right now, not history. The
+      // batch carries this id as metadata (submitEconomyBatch).
+      const message = error instanceof Error ? error.message : String(error);
+      const fullMessage = `Submission did not complete (${message}). Before resubmitting, check OpenAI's Batches page for metadata material_collager_job = ${jobId}.`;
+      await DB.prepare("UPDATE generation_jobs SET status = 'failed', error = ?, updated_at = ? WHERE id = ?")
+        .bind(fullMessage, Date.now(), jobId)
+        .run()
+        .catch(() => undefined);
+      // Reuse an OpenAIRequestError in place: its status and Retry-After
+      // handling in errorResponse must survive this, so only its displayed
+      // message grows the guidance above. Anything else — a timed-out fetch
+      // rejects with a DOMException, which passes `instanceof Error` but has
+      // a read-only `message` and throws a TypeError on assignment (verified
+      // against both Node and this repo's workerd/Miniflare) — is wrapped in
+      // a plain Error instead, with the original kept as `cause`.
+      if (error instanceof OpenAIRequestError) {
+        error.message = fullMessage;
+        throw error;
+      }
+      throw new Error(fullMessage, { cause: error });
+    }
+    try {
+      await DB.prepare("UPDATE generation_jobs SET status = ?, openai_batch_id = ?, updated_at = ? WHERE id = ?")
+        .bind(batch.status || "validating", batch.id, Date.now(), jobId)
+        .run();
+    } catch {
+      // One retry of the WRITE only — never the paid call. The batch is
+      // already bought; losing its id here would strand it, tracked by
+      // nothing, while the response below tells the user to look for it
+      // rather than resubmit.
+      try {
+        await DB.prepare("UPDATE generation_jobs SET status = ?, openai_batch_id = ?, updated_at = ? WHERE id = ?")
+          .bind(batch.status || "validating", batch.id, Date.now(), jobId)
+          .run();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Batch ${batch.id} was created for job ${jobId} but could not be recorded (${message}). Do not resubmit — check OpenAI's Batches page for metadata material_collager_job = ${jobId}.`,
+        );
+      }
+    }
     return Response.json({ ok: true, jobId, status: batch.status, estimatedUsd: null });
   } catch (error) {
     return errorResponse(error);
   }
 }
 
-export async function GET() {
+export async function GET(request?: Request) {
   try {
+    // Checked before anything is refreshed, so a malformed request costs nothing.
+    const trackedIds = trackedJobIds(request);
     await cleanupExpiredJobs();
     const DB = await ensureJobStorage();
-    const pending = await DB.prepare("SELECT * FROM generation_jobs WHERE mode = 'economy' AND output_key IS NULL AND status NOT IN ('failed', 'expired', 'cancelled') ORDER BY updated_at ASC LIMIT 8")
+    // Two per request: each refresh can wait on OpenAI (a status check, then
+    // possibly a result download) before history can answer. The page polls
+    // every 30 s while anything is pending, and a refreshed row's updated_at
+    // moves it to the back — successfully or not (see the bump below) — so
+    // every pending job still gets its turn. A row with no batch id has
+    // nothing to check (see POST).
+    const pending = await DB.prepare("SELECT * FROM generation_jobs WHERE mode = 'economy' AND output_key IS NULL AND openai_batch_id IS NOT NULL AND status NOT IN ('failed', 'expired', 'cancelled') ORDER BY updated_at ASC LIMIT 2")
       .all<JobRow>();
     // Refresh jobs independently: one job with an unreadable batch output must
-    // not take down the whole history listing for its six-month lifetime.
-    await Promise.allSettled(pending.results.map((row: JobRow) => refreshJob(row)));
+    // not take down the whole history listing for its six-month lifetime. A
+    // row whose status check itself rejects (a moved key, a batch OpenAI can
+    // no longer find) throws before any UPDATE runs, so without the bump
+    // below its updated_at would never move — it would sort first again on
+    // every GET and starve every other pending job.
+    const settled = await Promise.allSettled(pending.results.map((row: JobRow) => refreshJob(row)));
+    const bumpStamp = Date.now();
+    // Skip a 'finalizing' row: its updated_at is the stale-claim lease
+    // refreshJob reads to decide when a claim is reclaimable, not a fairness
+    // timestamp, and bumping it here would keep the lease from ever expiring.
+    // Guarded again in the UPDATE itself, not just the in-memory row.status
+    // above: that snapshot is from the SELECT at the top of this request, and
+    // an overlapping poll (another tab, the CLI) can have claimed the row for
+    // finalizing in the meantime.
+    await Promise.allSettled(
+      settled.flatMap((result, index) => {
+        const row = pending.results[index];
+        if (result.status !== "rejected" || row.status === "finalizing") return [];
+        return [DB.prepare("UPDATE generation_jobs SET updated_at = ? WHERE id = ? AND status != 'finalizing'").bind(bumpStamp, row.id).run()];
+      }),
+    );
+    // `jobs` is the history drawer's listing: the newest 30 rows of every
+    // render kind, drafts included, so an Economy job can fall out of it while
+    // it is still pending. A caller tracking particular jobs (the autoboard
+    // CLI's batch-status) names them in ?ids= and gets them back in
+    // `tracked`, where an id that is missing really is absent from this server.
     const jobs = await DB.prepare("SELECT * FROM generation_jobs ORDER BY created_at DESC LIMIT 30").all<JobRow>();
-    return Response.json({ ok: true, jobs: jobs.results.map(publicJob) });
+    const tracked = trackedIds && (await economyJobsById(DB, trackedIds)).map(publicJob);
+    return Response.json({ ok: true, jobs: jobs.results.map(publicJob), ...(tracked ? { tracked } : {}) });
   } catch (error) {
     return errorResponse(error);
   }
+}
+
+// The ids in ?ids=a,b (repeating ?ids= works too), or undefined when the
+// request names none — the history page's own request.
+function trackedJobIds(request?: Request) {
+  const params = request ? new URL(request.url).searchParams : undefined;
+  if (!params?.has("ids")) return undefined;
+  const ids = [...new Set(params.getAll("ids").flatMap((value) => value.split(",")).map((id) => id.trim()).filter(Boolean))];
+  if (ids.length > MAX_TRACKED_IDS) throw new Error(`Look up at most ${MAX_TRACKED_IDS} job ids per request.`);
+  if (ids.some((id) => !/^[A-Za-z0-9_-]{1,64}$/.test(id))) throw new Error("A job id may only contain letters, digits, hyphens and underscores.");
+  return ids;
+}
+
+async function economyJobsById(DB: D1Database, ids: string[]) {
+  const rows: JobRow[] = [];
+  for (let start = 0; start < ids.length; start += D1_MAX_BOUND_PARAMETERS) {
+    const chunk = ids.slice(start, start + D1_MAX_BOUND_PARAMETERS);
+    const found = await DB.prepare(`SELECT * FROM generation_jobs WHERE mode = 'economy' AND id IN (${chunk.map(() => "?").join(", ")})`)
+      .bind(...chunk)
+      .all<JobRow>();
+    rows.push(...found.results);
+  }
+  return rows;
 }
 
 async function submitEconomyBatch(
@@ -174,9 +287,16 @@ async function refreshJob(row: JobRow) {
   };
   // Bound retries: after a few finalize attempts a permanently unreadable
   // output should fail terminally instead of re-downloading and re-running the
-  // paid QA review every stale-claim window forever.
-  if (row.finalize_attempts + 1 > 3) {
-    await failJob("The Economy render could not be finalized after multiple attempts.");
+  // paid QA review every stale-claim window forever. The batch itself DID
+  // complete, though: it is billed and its output file is still at OpenAI, so
+  // the message says where, and not to buy it again. batch-finalize in
+  // scripts/autoboard/cli.mjs won't resubmit a job whose error matches
+  // RESUBMIT_WARNING (app/lib/economy-submission-status.ts); keep it matching.
+  if (row.finalize_attempts + 1 > MAX_FINALIZE_ATTEMPTS) {
+    await failJob(
+      `Batch ${row.openai_batch_id} completed at OpenAI, but its output could not be saved here after ${MAX_FINALIZE_ATTEMPTS} attempts. ` +
+        `Do not resubmit — it is already paid for. Its output file (${batch.output_file_id}) is on OpenAI's Batches page under metadata material_collager_job = ${row.id}.`,
+    );
     return;
   }
   try {

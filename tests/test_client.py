@@ -140,5 +140,35 @@ class ClientTests(unittest.TestCase):
                     self.assertIsNone(client.images.last_kwargs)
 
 
+class OpenAIClientConstructionTests(unittest.TestCase):
+    """The SDK retries twice by default; an accepted-but-timed-out paid call would be billed again."""
+
+    def _construct(self, factory):
+        import sys
+        from unittest import mock
+
+        created = {}
+
+        class FakeOpenAI:
+            def __init__(self, **kwargs):
+                created.update(kwargs)
+
+        with mock.patch.dict(sys.modules, {"openai": mock.Mock(OpenAI=FakeOpenAI)}), mock.patch.dict(
+            os.environ, {"OPENAI_API_KEY": "test-only"}
+        ):
+            factory()
+        return created
+
+    def test_image_client_never_retries_a_paid_call(self):
+        from material_collager.client import _make_openai_client
+
+        self.assertEqual(self._construct(_make_openai_client).get("max_retries"), 0)
+
+    def test_qa_client_never_retries_a_paid_call(self):
+        from material_collager.qa import _make_openai_client
+
+        self.assertEqual(self._construct(_make_openai_client).get("max_retries"), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

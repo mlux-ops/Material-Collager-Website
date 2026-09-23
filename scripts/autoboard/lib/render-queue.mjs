@@ -45,6 +45,11 @@ export class RenderQueue {
       // Only meaningful for kind:"final" — overrides the staleness gate when
       // the user explicitly acknowledged rendering from an outdated source.
       force: Boolean(fields.force),
+      // The render a confirm/final is built from, as picked when the job was
+      // queued. The dedupe key already names it, so execution must use it too:
+      // a re-pick while the job waits must not change what the paid render
+      // starts from (runRenderJob → queuedSource).
+      source: fields.source ?? null,
       state: "queued",
       progress: null,
       error: null,

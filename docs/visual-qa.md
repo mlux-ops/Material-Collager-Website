@@ -103,6 +103,109 @@ No deploy, publish, or production-state write occurred during this QA pass.
 
 ---
 
+# Visual QA - Workbench dialog focus containment (WP-3B, R14)
+
+Date: 2026-09-22
+Status: **KNOWN GAPS RECORDED - BROWSER PASS PENDING**
+
+## Scope
+
+`useModalFocus` (`app/components/workbench/useModalFocus.ts`) now contains
+Tab/Shift+Tab inside a Workbench dialog, moves focus in on open, supports
+Escape, and restores focus on close. Applied to the template chooser
+(`TemplateGallery`), `ExportDialog`, `GraphManager`'s dialog, and `Spotlight`'s
+own dismissible-modal render (the compact "Add node" overlay). This pass was
+implemented and verified via lint + the typecheck gate only; the controller
+runs the browser checks (see below) once, after integration, since several
+worktrees cannot share the one dev server.
+
+## Known gaps (deliberately not wired to useModalFocus)
+
+- **Wire-drop-to-empty-canvas prompt** (`WorkbenchApp.tsx`, the
+  `role="dialog"` rendered inline inside `CanvasInner`'s `wirePrompt && (...)`
+  block, `aria-label="Connect to a node"`). It renders inline in a
+  conditionally-executed branch of an existing component's render, not its
+  own function component, so a `useModalFocus` call there would be
+  conditional -- hooks cannot be called conditionally. Extracting it into its
+  own component is a larger change than this defect needs and was not
+  verified as part of this review.
+- **Restore-error alertdialog** (`WorkbenchApp.tsx`, `role="alertdialog"`,
+  `aria-label="Could not load your workbench"`). Same inline-conditional
+  constraint. This one is deliberately non-dismissable (no
+  `useModalDismiss`/backdrop-click/Escape path already, by design -- see its
+  own comment) and **must stay non-dismissable** in any later change that
+  gives it a focus trap; only a Retry that actually succeeds may let the user
+  out of it.
+- **Three node-editor dialogs outside this pass's scope entirely** (not
+  inline-conditional -- each is its own component -- so nothing here explains
+  why they were skipped; they simply were), found by `grep -rn 'role="dialog"'
+  app/components/workbench/nodes/`. Each uses `useModalDismiss` for its close
+  animation but never `useModalFocus`: no Tab containment, no focus-in on
+  open, no restore-focus-on-close, and each already has its own `window`-level
+  `keydown` handler for Escape that a later `useModalFocus` wiring would need
+  to reconcile, not just add to -- the three do not agree on what Escape does:
+  - `crop-editor.tsx`, `aria-label="Crop the image"`. A draft polygon in
+    progress absorbs Escape (clears it); otherwise Escape closes the dialog.
+  - `maskedEdit.tsx`, `aria-label="Draw the mask to edit"`. Escape only ever
+    clears a draft polygon (a no-op if there isn't one) and never closes the
+    dialog -- its Cancel/Apply buttons are the only close path.
+  - `viewImage.tsx`, `aria-label="Full-resolution image"`. No polygon
+    concept; Escape always closes.
+
+## Fix round 1 — Escape wiring corrected
+
+Date: 2026-09-23
+
+Review found two dialogs where Tab containment shipped without a working
+Escape-to-close:
+
+- `GraphManager`'s dialog omitted `onEscape` entirely, so outside of an
+  in-progress rename, Escape no longer closed the Graph Manager (only the
+  rename row's own handler ran, and that only cancels the rename). Fixed
+  with a guarded `onEscape`: `if (renamingId === null) requestClose();` —
+  `useModalFocus`'s document-level capture listener calls `preventDefault()`
+  but never `stopPropagation()`, and the rename input's own Escape handler
+  doesn't consult `defaultPrevented`, so both behaviors now coexist: Escape
+  during a rename still only cancels the rename (the guard skips the dialog
+  close), and Escape anywhere else in the dialog now closes it, matching
+  every other Workbench dialog.
+- `Spotlight`'s own dismissible-modal render omitted `onEscape`, reasoned at
+  the time as redundant with the search input's own local Escape handler.
+  That reasoning missed that Tab containment now keeps focus inside the
+  dialog on non-input controls (result buttons) too, where the local handler
+  never fires — Escape did nothing there. Fixed by wiring
+  `onEscape: requestClose`; when the input does have focus, both handlers
+  now fire for the same keypress, which is harmless because
+  `useModalDismiss`'s `requestClose` ignores a repeat call while already
+  closing (its `timeoutRef` guard).
+
+## Browser checks not yet performed (skipped per controller instruction; now the user's post-merge checks, not a controller/CI gate)
+
+- Template chooser: after it opens on an empty canvas,
+  `document.activeElement.closest('[role="dialog"]') !== null`; Tab x10 stays
+  inside; Shift+Tab from the first control wraps to the last; Escape or
+  **Skip** closes it and focus is not left on a removed node.
+- Same two focus checks (open lands inside the dialog; Tab stays contained)
+  repeated for the Export dialog.
+- Task 3B.1 (R17): with `window.prompt` stubbed to return `null`, clicking
+  "+ New workbench" creates nothing -- the graph count in the manager is
+  unchanged and the active graph does not change.
+- Task 3B.3 (R15): `/workbench` still reaches the app normally (`read_page`
+  shows the canvas, not "Loading workbench…"). The failed-chunk branch itself
+  cannot be triggered in a preview without editing code, so it stays a code
+  read, not a browser check.
+- **Escape closes the Graph Manager outside a rename** (fix round 1): open
+  it, press Escape with no row being renamed, and confirm it closes like any
+  other Workbench dialog. Then reopen it, click Rename on a row, press
+  Escape, and confirm ONLY the rename cancels (input reverts to the
+  non-editing row) and the dialog itself stays open.
+- **Escape closes Spotlight's modal from a result button** (fix round 1):
+  open the compact "Add node" overlay, Tab past the search input to a node-
+  type result button, press Escape, and confirm the dialog closes (previously
+  did nothing once focus had moved off the search input).
+
+---
+
 # Visual QA - Workbench Node Editor Phase 2 (S32)
 
 Date: 2026-07-25
@@ -331,3 +434,171 @@ this task, outside the repository.
   collection, terminal-output selection, deduplication, and failure handling
   are covered by the workbench regression suite.
 - No deployment occurred.
+
+---
+
+# Visual QA - Generator item-field labels and help-bubble placement (WP-3C, R16/R20)
+
+Date: 2026-09-23
+Status: **STATIC CASCADE TRACE ONLY - BROWSER PASS PENDING**
+
+## Scope
+
+Task 3C.1 (R16) gives each item field its own visible `<label htmlFor>` (the
+implicit `<label>` it replaces had the help `<button>` as its only labelable
+child, so the input itself had no accessible label). Task 3C.2 (R20) re-anchors
+the item-field help bubble (`.field-help`) to grow up-and-right from its own
+label's left edge instead of 210px leftward from the help button, which
+`.references-surface`'s `overflow: auto` clipped for the first column's cards.
+
+Verified via static CSS-cascade tracing and the lint/typecheck gates only, per
+the controller: the Browser preview cannot serve this branch and has no WebGL.
+No dev server, `.dev.vars`, or Browser tool was used; nothing below was observed
+in a running browser. Before-measurements are the controller's, from the
+equivalent `main` checkout (`app/globals.css` byte-identical to this worktree's).
+
+## Before measurements
+
+`/generator`, item 1, **Item details** open, 1440x900 unless noted.
+
+- R16, `.item-fields > *` first field ("Item type"): `label` computed style
+  `{fontSize:11px, fontWeight:650, color:rgb(101,112,105), marginBottom:5px,
+  display:flex, gap:6px}`; `fieldBox`/`inputBox` both `{x:247, width:303.328125}`;
+  `inputLabels: []` — the R16 defect.
+- R20, first help bubble vs. tray: `bubble {x:111.453125, width:210}`,
+  `tray {x:240, width:652}`, `inside: false` — the bubble grew 210px leftward and
+  was clipped by the tray's `overflow: auto` before reaching `tray.left`.
+
+## R16 - static cascade trace (after-expectation)
+
+The diff changes only the wrapper element (`<label>` -> `<div class="item-field">`),
+adds an explicit `<label htmlFor>`, and moves the label row's styling from
+`label > span` to `.item-field > .field-label`. No sizing property of
+`.item-fields`/`.material-item`/`.items-list` is touched.
+
+| Element | Property | Before | After | Match |
+| --- | --- | --- | --- | --- |
+| `.field-label` | `display` | `flex` | `flex` (unmodified rule) | Yes |
+| `.field-label` | `gap` | `6px` | `6px` (unmodified rule) | Yes |
+| `.field-label` | `color` | `rgb(101,112,105)` | same, now from `.item-field > .field-label` (`label > span` no longer matches) | Yes |
+| `.field-label` | `font-size` | `11px` | `11px`, same substitution | Yes |
+| `.field-label` | `font-weight` | `650` | `650`, same substitution | Yes |
+| `.field-label` | `margin-bottom` | `5px` | `5px`, same substitution | Yes |
+| wrapper | `fieldBox` | `width:303.33` | unchanged (no sizing property touched; grid-item blockifies identically; `min-width:0` preserved) | Yes, within 0.5px |
+| input | `inputBox` | `width:303.33` | unchanged (`.item-fields input` untouched) | Yes, within 0.5px |
+| `input#...-role` | `.labels` | `[]` | `["Item type"]` | Yes, fixes defect |
+| `.item-fields [id]` | uniqueness | n/a | guaranteed by stable `item.uiKey` | Traced correct |
+
+`.item-fields label > span { font-size: 11px }` is deleted: no `<span>` is a
+direct child of a `<label>` in the new markup, confirmed by grep.
+
+## R20 - placement argument (conclusions)
+
+- **Horizontal, all viewports, by construction.** `.field-label` (`position:
+  relative`) is the bubble's containing block; `.help-wrap` is `position: static`.
+  `left: 0` pins the bubble to `.field-label`'s own left edge; `width: min(210px,
+  100%)` caps its width at `.field-label`'s own width — so it can never spill past
+  the card's right edge, for any column/card/desktop viewport. Confirmed that
+  neither `@media (max-width: 1240px)` (~1183) nor either `@media (max-width:
+  1280px)` block (~2347, ~3271) touches `.material-item`/`.items-list`/
+  `.item-fields`/`.field-label`/`.help-wrap`/`.field-help`.
+- **Vertical (superseded by the fix round below).** `bottom: calc(100% + 6px)`
+  grows the bubble upward, and this argument only checked clearance to the
+  tray's top. It missed a closer clipping ancestor: the item's own `<details>`.
+  `details::details-content { overflow-y: clip }` (globals.css ~798-808) applies
+  whether or not the details is `[open]` — the `[open]` rule (~810-814) sets
+  `block-size`/`filter`/`opacity` only, never `overflow-y` — so vertical overflow
+  is clipped from both paint and hit-testing at that box's edge, well before the
+  bubble ever reaches the tray. Item 1's first field has no room *above* that box,
+  so its bubble was clipped away entirely; see the fix round.
+- **390x844 (phone) — corrected after review.** The phone media query's
+  `.generator-shell .field-help` ties on specificity with `.item-fields
+  .field-help` but wins by source order for every property it sets. It did not
+  set `bottom`, so `.item-fields .field-help`'s `bottom: calc(100% + 6px)` leaked
+  through: with `position: fixed` (containing block = viewport) and `top` also
+  set, CSS 2.1 §10.6.4 solves a negative `auto` height, collapsing the bubble to
+  zero height on phones. Fixed by adding `bottom: auto;` and `transform-origin:
+  100% 14px;` (restoring the pre-3C.2 value, which also leaked) to the phone
+  block. Full per-property table is in the WP-3C report (outside this repo).
+  Phones are not literally unchanged — `bottom`/`transform-origin` are now
+  explicit resets rather than silently absent — but the computed result matches
+  pre-3C.2 behavior.
+- A residual ~24px gap between an independent CSS re-derivation of the first
+  card's width and the measured `fieldBox` width affects neither argument (R16: no
+  sizing property changed; R20: containment holds regardless of actual width).
+
+## R20 - accordion clip, first bubble invisible on desktop (fix round, 2026-09-23)
+
+The "Vertical" bullet above missed that `.item-fields` lives inside the item's
+`<details>`, whose `::details-content` box clips vertical overflow (`overflow-y:
+clip`) regardless of `[open]`. The first field's bubble opens upward from
+`.field-label` with no field above it to give it room inside that box, so it
+sits entirely above the clip line and is removed from paint and hit-testing;
+the second field's bubble loses its top ~6px (padding only, text unaffected).
+
+Fix: directly after `.item-fields .field-help`, added
+`.item-fields :where(.item-field:first-child) .field-help { bottom: auto; top:
+calc(100% + 6px); transform-origin: 0 0; }` (globals.css ~1810-1826), so the
+first field's bubble opens downward, into the clip box, instead of upward past
+its top. `:where()` holds this at the same (0,2,0) specificity as the rule it
+sits next to, so `.generator-shell .field-help` in the `@media (max-width:
+760px)` block (also (0,2,0), and later in source order) still wins under 760px
+— confirmed by reading both selectors, not just reasoning about them.
+
+**Verification method — static harness, not the running app.** Checked with a
+standalone HTML file (`r20-repro.html` / `r20-verify.html`, outside this repo)
+that inlines the relevant rules copied verbatim from `app/globals.css` plus the
+item-card markup from `app/generator/page.tsx` — no dev server, no `.dev.vars`,
+no live app. Because a `file://` path outside the project renders in the
+browser pane only as an inert static snapshot (no script execution, no
+`elementFromPoint`), the harness was loaded by navigating to a real page and
+using `document.open()`/`document.write()` to replace the document with the
+harness's markup and styles, which does execute scripts normally.
+
+Per-bubble check used `document.elementFromPoint` at three points on each
+bubble's vertical extent (top edge + 2px, middle, bottom edge − 2px, all
+horizontally centered) rather than `getBoundingClientRect()` alone, because
+`overflow: clip` removes the clipped pixels from hit-testing too, not just
+paint — a bounding rect doesn't show that. Run at 1440x900, 1280x900 and
+1024x900 (`resize_window`, reset to `desktop` after): identical at all three
+widths, since nothing in this card is responsive below the 760px phone
+breakpoint the harness doesn't include.
+
+| Bubble | Before fix | After fix (isolated, one bubble shown — matches real `:hover`/`:focus-within`, which only ever shows one at a time) |
+| --- | --- | --- |
+| 1st field ("Item type") | All 3 points miss (rect fully above the clip line) | All 3 points hit at all 3 widths — **fixed** |
+| 2nd field ("Product / model") | `top+2` misses, `middle`/`bottom-2` hit | Unchanged: `top+2` still misses (~6.2px of the bubble's 8px top padding is clipped; text starts well below it and is unaffected) — left as-is per the approved fix scope |
+| 3rd field ("Brand") | All 3 points hit | Unchanged — all 3 points hit |
+
+Forcing *all* bubbles visible at once — the harness's own screenshot
+convention (`body.force`), not a real state — makes the first bubble's new
+downward extent overlap the second bubble's upward extent (both fill the
+narrow band between the two fields, from opposite directions), and the later
+bubble in DOM order paints on top at equal `z-index`. Isolating each bubble one
+at a time (simulating real `:hover`/`:focus-within`, which only one `.help-wrap`
+can have at once) confirms this never occurs in the app: the table above is the
+isolated result. This is a property of the static harness's all-at-once
+convention, not a regression.
+
+This static-harness check is stronger than pure CSS-cascade tracing (it
+executes the real cascade and hit-tests real geometry) but is still not the
+running app. The live check remains the user's post-merge check, below.
+
+## Pending - live browser check (post-merge)
+
+Nothing above was observed in a running browser. These are the user's checks
+to run after merge, not a controller/CI gate.
+
+- Re-run the R16 snippet; confirm the "after" column; click label text (focus ->
+  input); click "?" (focus -> button, bubble shows); reorder/remove an item (ids
+  stay unique).
+- Re-run the R20 snippet at 1440x900, 1280x800, 1024x768, 390x844 on the first/last
+  field of the first/last visible card; confirm `inside: true` at the three desktop
+  sizes, and confirm the phone help bubble renders with its content at 390x844
+  (the zero-height regression this fix round corrected).
+- The two known-gap dialogs from Task 3B.2 are unrelated and remain as recorded in
+  the WP-3B entry above.
+- Confirm the first field's help bubble in the live app with real `:hover`/
+  `:focus-within`, on the actual `<details>` accordion (not the static
+  harness's copy) at 1440, 1280 and 1024.
+- hit-test (elementFromPoint), not bounding rects.
