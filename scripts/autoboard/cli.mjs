@@ -1178,13 +1178,24 @@ async function commandBatchStatus(values) {
 
   const baseUrl = (values["base-url"] ?? "http://localhost:3000").replace(/\/+$/, "");
   await waitForServer(baseUrl);
-  // GET /api/economy refreshes every pending economy job server-side before
-  // returning the list — this call is what actually advances a batch's
-  // status, not just reads it.
-  const response = await fetch(`${baseUrl}/api/economy`, { headers: activeAccessHeaders });
-  const json = await response.json().catch(() => null);
-  if (!response.ok || !json?.ok) throw new Error(json?.error ?? `HTTP ${response.status} from /api/economy`);
-  const jobsById = new Map(json.jobs.map((job) => [job.id, job]));
+  // GET /api/economy refreshes only its two least-recently-updated pending
+  // jobs per call (see the `pending` query in app/api/economy/route.ts), so
+  // one request advances at most two of this run's submissions. Repeat until
+  // a round changes none of the tracked jobs' statuses — everything left is
+  // either terminal or has nothing pending to check — or the cap below is
+  // reached. Repeats are close to free: with QA disabled (see refreshJob in
+  // that route), a refresh only checks status and, once, downloads a result.
+  const MAX_STATUS_POLLS = Math.max(4, Math.ceil(entries.length / 2) + 2);
+  let jobsById = new Map();
+  for (let poll = 0; poll < MAX_STATUS_POLLS; poll++) {
+    const response = await fetch(`${baseUrl}/api/economy`, { headers: activeAccessHeaders });
+    const json = await response.json().catch(() => null);
+    if (!response.ok || !json?.ok) throw new Error(json?.error ?? `HTTP ${response.status} from /api/economy`);
+    const next = new Map(json.jobs.map((job) => [job.id, job]));
+    const stable = entries.every(([, submission]) => jobsById.get(submission.jobId)?.status === next.get(submission.jobId)?.status);
+    jobsById = next;
+    if (stable) break;
+  }
 
   let changed = false;
   for (const [variantId, submission] of entries) {

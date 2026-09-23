@@ -148,3 +148,74 @@ test("CLI generate records a single failed request as an error with diagnostics 
     rmSync(runDir, { recursive: true, force: true });
   }
 });
+
+test("CLI batch-status repeats the GET until nothing changes, so more than two pending jobs still advance in one run", async () => {
+  const runId = `run-cli-batch-status-${process.pid}-${Date.now()}`;
+  const runDir = path.join(process.cwd(), "autoboard-runs", runId);
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(path.join(runDir, "plan.json"), JSON.stringify({ runId, source: "offline-manifest", variants: [], boards: [] }, null, 2));
+  writeFileSync(path.join(runDir, "results.json"), JSON.stringify({
+    candidates: {},
+    finals: {},
+    economy: {
+      "board--A": { jobId: "job-a", status: "validating" },
+      "board--B": { jobId: "job-b", status: "validating" },
+      "board--C": { jobId: "job-c", status: "validating" },
+    },
+  }, null, 2));
+
+  // /api/economy only ever advances its two least-recently-updated pending
+  // jobs per call (see the `pending` LIMIT in app/api/economy/route.ts), so
+  // job-c only settles on the third round here — proving one CLI invocation
+  // must poll more than once to fully drain three tracked submissions.
+  const rounds = [
+    [{ id: "job-a", status: "in_progress" }, { id: "job-b", status: "in_progress" }, { id: "job-c", status: "validating" }],
+    [{ id: "job-a", status: "failed" }, { id: "job-b", status: "failed" }, { id: "job-c", status: "in_progress" }],
+    [{ id: "job-a", status: "failed" }, { id: "job-b", status: "failed" }, { id: "job-c", status: "failed" }],
+  ];
+  let requestCount = 0;
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/economy") {
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+    requestCount += 1;
+    const round = rounds[Math.min(requestCount, rounds.length) - 1];
+    const jobs = round.map((job) => ({
+      libraryVisible: false, model: null, quality: null, background: "opaque",
+      outputFormat: "png", usage: null, costUsd: null, error: null, ...job,
+    }));
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ ok: true, jobs }));
+  });
+  await listen(server);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const testCreds = { ["OPENAI_API_KEY"]: "test-key" };
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [
+        "--experimental-strip-types", "scripts/autoboard/cli.mjs", "batch-status",
+        "--run", runId, "--base-url", baseUrl,
+      ], { cwd: process.cwd(), env: { ...process.env, ...testCreds }, stdio: ["ignore", "pipe", "pipe"] });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => { stdout += chunk; });
+      child.stderr.on("data", (chunk) => { stderr += chunk; });
+      child.once("error", reject);
+      child.once("close", (status) => resolve({ status, stdout, stderr }));
+    });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.ok(requestCount > 1, `expected more than one GET to /api/economy, saw ${requestCount}`);
+    const results = JSON.parse(readFileSync(path.join(runDir, "results.json"), "utf8"));
+    assert.equal(results.economy["board--A"].status, "failed");
+    assert.equal(results.economy["board--B"].status, "failed");
+    assert.equal(results.economy["board--C"].status, "failed");
+  } finally {
+    await close(server);
+    rmSync(runDir, { recursive: true, force: true });
+  }
+});
