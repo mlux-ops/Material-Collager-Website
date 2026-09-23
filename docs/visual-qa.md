@@ -429,179 +429,93 @@ Status: **STATIC CASCADE TRACE ONLY - BROWSER PASS PENDING**
 
 ## Scope
 
-Task 3C.1 (R16) gives each of the five item fields (`Item type`, `Product / model`,
-`Brand`, `Finish / color`, `Generation notes`) its own visible `<label htmlFor>`,
-replacing the implicit `<label>` wrapper whose only labelable child was the help
-`<button>` (so the input itself had no accessible label). Task 3C.2 (R20) re-anchors
-the item-field help bubble (`.field-help`) to grow up-and-right from its own label's
-left edge instead of growing 210px leftward from the help button, which
+Task 3C.1 (R16) gives each item field its own visible `<label htmlFor>` (the
+implicit `<label>` it replaces had the help `<button>` as its only labelable
+child, so the input itself had no accessible label). Task 3C.2 (R20) re-anchors
+the item-field help bubble (`.field-help`) to grow up-and-right from its own
+label's left edge instead of 210px leftward from the help button, which
 `.references-surface`'s `overflow: auto` clipped for the first column's cards.
 
-This pass was implemented and verified via static CSS-cascade tracing and the
-lint/typecheck gates only, per the controller's instruction: the Browser preview
-cannot serve this worktree's branch and has no WebGL, so no dev server, `.dev.vars`,
-or Browser/preview tool was used. Nothing below was observed in a running browser;
-every value is either a "before" measurement handed to this pass by the controller
-(captured on the equivalent `main` checkout, whose `app/globals.css` is byte-identical
-to this worktree's) or a value derived by tracing which CSS rules apply to the new
-markup and classes.
+Verified via static CSS-cascade tracing and the lint/typecheck gates only, per
+the controller: the Browser preview cannot serve this branch and has no WebGL.
+No dev server, `.dev.vars`, or Browser tool was used; nothing below was observed
+in a running browser. Before-measurements are the controller's, from the
+equivalent `main` checkout (`app/globals.css` byte-identical to this worktree's).
 
-## Before measurements (recorded by the controller, prior to any code change)
+## Before measurements
 
-Page `/generator`, item 1 ("vanity faucet" fixture), **Item details** open,
-viewport 1440x900 unless noted.
+`/generator`, item 1, **Item details** open, 1440x900 unless noted.
 
-### R16 - `.item-fields > *` first child ("Item type" field)
-
-```json
-{
-  "label": {
-    "fontSize": "11px",
-    "fontWeight": "650",
-    "color": "rgb(101, 112, 105)",
-    "marginBottom": "5px",
-    "display": "flex",
-    "gap": "6px"
-  },
-  "fieldBox": { "x": 247, "y": 299.09375, "width": 303.328125, "height": 55.5, "top": 299.09375, "right": 550.328125, "bottom": 354.59375, "left": 247 },
-  "inputBox": { "x": 247, "y": 320.59375, "width": 303.328125, "height": 34, "top": 320.59375, "right": 550.328125, "bottom": 354.59375, "left": 247 },
-  "inputLabels": []
-}
-```
-
-`inputLabels: []` is the R16 defect: the input had no associated `<label>` because
-the help `<button>` was the implicit label's only labelable control.
-
-### R20 - first help bubble vs. the reference tray
-
-Viewport 1440x900, item 1's first help button (`aria-label` starts "Item type: ..."),
-focused via `button.focus()` (a real DOM focus state; `:focus-within` is what the
-CSS branches on, so this matches keyboard/assistive-tech use - a synthetic click
-did not move `document.activeElement` in this preview environment, recorded as a
-deviation at the time):
-
-```json
-{
-  "inside": false,
-  "bubble": { "x": 111.453125, "y": 292.34375, "width": 210, "height": 62.171875, "top": 292.34375, "right": 321.453125, "bottom": 354.515625, "left": 111.453125 },
-  "tray":   { "x": 240, "y": 66, "width": 652, "height": 834, "top": 66, "right": 892, "bottom": 900, "left": 240 }
-}
-```
-
-`inside: false`: the bubble grew 210px leftward from the help button and was
-clipped by `.references-surface`'s `overflow: auto` well before reaching the
-tray's own left edge (`bubble.left` 111.45 vs `tray.left` 240).
+- R16, `.item-fields > *` first field ("Item type"): `label` computed style
+  `{fontSize:11px, fontWeight:650, color:rgb(101,112,105), marginBottom:5px,
+  display:flex, gap:6px}`; `fieldBox`/`inputBox` both `{x:247, width:303.328125}`;
+  `inputLabels: []` — the R16 defect.
+- R20, first help bubble vs. tray: `bubble {x:111.453125, width:210}`,
+  `tray {x:240, width:652}`, `inside: false` — the bubble grew 210px leftward and
+  was clipped by the tray's `overflow: auto` before reaching `tray.left`.
 
 ## R16 - static cascade trace (after-expectation)
 
-The diff (`FieldLabel` in `app/generator/page.tsx`, and the new `.item-field` /
-`.item-field > .field-label` rules in `app/globals.css`) changes only: the wrapper
-element (`<label>` -> `<div class="item-field">`), the addition of an explicit
-`<label htmlFor>` around the field's text, and which selector supplies the label
-row's color/size/weight/spacing. It does not touch `.item-fields`'s own grid
-definition, `.material-item`, `.items-list`, or any input/textarea rule.
+The diff changes only the wrapper element (`<label>` -> `<div class="item-field">`),
+adds an explicit `<label htmlFor>`, and moves the label row's styling from
+`label > span` to `.item-field > .field-label`. No sizing property of
+`.item-fields`/`.material-item`/`.items-list` is touched.
 
-| Element | Property | Before (measured) | After (traced) | Match |
+| Element | Property | Before | After | Match |
 | --- | --- | --- | --- | --- |
-| `.field-label` | `display` | `flex` | `flex` -- still set by the unmodified `.field-label { display: flex; ... }` rule (class beats the `label > span` type-selector combo it used to also match) | Yes |
-| `.field-label` | `gap` | `6px` | `6px` -- same rule, unmodified | Yes |
-| `.field-label` | `color` | `rgb(101, 112, 105)` (`--muted`) | `rgb(101, 112, 105)` -- before, from `label > span` (matched because `.field-label` was a `<span>` directly inside a `<label>`); after, `.field-label` is a `<span>` inside a `<div class="item-field">`, so `label > span` no longer matches anything in this markup, and the new `.item-field > .field-label { color: var(--muted); ... }` supplies the identical value | Yes |
-| `.field-label` | `font-size` | `11px` | `11px` -- same substitution as `color`, new rule states `11px` explicitly | Yes |
-| `.field-label` | `font-weight` | `650` | `650` -- same substitution, new rule states `650` explicitly | Yes |
-| `.field-label` | `margin-bottom` | `5px` | `5px` -- same substitution, new rule states `5px` explicitly | Yes |
-| `.item-fields > *` (wrapper) | `fieldBox` (position/size) | `{x:247, width:303.328125, height:55.5, ...}` | Unchanged -- no sizing property (`.item-fields`'s `display`/`gap`/`grid-template-columns`, `.material-item`/`.items-list` padding, gap, or track sizing) is touched by this diff; the wrapper's tag changes from `<label>` to `<div>`, both of which are blockified identically as a grid item, and `min-width: 0` is preserved via the new `.item-field` rule replacing the old `label { min-width: 0; }` | Yes (within 0.5px, unchanged by construction) |
-| input/textarea | `inputBox` (position/size) | `{x:247, width:303.328125, height:34, ...}` | Unchanged -- `.item-fields input, .item-fields textarea` is an unmodified descendant-combinator rule; the input is still a descendant of `.item-fields` regardless of the wrapper's tag name | Yes (within 0.5px, unchanged by construction) |
-| `input#...-role` | `labels` (via `input.labels`) | `[]` | `["Item type"]` -- `<label htmlFor="${item.uiKey}-role">Item type</label>` now explicitly targets `<input id="${item.uiKey}-role">` | Yes (fixes the defect) |
-| `.item-fields [id]` | id uniqueness | n/a (no ids existed before) | `item.uiKey` (from `createUiKey()`, minted once per item and stable across reorders) makes every one of the 5xN ids (`${uiKey}-role`, `-name`, `-brand`, `-finish`, `-notes`, and their `-help` companions) unique per item and stable when items are reordered or removed | Traced correct; not executed in a browser |
+| `.field-label` | `display` | `flex` | `flex` (unmodified rule) | Yes |
+| `.field-label` | `gap` | `6px` | `6px` (unmodified rule) | Yes |
+| `.field-label` | `color` | `rgb(101,112,105)` | same, now from `.item-field > .field-label` (`label > span` no longer matches) | Yes |
+| `.field-label` | `font-size` | `11px` | `11px`, same substitution | Yes |
+| `.field-label` | `font-weight` | `650` | `650`, same substitution | Yes |
+| `.field-label` | `margin-bottom` | `5px` | `5px`, same substitution | Yes |
+| wrapper | `fieldBox` | `width:303.33` | unchanged (no sizing property touched; grid-item blockifies identically; `min-width:0` preserved) | Yes, within 0.5px |
+| input | `inputBox` | `width:303.33` | unchanged (`.item-fields input` untouched) | Yes, within 0.5px |
+| `input#...-role` | `.labels` | `[]` | `["Item type"]` | Yes, fixes defect |
+| `.item-fields [id]` | uniqueness | n/a | guaranteed by stable `item.uiKey` | Traced correct |
 
-No mismatch found. `.item-fields label > span { font-size: 11px; }` (an older,
-redundant rule) no longer matches anything in the new markup -- no `<span>` is a
-direct child of a `<label>` inside `.item-fields` any more (the new inner
-`<label htmlFor>` wraps only plain text) -- but since it only ever restated the same
-`11px` the base rule already gave, its going inert changes nothing.
+`.item-fields label > span { font-size: 11px }` is deleted: no `<span>` is a
+direct child of a `<label>` in the new markup, confirmed by grep.
 
-## R20 - static placement argument (why the bubble stays inside the card)
+## R20 - placement argument (conclusions)
 
-`FieldLabel`/`.field-help` is used only for these five item fields (confirmed by
-searching `app/generator/page.tsx` for `FieldLabel` and `.field-help`); there is no
-other call site whose bubble positioning this scoped fix could disturb.
+- **Horizontal, all viewports, by construction.** `.field-label` (`position:
+  relative`) is the bubble's containing block; `.help-wrap` is `position: static`.
+  `left: 0` pins the bubble to `.field-label`'s own left edge; `width: min(210px,
+  100%)` caps its width at `.field-label`'s own width — so it can never spill past
+  the card's right edge, for any column/card/desktop viewport. Confirmed that
+  neither `@media (max-width: 1240px)` (~1183) nor either `@media (max-width:
+  1280px)` block (~2347, ~3271) touches `.material-item`/`.items-list`/
+  `.item-fields`/`.field-label`/`.help-wrap`/`.field-help`.
+- **Vertical.** `bottom: calc(100% + 6px)` grows the bubble upward; item 1's first
+  field has ~233px of clearance to the tray's top, well more than the old bubble's
+  own height (62px).
+- **390x844 (phone) — corrected after review.** The phone media query's
+  `.generator-shell .field-help` ties on specificity with `.item-fields
+  .field-help` but wins by source order for every property it sets. It did not
+  set `bottom`, so `.item-fields .field-help`'s `bottom: calc(100% + 6px)` leaked
+  through: with `position: fixed` (containing block = viewport) and `top` also
+  set, CSS 2.1 §10.6.4 solves a negative `auto` height, collapsing the bubble to
+  zero height on phones. Fixed by adding `bottom: auto;` and `transform-origin:
+  100% 14px;` (restoring the pre-3C.2 value, which also leaked) to the phone
+  block. Full per-property table is in the WP-3C report (outside this repo).
+  Phones are not literally unchanged — `bottom`/`transform-origin` are now
+  explicit resets rather than silently absent — but the computed result matches
+  pre-3C.2 behavior.
+- A residual ~24px gap between an independent CSS re-derivation of the first
+  card's width and the measured `fieldBox` width affects neither argument (R16: no
+  sizing property changed; R20: containment holds regardless of actual width).
 
-**Horizontal - true by construction, independent of viewport or column count.**
-`.item-fields .field-label { position: relative }` plus `.item-fields .help-wrap
-{ position: static }` make `.field-label` the containing block for the
-absolutely-positioned `.field-help` bubble (rather than `.help-wrap`, as before).
-`.field-label` is a block-level flex container inside a plain-block `.item-field`,
-itself the sole column of `.item-fields`'s single-column grid (`grid-template-columns:
-1fr`), so `.field-label` always fills exactly the item-field's own content width --
-which sits entirely inside `.material-item`'s padded content box, which is in turn
-sized by `.items-list`'s grid to fit inside `.references-surface`'s padded content
-box (the scrolling tray). The new rule sets `left: 0` (flush with `.field-label`'s
-own left edge, always at or past the tray's left edge by at least the card's own
-padding+border) and `width: min(210px, 100%)`, where `100%` resolves against that
-same containing block. Because the bubble's width can never exceed `.field-label`'s
-own width, its right edge can never exceed `.field-label`'s right edge either -- so
-the bubble cannot spill past the card's own right edge, regardless of which column
-the card sits in, how many columns fit at a given viewport width, or how wide the
-card itself is. This is a structural guarantee, not a value that could drift with a
-breakpoint. It holds identically for the first field and the last field
-(`Generation notes`, a `.wide-field`) of any card, since `.item-fields .wide-field
-{ grid-column: auto }` is a no-op in a single-column grid -- every field is the same
-width.
+## Pending - live browser check (post-merge)
 
-**Vertical.** `bottom: calc(100% + 6px)` grows the bubble upward from the label's
-own top edge. Using the before measurements above (same page state, same viewport):
-item 1's first field sits at `fieldBox.top` approximately 299 while the tray's own
-top is `tray.top = 66` -- roughly 233px of clearance above the field before reaching
-the tray's top edge, comfortably more than the old bubble's own height (`62.17px`)
-or a noticeably longer help string wrapped at 210px width. Every other field in the
-same card sits lower still (more clearance above it), and a card in a lower grid row
-has the rows above it for clearance too -- so the first field of the first (topmost)
-card is the tightest case, and it has ample room.
+Nothing above was observed in a running browser.
 
-**1440x900, 1280x800, 1024x768.** None of the three intermediate/desktop breakpoints
-(`@media (max-width: 1280px)`, which only repositions `.workbench`/
-`.controls-surface`/`.references-surface`/`.output-surface`) touch `.material-item`,
-`.items-list`, `.item-fields`, `.field-label`, `.help-wrap`, or `.field-help` at all --
-so the card/field-internal relationships the argument above relies on are identical
-at all three widths. Only the number of `.items-list` columns (and hence overall
-card width) changes between them, and the argument above does not depend on that
-number.
-
-**390x844.** The combined query `@media (max-width: 760px), (orientation: landscape)
-and (max-width: 960px) and (max-height: 700px)` matches at 390x844 (`max-width: 760px`
-alone). Inside it, `.generator-shell .field-help { position: fixed; ... }` has the
-same specificity (two classes) as the new `.item-fields .field-help` rule but comes
-later in `app/globals.css`'s source order, so it wins outright at this width -- the
-phone bubble is the pre-existing fixed, viewport-anchored one, completely unchanged
-by this fix. (`1024x768` does not match this query: it is landscape, but `1024 > 960`
-and `768 > 700`, so neither clause applies.)
-
-A residual, unreconciled discrepancy: independently re-deriving the first card's
-outer width from `.items-list`'s `repeat(auto-fit, minmax(255px, 1fr))` track sizing
-and `.references-surface`'s measured 652px rect did not land on exactly the measured
-303.328125px `fieldBox` width (off by roughly 24px, under either a 1- or
-2-card-per-row hypothesis). This does not affect either argument above -- R16's
-equivalence holds because no sizing property changed, and R20's containment holds
-by the `min(210px, 100%)` construction regardless of the actual card width -- but it
-means the exact column arrangement at 1440px was not independently confirmed from
-source alone, and is called out here rather than papered over.
-
-## Pending - live browser check (post-merge, for the controller/user)
-
-Nothing above was observed in a running browser. The following still need a real
-`vinext dev` session against this merged branch, per `AGENTS.md`'s verification
-workflow:
-
-- Re-run the Task 3C.1 Step 1/Step 4 snippet on `/generator` after the merge and
-  confirm the `label`/`fieldBox`/`inputBox`/`inputLabels` values match this trace's
-  "after" column; click the "Item type" text and confirm focus lands on the input;
-  click the "?" button and confirm focus lands on the button (not the input) and
-  the bubble shows; reorder/remove an item and confirm the `.item-fields [id]`
-  uniqueness check.
-- Re-run the Task 3C.2 Step 1/Step 3 snippet at 1440x900, 1280x800, 1024x768 (via
-  `resize_window`) and 390x844 (`preset: "mobile"`, then reload) on the first and
-  last field of the first and last visible card; confirm `inside: true` at the three
-  desktop sizes and that the phone bubble renders as before at 390x844.
-- The two known-gap dialogs from Task 3B.2 (Workbench wire-drop-to-empty-canvas
-  prompt and the restore-error alertdialog) are unrelated to this pass and remain
-  as recorded in the WP-3B entry above.
+- Re-run the R16 snippet; confirm the "after" column; click label text (focus ->
+  input); click "?" (focus -> button, bubble shows); reorder/remove an item (ids
+  stay unique).
+- Re-run the R20 snippet at 1440x900, 1280x800, 1024x768, 390x844 on the first/last
+  field of the first/last visible card; confirm `inside: true` at the three desktop
+  sizes, and confirm the phone help bubble renders with its content at 390x844
+  (the zero-height regression this fix round corrected).
+- The two known-gap dialogs from Task 3B.2 are unrelated and remain as recorded in
+  the WP-3B entry above.

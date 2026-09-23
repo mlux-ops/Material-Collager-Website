@@ -1788,10 +1788,6 @@ body {
   min-height: 62px;
 }
 
-.item-fields label > span {
-  font-size: 11px;
-}
-
 .help-button {
   height: 16px;
   min-height: 16px;
@@ -3355,7 +3351,9 @@ button.site-wordmark {
     position: fixed;
     top: calc(58px + env(safe-area-inset-top));
     right: max(10px, env(safe-area-inset-right));
+    bottom: auto;
     left: max(10px, env(safe-area-inset-left));
+    transform-origin: 100% 14px;
     width: auto;
   }
   .generator-shell summary {
