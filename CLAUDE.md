@@ -29,7 +29,7 @@ Node 22.13+ required (`engines` in `package.json`).
 ### Tests
 
 `npm run test:transitions` is misnamed: its glob is `tests/*.test.mjs`, so it runs
-the **entire** suite (822 tests), not just transitions. Use it as the run-all.
+the **entire** suite (834 tests), not just transitions. Use it as the run-all.
 
 Individual suites:
 
@@ -203,9 +203,14 @@ localhost to mint a JWT. Blank both in `.dev.vars`, which overrides
   (workbench, scene-lab, `db/index.ts`, and the `examples/` tree). The gate is
   `node scripts/typecheck-baseline.mjs`: it fails when tsc reports more errors
   than `scripts/typecheck-baseline.json` records, or when tsc does not run
-  cleanly. Pay debt down by lowering that number, never by raising it.
-  Cloudflare's own types come from `@cloudflare/workers-types` via tsconfig
-  `types`; that array also has to list `node`, because naming it at all turns
+  cleanly. Pay debt down by lowering that number, never by raising it. A run
+  that stopped before type-checking fails too: an option error (a `types`
+  entry that does not resolve because `node_modules` is stale), a syntax error
+  or a missing global type makes tsc report a few errors, under the baseline,
+  having checked nothing. The gate runs `tsc --listFilesOnly` first to catch
+  the first two, since that pass reports option and syntax errors but no type
+  errors. Cloudflare's own types come from `@cloudflare/workers-types` via
+  tsconfig `types`; that array also has to list `node`, because naming it at all turns
   off automatic `@types/*` inclusion. `db/index.ts` still errors because
   workers-types' generic `Env` has no bindings — the fix is a generated
   `worker-configuration.d.ts` from `wrangler types`, not a hand-written
