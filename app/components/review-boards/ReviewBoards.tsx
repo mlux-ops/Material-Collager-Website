@@ -265,6 +265,11 @@ export function ReviewBoards() {
 
   const remove = useCallback(async () => {
     if (!activeId) return;
+    // Everything collected for the project goes with it, and none of it comes
+    // back: say what, and let Cancel do nothing at all. The sheet itself is
+    // never written by a delete (see autoboard-projects.ts deleteProject).
+    const name = shown?.name ? `"${shown.name}"` : "this project";
+    if (!window.confirm(`Delete ${name}? Its collected photos, board notes, renders and row edits are removed for good. The Smartsheet is not changed.`)) return;
     setBusy("deleting");
     setError("");
     try {
@@ -276,7 +281,7 @@ export function ReviewBoards() {
     } finally {
       setBusy("");
     }
-  }, [activeId, loadProjects]);
+  }, [activeId, loadProjects, shown]);
 
   const reloadPhotos = useCallback(async () => {
     if (!activeId) return;
