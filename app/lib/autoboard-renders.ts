@@ -266,14 +266,19 @@ export async function setRenderStatus(renderId: string, status: unknown): Promis
   const DB = await ensureRenderStorage();
   const row = await DB.prepare("SELECT * FROM autoboard_renders WHERE id = ?").bind(renderId).first<RenderRow>();
   if (!row) return null;
+  // One selection per board and kind. Clearing the others and marking this one
+  // go out as ONE batch, which D1 runs as a transaction: two picks made at the
+  // same time can no longer interleave into two selections, and a failure
+  // part-way can no longer leave the board with none.
+  const statements: D1PreparedStatement[] = [];
   if (status !== "candidate") {
-    await DB.prepare(
-      "UPDATE autoboard_renders SET status = 'candidate' WHERE project_id = ? AND board_id = ? AND kind = ? AND id != ?",
-    )
-      .bind(row.project_id, row.board_id, row.kind, renderId)
-      .run();
+    statements.push(
+      DB.prepare("UPDATE autoboard_renders SET status = 'candidate' WHERE project_id = ? AND board_id = ? AND kind = ? AND id != ?")
+        .bind(row.project_id, row.board_id, row.kind, renderId),
+    );
   }
-  await DB.prepare("UPDATE autoboard_renders SET status = ? WHERE id = ?").bind(status, renderId).run();
+  statements.push(DB.prepare("UPDATE autoboard_renders SET status = ? WHERE id = ?").bind(status, renderId));
+  await DB.batch(statements);
   return publicRender({ ...row, status: status as RenderStatus });
 }
 
