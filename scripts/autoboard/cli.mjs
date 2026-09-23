@@ -1058,6 +1058,10 @@ async function commandFinalize(values, variantIds) {
 // already produced.
 // ---------------------------------------------------------------------------
 
+// Mirrors COMPLETE_STATUSES in app/api/economy/route.ts: once a job reaches
+// one of these it will never change again, so batch-status stops waiting on it.
+const TERMINAL_ECONOMY_STATUSES = new Set(["completed", "failed", "expired", "cancelled"]);
+
 async function commandBatchFinalize(values, variantIds) {
   if (!values.run) throw new Error("Pass --run <run-id>.");
   if (!variantIds.length) throw new Error("Pass at least one variantId (e.g. penthouse-kitchen-material--A).");
@@ -1178,23 +1182,47 @@ async function commandBatchStatus(values) {
 
   const baseUrl = (values["base-url"] ?? "http://localhost:3000").replace(/\/+$/, "");
   await waitForServer(baseUrl);
-  // GET /api/economy refreshes only its two least-recently-updated pending
-  // jobs per call (see the `pending` query in app/api/economy/route.ts), so
-  // one request advances at most two of this run's submissions. Repeat until
-  // a round changes none of the tracked jobs' statuses — everything left is
-  // either terminal or has nothing pending to check — or the cap below is
-  // reached. Repeats are close to free: with QA disabled (see refreshJob in
-  // that route), a refresh only checks status and, once, downloads a result.
-  const MAX_STATUS_POLLS = Math.max(4, Math.ceil(entries.length / 2) + 2);
+  // GET /api/economy refreshes only its two globally least-recently-updated
+  // pending jobs per call (see the `pending` query in
+  // app/api/economy/route.ts) — not necessarily two of THIS run's, since
+  // other pending jobs (another run, another tab) compete for the same two
+  // slots. So "nothing changed between two rounds" is not a safe stopping
+  // signal: an untouched job's last-known status just hasn't changed either,
+  // which looks identical to it having been re-confirmed. Instead, keep
+  // polling until every tracked job is either terminal or has an updatedAt
+  // at or after this call's start — proof it was actually checked this run —
+  // or the cap is reached. The cap is sized from how many non-terminal
+  // economy jobs the LATEST response shows, not just this run's tracked
+  // count, for the same reason. Repeats are close to free: with QA disabled
+  // (see refreshJob in that route), a refresh only checks status and, once,
+  // downloads a result.
+  const pollStartedAt = Date.now();
+  const isSettled = (job) => !job || TERMINAL_ECONOMY_STATUSES.has(job.status) || job.updatedAt >= pollStartedAt;
   let jobsById = new Map();
-  for (let poll = 0; poll < MAX_STATUS_POLLS; poll++) {
-    const response = await fetch(`${baseUrl}/api/economy`, { headers: activeAccessHeaders });
-    const json = await response.json().catch(() => null);
-    if (!response.ok || !json?.ok) throw new Error(json?.error ?? `HTTP ${response.status} from /api/economy`);
-    const next = new Map(json.jobs.map((job) => [job.id, job]));
-    const stable = entries.every(([, submission]) => jobsById.get(submission.jobId)?.status === next.get(submission.jobId)?.status);
-    jobsById = next;
-    if (stable) break;
+  for (let poll = 0; ; poll++) {
+    let json;
+    try {
+      const response = await fetch(`${baseUrl}/api/economy`, { headers: activeAccessHeaders });
+      json = await response.json().catch(() => null);
+      if (!response.ok || !json?.ok) throw new Error(json?.error ?? `HTTP ${response.status} from /api/economy`);
+    } catch (error) {
+      // Keep whatever the last successful round already learned instead of
+      // discarding it: a transient failure here must not cost outputs that
+      // are already confirmed completed by an earlier, successful round.
+      console.log(`  batch-status: a status check failed (${error instanceof Error ? error.message : error}); continuing with the last successful read.`);
+      break;
+    }
+    jobsById = new Map(json.jobs.map((job) => [job.id, job]));
+    if (entries.every(([, submission]) => isSettled(jobsById.get(submission.jobId)))) break;
+    const pendingElsewhere = json.jobs.filter((job) => !TERMINAL_ECONOMY_STATUSES.has(job.status)).length;
+    const cap = Math.max(4, Math.ceil(pendingElsewhere / 2) + 2);
+    if (poll + 1 >= cap) {
+      const unsettled = entries
+        .filter(([, submission]) => !isSettled(jobsById.get(submission.jobId)))
+        .map(([variantId]) => variantId);
+      console.log(`  batch-status: stopped after ${poll + 1} rounds with ${unsettled.length} job(s) not yet confirmed: ${unsettled.join(", ")}. Run batch-status again to keep checking.`);
+      break;
+    }
   }
 
   let changed = false;

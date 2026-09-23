@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { test } from "node:test";
 import path from "node:path";
@@ -149,30 +149,110 @@ test("CLI generate records a single failed request as an error with diagnostics 
   }
 });
 
-test("CLI batch-status repeats the GET until nothing changes, so more than two pending jobs still advance in one run", async () => {
-  const runId = `run-cli-batch-status-${process.pid}-${Date.now()}`;
+function runBatchStatus(runId, baseUrl) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [
+      "--experimental-strip-types", "scripts/autoboard/cli.mjs", "batch-status",
+      "--run", runId, "--base-url", baseUrl,
+    ], { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.once("error", reject);
+    child.once("close", (status) => resolve({ status, stdout, stderr }));
+  });
+}
+
+test("CLI batch-status keeps polling until every tracked job is confirmed, not just until nothing changes", async () => {
+  const runId = `run-cli-batch-status-fair-${process.pid}-${Date.now()}`;
+  const runDir = path.join(process.cwd(), "autoboard-runs", runId);
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(path.join(runDir, "plan.json"), JSON.stringify({ runId, source: "offline-manifest", variants: [], boards: [] }, null, 2));
+  // Five tracked jobs, oldest (job-a) to newest (job-e). /api/economy only
+  // ever refreshes the two globally oldest non-terminal jobs per call (see
+  // the `pending` LIMIT in app/api/economy/route.ts), so with five tracked
+  // jobs a round can leave job-e completely untouched while STILL reporting
+  // "in_progress" for everyone — identical status text to the round before,
+  // even though different jobs were actually checked. Only on round 3 does
+  // job-e become the two oldest and finally get checked, where it completes.
+  const now = Date.now();
+  const ids = ["job-a", "job-b", "job-c", "job-d", "job-e"];
+  writeFileSync(path.join(runDir, "results.json"), JSON.stringify({
+    candidates: {},
+    finals: {},
+    economy: Object.fromEntries(ids.map((id, index) => [
+      `board--${String.fromCharCode(65 + index)}`, { jobId: id, status: "in_progress" },
+    ])),
+  }, null, 2));
+  const state = new Map(ids.map((id, index) => [id, { status: "in_progress", updatedAt: now - (ids.length - index) * 1000 }]));
+  const PNG = Buffer.from(
+    "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de0000000c4944415408d763f8cfc0c0c0c40000000704fe07b3ee7e0000000049454e44ae426082",
+    "hex",
+  );
+
+  const server = createServer((request, response) => {
+    if (request.url === "/api/economy") {
+      // Mirrors the real `pending` query: refresh only the two rows with the
+      // oldest updatedAt among the non-terminal ones, and give them a fresh
+      // updatedAt — exactly what the round-1 fairness bump does even when a
+      // check fails, and what a real refresh does when it succeeds.
+      const nonTerminal = [...state.entries()].filter(([, job]) => job.status !== "completed" && job.status !== "failed");
+      nonTerminal.sort((a, b) => a[1].updatedAt - b[1].updatedAt);
+      for (const [id, job] of nonTerminal.slice(0, 2)) {
+        if (id === "job-e") job.status = "completed";
+        job.updatedAt = Date.now();
+      }
+      const jobs = [...state.entries()].map(([id, job]) => ({
+        id, status: job.status, updatedAt: job.updatedAt, error: null,
+        libraryVisible: false, model: null, quality: null, background: "opaque", outputFormat: "png", usage: null, costUsd: null,
+      }));
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ ok: true, jobs }));
+      return;
+    }
+    if (request.url === "/api/economy/output/job-e") {
+      response.writeHead(200, { "Content-Type": "image/png" });
+      response.end(PNG);
+      return;
+    }
+    response.writeHead(404);
+    response.end();
+  });
+  await listen(server);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const result = await runBatchStatus(runId, baseUrl);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    const results = JSON.parse(readFileSync(path.join(runDir, "results.json"), "utf8"));
+    const savedEntry = Object.values(results.economy).find((entry) => entry.jobId === "job-e");
+    assert.equal(savedEntry.status, "completed");
+    assert.ok(savedEntry.savedPath, "job-e's output should have been downloaded and saved");
+    assert.ok(existsSync(savedEntry.savedPath));
+  } finally {
+    await close(server);
+    rmSync(runDir, { recursive: true, force: true });
+  }
+});
+
+test("CLI batch-status keeps what it already learned if a later GET fails, rather than discarding the run", async () => {
+  const runId = `run-cli-batch-status-flaky-${process.pid}-${Date.now()}`;
   const runDir = path.join(process.cwd(), "autoboard-runs", runId);
   mkdirSync(runDir, { recursive: true });
   writeFileSync(path.join(runDir, "plan.json"), JSON.stringify({ runId, source: "offline-manifest", variants: [], boards: [] }, null, 2));
   writeFileSync(path.join(runDir, "results.json"), JSON.stringify({
     candidates: {},
     finals: {},
-    economy: {
-      "board--A": { jobId: "job-a", status: "validating" },
-      "board--B": { jobId: "job-b", status: "validating" },
-      "board--C": { jobId: "job-c", status: "validating" },
-    },
+    economy: { "board--A": { jobId: "job-a", status: "in_progress" } },
   }, null, 2));
 
-  // /api/economy only ever advances its two least-recently-updated pending
-  // jobs per call (see the `pending` LIMIT in app/api/economy/route.ts), so
-  // job-c only settles on the third round here — proving one CLI invocation
-  // must poll more than once to fully drain three tracked submissions.
-  const rounds = [
-    [{ id: "job-a", status: "in_progress" }, { id: "job-b", status: "in_progress" }, { id: "job-c", status: "validating" }],
-    [{ id: "job-a", status: "failed" }, { id: "job-b", status: "failed" }, { id: "job-c", status: "in_progress" }],
-    [{ id: "job-a", status: "failed" }, { id: "job-b", status: "failed" }, { id: "job-c", status: "failed" }],
-  ];
+  // The first round succeeds but leaves job-a still running (its updatedAt
+  // predates the CLI's own start, so it does not count as settled); every
+  // round after that answers 500. The command must still exit cleanly using
+  // what round 1 already learned, instead of throwing that data away.
   let requestCount = 0;
   const server = createServer((request, response) => {
     if (request.url !== "/api/economy") {
@@ -181,39 +261,28 @@ test("CLI batch-status repeats the GET until nothing changes, so more than two p
       return;
     }
     requestCount += 1;
-    const round = rounds[Math.min(requestCount, rounds.length) - 1];
-    const jobs = round.map((job) => ({
-      libraryVisible: false, model: null, quality: null, background: "opaque",
-      outputFormat: "png", usage: null, costUsd: null, error: null, ...job,
-    }));
-    response.writeHead(200, { "Content-Type": "application/json" });
-    response.end(JSON.stringify({ ok: true, jobs }));
+    if (requestCount === 1) {
+      const jobs = [{
+        id: "job-a", status: "in_progress", updatedAt: Date.now() - 60_000, error: null,
+        libraryVisible: false, model: null, quality: null, background: "opaque", outputFormat: "png", usage: null, costUsd: null,
+      }];
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ ok: true, jobs }));
+      return;
+    }
+    response.writeHead(500, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ ok: false, error: "Internal error" }));
   });
   await listen(server);
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
-  const testCreds = { ["OPENAI_API_KEY"]: "test-key" };
 
   try {
-    const result = await new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, [
-        "--experimental-strip-types", "scripts/autoboard/cli.mjs", "batch-status",
-        "--run", runId, "--base-url", baseUrl,
-      ], { cwd: process.cwd(), env: { ...process.env, ...testCreds }, stdio: ["ignore", "pipe", "pipe"] });
-      let stdout = "";
-      let stderr = "";
-      child.stdout.setEncoding("utf8");
-      child.stderr.setEncoding("utf8");
-      child.stdout.on("data", (chunk) => { stdout += chunk; });
-      child.stderr.on("data", (chunk) => { stderr += chunk; });
-      child.once("error", reject);
-      child.once("close", (status) => resolve({ status, stdout, stderr }));
-    });
+    const result = await runBatchStatus(runId, baseUrl);
     assert.equal(result.status, 0, result.stdout + result.stderr);
-    assert.ok(requestCount > 1, `expected more than one GET to /api/economy, saw ${requestCount}`);
+    assert.ok(requestCount > 1, `expected batch-status to retry past the first round, saw ${requestCount} request(s)`);
+    assert.match(result.stdout, /status check failed/);
     const results = JSON.parse(readFileSync(path.join(runDir, "results.json"), "utf8"));
-    assert.equal(results.economy["board--A"].status, "failed");
-    assert.equal(results.economy["board--B"].status, "failed");
-    assert.equal(results.economy["board--C"].status, "failed");
+    assert.equal(results.economy["board--A"].status, "in_progress");
   } finally {
     await close(server);
     rmSync(runDir, { recursive: true, force: true });
