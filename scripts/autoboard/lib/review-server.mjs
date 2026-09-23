@@ -3,12 +3,13 @@
 // user, direct filesystem access — this is a developer tool, not a deployed
 // service, so it's kept dependency-free (plain node:http, no framework).
 
+import { createHash } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 
-import { addSlot, applySelection, buildRoomIndex, CUSTOM_ID_PREFIX, libraryOptionsForSlot, removeSlot, replaceItemImage, resetSelection, roomKeyFor, slotKind } from "./review-core.mjs";
+import { addSlot, applySelection, buildRoomIndex, CUSTOM_ID_PREFIX, libraryOptionsForSlot, recordImageDigest, removeSlot, replaceItemImage, resetSelection, roomKeyFor, slotKind } from "./review-core.mjs";
 import { makeDiskImageResolver } from "./match.mjs";
 import { readNoteOverrides } from "./notes.mjs";
 import { resolveAccessHeaders } from "./access.mjs";
@@ -444,11 +445,15 @@ export async function startReviewServer({
           matchesCurrentItem = item.rowId === rowId;
         }
 
+        // Same path, new bytes: without the digest, every render made from the
+        // old photo would still pass renderRecordIsStale.
+        recordImageDigest(plan, imagePath, createHash("sha256").update(buffer).digest("hex"));
         if (matchesCurrentItem) {
           const updated = replaceItemImage({ board, slotId, imagePath });
           await persistPlan();
           sendJson(response, 200, { item: serializeItem(updated) });
         } else {
+          await persistPlan();
           sendJson(response, 200, { imagePath });
         }
         return;

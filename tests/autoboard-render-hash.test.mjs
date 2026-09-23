@@ -105,6 +105,22 @@ test("selectionHash ignores bookkeeping the model never sees", () => {
   }
 });
 
+test("a photo replaced in place changes selectionHash only for boards whose items use it", () => {
+  const before = selectionHash(board(), "");
+  const replaced = board({ imageDigests: { "/a.jpg": "1".repeat(64) } });
+  assert.notEqual(selectionHash(replaced, ""), before);
+  assert.notEqual(selectionHash(board({ imageDigests: { "/a.jpg": "2".repeat(64) } }), ""), selectionHash(replaced, ""));
+  // A digest for a path no item uses leaves the hash exactly as it was — which
+  // is what keeps every hash already written to results.json valid.
+  assert.equal(selectionHash(board({ imageDigests: { "/elsewhere.jpg": "3".repeat(64) } }), ""), before);
+});
+
+test("a render made before an in-place photo replacement is stale afterwards", () => {
+  const record = { selectionHash: selectionHash(board(), "") };
+  assert.equal(renderRecordIsStale(board(), record, "final", ""), false);
+  assert.equal(renderRecordIsStale(board({ imageDigests: { "/b.jpg": "4".repeat(64) } }), record, "final", ""), true);
+});
+
 // ---------------------------------------------------------------------------
 // Options and staleness
 // ---------------------------------------------------------------------------

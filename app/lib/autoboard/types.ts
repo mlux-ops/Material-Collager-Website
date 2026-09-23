@@ -87,6 +87,11 @@ export type Board = {
   // historical quality default.
   heroItemId?: string;
   renderOptions?: { quality?: string; background?: string };
+
+  // Set by the CLI review server when a photo is replaced in place: the same
+  // path now holds different bytes, which the path alone cannot show.
+  // selectionHash folds in the digest of every image an item uses that has one.
+  imageDigests?: Record<string, string>;
 };
 
 export type TileEntry = {
