@@ -1307,7 +1307,14 @@ export default function Home() {
       await refreshJobs();
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        setPanelText("Final rendering cancelled. Your draft and references are unchanged.");
+        // Economy's paid submission may have already reached the server (and
+        // OpenAI) before the abort landed — unlike the immediate path, "your
+        // draft and references are unchanged" would be a guess, not a fact.
+        setPanelText(
+          mode === "economy"
+            ? "Final rendering cancelled. A batch may still have been created — check History before resubmitting."
+            : "Final rendering cancelled. Your draft and references are unchanged.",
+        );
       } else {
         // Surface the failed request's diagnostics so Troubleshooting shows the
         // failing stage instead of stale data from the previous draft render.
@@ -1349,6 +1356,10 @@ export default function Home() {
           });
         }
         setPanelText(`Final rendering failed: ${error instanceof Error ? error.message : "Unknown error."}`);
+        // A failed Economy submit can still leave a history row behind (see
+        // POST /api/economy) — with its own guidance on what to check before
+        // resubmitting. Show it immediately rather than after the next poll.
+        if (mode === "economy") await refreshJobs();
       }
     } finally {
       setIsWorking(false);
