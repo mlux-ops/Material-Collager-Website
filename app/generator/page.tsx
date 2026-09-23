@@ -255,13 +255,16 @@ function createReference(file: File, remote?: ReferenceUploadCache, metadata?: P
   };
 }
 
-function FieldLabel({ text, help }: { text: string; help: string }) {
+// The visible text is the field's <label>; the help button sits beside it,
+// not inside it (a <label> may hold only its own control), and the help text
+// is the input's description.
+function FieldLabel({ text, help, htmlFor }: { text: string; help: string; htmlFor: string }) {
   return (
     <span className="field-label">
-      {text}
+      <label htmlFor={htmlFor}>{text}</label>
       <span className="help-wrap">
         <button type="button" className="help-button" aria-label={`${text}: ${help}`}>?</button>
-        <span className="field-help" role="tooltip">{help}</span>
+        <span className="field-help" role="tooltip" id={`${htmlFor}-help`}>{help}</span>
       </span>
     </span>
   );
@@ -1904,26 +1907,26 @@ export default function Home() {
                 <details className="item-details">
                   <summary>Item details</summary>
                   <div className="item-fields">
-                    <label>
-                      <FieldLabel text="Item type" help="What this object contributes to the collage, such as main bathroom tile, vanity faucet, or countertop stone." />
-                      <input value={item.role} onChange={(event) => updateItem(item.uiKey, { role: event.target.value })} />
-                    </label>
-                    <label>
-                      <FieldLabel text="Product / model" help="The exact collection, model number, or SKU when known. Leave blank when the image does not prove it." />
-                      <input value={item.name || ""} onChange={(event) => updateItem(item.uiKey, { name: event.target.value })} />
-                    </label>
-                    <label>
-                      <FieldLabel text="Brand" help="The manufacturer name, not the retailer or showroom." />
-                      <input value={item.brand || ""} onChange={(event) => updateItem(item.uiKey, { brand: event.target.value })} />
-                    </label>
-                    <label className="wide-field">
-                      <FieldLabel text="Finish / color" help="Use the manufacturer finish name when known, or describe the visible material color and sheen." />
-                      <input value={item.finish || ""} onChange={(event) => updateItem(item.uiKey, { finish: event.target.value })} />
-                    </label>
-                    <label className="wide-field">
-                      <FieldLabel text="Generation notes" help="Add exceptions the image cannot communicate, such as which face to show, details to preserve, or objects that must not appear." />
-                      <textarea value={item.notes || ""} onChange={(event) => updateItem(item.uiKey, { notes: event.target.value })} />
-                    </label>
+                    <div className="item-field">
+                      <FieldLabel htmlFor={`${item.uiKey}-role`} text="Item type" help="What this object contributes to the collage, such as main bathroom tile, vanity faucet, or countertop stone." />
+                      <input id={`${item.uiKey}-role`} aria-describedby={`${item.uiKey}-role-help`} value={item.role} onChange={(event) => updateItem(item.uiKey, { role: event.target.value })} />
+                    </div>
+                    <div className="item-field">
+                      <FieldLabel htmlFor={`${item.uiKey}-name`} text="Product / model" help="The exact collection, model number, or SKU when known. Leave blank when the image does not prove it." />
+                      <input id={`${item.uiKey}-name`} aria-describedby={`${item.uiKey}-name-help`} value={item.name || ""} onChange={(event) => updateItem(item.uiKey, { name: event.target.value })} />
+                    </div>
+                    <div className="item-field">
+                      <FieldLabel htmlFor={`${item.uiKey}-brand`} text="Brand" help="The manufacturer name, not the retailer or showroom." />
+                      <input id={`${item.uiKey}-brand`} aria-describedby={`${item.uiKey}-brand-help`} value={item.brand || ""} onChange={(event) => updateItem(item.uiKey, { brand: event.target.value })} />
+                    </div>
+                    <div className="item-field wide-field">
+                      <FieldLabel htmlFor={`${item.uiKey}-finish`} text="Finish / color" help="Use the manufacturer finish name when known, or describe the visible material color and sheen." />
+                      <input id={`${item.uiKey}-finish`} aria-describedby={`${item.uiKey}-finish-help`} value={item.finish || ""} onChange={(event) => updateItem(item.uiKey, { finish: event.target.value })} />
+                    </div>
+                    <div className="item-field wide-field">
+                      <FieldLabel htmlFor={`${item.uiKey}-notes`} text="Generation notes" help="Add exceptions the image cannot communicate, such as which face to show, details to preserve, or objects that must not appear." />
+                      <textarea id={`${item.uiKey}-notes`} aria-describedby={`${item.uiKey}-notes-help`} value={item.notes || ""} onChange={(event) => updateItem(item.uiKey, { notes: event.target.value })} />
+                    </div>
                   </div>
                 </details>
               </article>
