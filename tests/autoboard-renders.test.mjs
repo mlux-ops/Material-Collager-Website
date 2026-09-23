@@ -74,3 +74,43 @@ test("setting a render back to candidate leaves the others alone", async () => {
   await setRenderStatus("r-a", "candidate");
   assert.deepEqual(await statuses("p-cand"), { "r-a": "candidate", "r-b": "approved" });
 });
+
+const { renderBoardDraft } = await import("../app/lib/autoboard-renders.ts");
+
+function abortBoard() {
+  return {
+    id: "b", unitType: "Penthouse", roomLabel: "Bath 2", collageType: "bathroom_fixture_collage",
+    kindLabel: "Fixture Collage", title: "Bath",
+    items: [{ slotId: "vanity_faucet", role: "vanity faucet", required: true, rowId: "1", sku: "A", brand: "Brizo", name: "Odin Faucet", notes: "", images: [] }],
+  };
+}
+
+test("a board render whose request was already abandoned never reaches generation (R09)", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let calls = 0;
+  await assert.rejects(
+    renderBoardDraft("p-abort", abortBoard(), "", {
+      origin: "http://localhost",
+      signal: controller.signal,
+      generate: async () => { calls += 1; return Response.json({}); },
+    }),
+    { name: "AbortError" },
+  );
+  assert.equal(calls, 0);
+});
+
+test("the incoming request's signal reaches the generation request", async () => {
+  const controller = new AbortController();
+  let forwarded;
+  await assert.rejects(renderBoardDraft("p-abort", abortBoard(), "", {
+    origin: "http://localhost",
+    signal: controller.signal,
+    generate: async (request) => {
+      controller.abort();
+      forwarded = request.signal.aborted;
+      return Response.json({ ok: false, error: "cancelled" }, { status: 499 });
+    },
+  }));
+  assert.equal(forwarded, true);
+});

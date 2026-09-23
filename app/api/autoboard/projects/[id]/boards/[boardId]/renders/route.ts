@@ -42,6 +42,7 @@ export async function POST(request: Request, context: Context) {
       variant,
       generate,
       origin: new URL(request.url).origin,
+      signal: request.signal,
     });
     return Response.json({ ok: true, render }, { status: 201 });
   } catch (error) {

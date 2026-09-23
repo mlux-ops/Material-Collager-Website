@@ -144,6 +144,13 @@ export type RenderDeps = {
    * network request is made to it.
    */
   origin: string;
+  /**
+   * The incoming request's signal. A render the reviewer has already abandoned
+   * stops before anything is read or paid for; once dispatched, the generate
+   * route passes it on to the image API. Aborting cannot un-bill a request
+   * OpenAI already accepted.
+   */
+  signal?: AbortSignal;
 };
 
 /**
@@ -159,6 +166,7 @@ export async function renderBoardDraft(
   instruction: string,
   options: { variant?: Variant; kind?: RenderKind } & RenderDeps,
 ): Promise<BoardRender> {
+  options.signal?.throwIfAborted();
   const DB = await ensureRenderStorage();
   const kind = options.kind ?? "draft";
   const variant = options.variant ?? DEFAULT_VARIANTS[0];
@@ -193,7 +201,7 @@ export async function renderBoardDraft(
   }
 
   const response = await options.generate(
-    new Request(`${options.origin}/api/generate`, { method: "POST", body: form }),
+    new Request(`${options.origin}/api/generate`, { method: "POST", body: form, signal: options.signal }),
   );
   if (!response.ok) {
     const body = await response.text().catch(() => "");
