@@ -1,55 +1,3 @@
-# Visual QA - Workbench dialog focus containment (WP-3B, R14)
-
-Date: 2026-09-22
-Status: **KNOWN GAPS RECORDED - BROWSER PASS PENDING**
-
-## Scope
-
-`useModalFocus` (`app/components/workbench/useModalFocus.ts`) now contains
-Tab/Shift+Tab inside a Workbench dialog, moves focus in on open, supports
-Escape, and restores focus on close. Applied to the template chooser
-(`TemplateGallery`), `ExportDialog`, `GraphManager`'s dialog, and `Spotlight`'s
-own dismissible-modal render (the compact "Add node" overlay). This pass was
-implemented and verified via lint + the typecheck gate only; the controller
-runs the browser checks (see below) once, after integration, since several
-worktrees cannot share the one dev server.
-
-## Known gaps (deliberately not wired to useModalFocus)
-
-- **Wire-drop-to-empty-canvas prompt** (`WorkbenchApp.tsx`, the
-  `role="dialog"` rendered inline inside `CanvasInner`'s `wirePrompt && (...)`
-  block, `aria-label="Connect to a node"`). It renders inline in a
-  conditionally-executed branch of an existing component's render, not its
-  own function component, so a `useModalFocus` call there would be
-  conditional -- hooks cannot be called conditionally. Extracting it into its
-  own component is a larger change than this defect needs and was not
-  verified as part of this review.
-- **Restore-error alertdialog** (`WorkbenchApp.tsx`, `role="alertdialog"`,
-  `aria-label="Could not load your workbench"`). Same inline-conditional
-  constraint. This one is deliberately non-dismissable (no
-  `useModalDismiss`/backdrop-click/Escape path already, by design -- see its
-  own comment) and **must stay non-dismissable** in any later change that
-  gives it a focus trap; only a Retry that actually succeeds may let the user
-  out of it.
-
-## Browser checks not yet performed (skipped per controller instruction; for the controller to run)
-
-- Template chooser: after it opens on an empty canvas,
-  `document.activeElement.closest('[role="dialog"]') !== null`; Tab x10 stays
-  inside; Shift+Tab from the first control wraps to the last; Escape or
-  **Skip** closes it and focus is not left on a removed node.
-- Same two focus checks (open lands inside the dialog; Tab stays contained)
-  repeated for the Export dialog.
-- Task 3B.1 (R17): with `window.prompt` stubbed to return `null`, clicking
-  "+ New workbench" creates nothing -- the graph count in the manager is
-  unchanged and the active graph does not change.
-- Task 3B.3 (R15): `/workbench` still reaches the app normally (`read_page`
-  shows the canvas, not "Loading workbench…"). The failed-chunk branch itself
-  cannot be triggered in a preview without editing code, so it stays a code
-  read, not a browser check.
-
----
-
 # Visual QA - Sunburst migration Task 2 Autoboard Review
 
 Date: 2026-09-08
@@ -152,6 +100,94 @@ this implementation pass.
 ## No-deploy confirmation
 
 No deploy, publish, or production-state write occurred during this QA pass.
+
+---
+
+# Visual QA - Workbench dialog focus containment (WP-3B, R14)
+
+Date: 2026-09-22
+Status: **KNOWN GAPS RECORDED - BROWSER PASS PENDING**
+
+## Scope
+
+`useModalFocus` (`app/components/workbench/useModalFocus.ts`) now contains
+Tab/Shift+Tab inside a Workbench dialog, moves focus in on open, supports
+Escape, and restores focus on close. Applied to the template chooser
+(`TemplateGallery`), `ExportDialog`, `GraphManager`'s dialog, and `Spotlight`'s
+own dismissible-modal render (the compact "Add node" overlay). This pass was
+implemented and verified via lint + the typecheck gate only; the controller
+runs the browser checks (see below) once, after integration, since several
+worktrees cannot share the one dev server.
+
+## Known gaps (deliberately not wired to useModalFocus)
+
+- **Wire-drop-to-empty-canvas prompt** (`WorkbenchApp.tsx`, the
+  `role="dialog"` rendered inline inside `CanvasInner`'s `wirePrompt && (...)`
+  block, `aria-label="Connect to a node"`). It renders inline in a
+  conditionally-executed branch of an existing component's render, not its
+  own function component, so a `useModalFocus` call there would be
+  conditional -- hooks cannot be called conditionally. Extracting it into its
+  own component is a larger change than this defect needs and was not
+  verified as part of this review.
+- **Restore-error alertdialog** (`WorkbenchApp.tsx`, `role="alertdialog"`,
+  `aria-label="Could not load your workbench"`). Same inline-conditional
+  constraint. This one is deliberately non-dismissable (no
+  `useModalDismiss`/backdrop-click/Escape path already, by design -- see its
+  own comment) and **must stay non-dismissable** in any later change that
+  gives it a focus trap; only a Retry that actually succeeds may let the user
+  out of it.
+
+## Fix round 1 — Escape wiring corrected
+
+Date: 2026-09-23
+
+Review found two dialogs where Tab containment shipped without a working
+Escape-to-close:
+
+- `GraphManager`'s dialog omitted `onEscape` entirely, so outside of an
+  in-progress rename, Escape no longer closed the Graph Manager (only the
+  rename row's own handler ran, and that only cancels the rename). Fixed
+  with a guarded `onEscape`: `if (renamingId === null) requestClose();` —
+  `useModalFocus`'s document-level capture listener calls `preventDefault()`
+  but never `stopPropagation()`, and the rename input's own Escape handler
+  doesn't consult `defaultPrevented`, so both behaviors now coexist: Escape
+  during a rename still only cancels the rename (the guard skips the dialog
+  close), and Escape anywhere else in the dialog now closes it, matching
+  every other Workbench dialog.
+- `Spotlight`'s own dismissible-modal render omitted `onEscape`, reasoned at
+  the time as redundant with the search input's own local Escape handler.
+  That reasoning missed that Tab containment now keeps focus inside the
+  dialog on non-input controls (result buttons) too, where the local handler
+  never fires — Escape did nothing there. Fixed by wiring
+  `onEscape: requestClose`; when the input does have focus, both handlers
+  now fire for the same keypress, which is harmless because
+  `useModalDismiss`'s `requestClose` ignores a repeat call while already
+  closing (its `timeoutRef` guard).
+
+## Browser checks not yet performed (skipped per controller instruction; for the controller to run)
+
+- Template chooser: after it opens on an empty canvas,
+  `document.activeElement.closest('[role="dialog"]') !== null`; Tab x10 stays
+  inside; Shift+Tab from the first control wraps to the last; Escape or
+  **Skip** closes it and focus is not left on a removed node.
+- Same two focus checks (open lands inside the dialog; Tab stays contained)
+  repeated for the Export dialog.
+- Task 3B.1 (R17): with `window.prompt` stubbed to return `null`, clicking
+  "+ New workbench" creates nothing -- the graph count in the manager is
+  unchanged and the active graph does not change.
+- Task 3B.3 (R15): `/workbench` still reaches the app normally (`read_page`
+  shows the canvas, not "Loading workbench…"). The failed-chunk branch itself
+  cannot be triggered in a preview without editing code, so it stays a code
+  read, not a browser check.
+- **Escape closes the Graph Manager outside a rename** (fix round 1): open
+  it, press Escape with no row being renamed, and confirm it closes like any
+  other Workbench dialog. Then reopen it, click Rename on a row, press
+  Escape, and confirm ONLY the rename cancels (input reverts to the
+  non-editing row) and the dialog itself stays open.
+- **Escape closes Spotlight's modal from a result button** (fix round 1):
+  open the compact "Add node" overlay, Tab past the search input to a node-
+  type result button, press Escape, and confirm the dialog closes (previously
+  did nothing once focus had moved off the search input).
 
 ---
 

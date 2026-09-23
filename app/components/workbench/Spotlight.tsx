@@ -29,13 +29,16 @@ export function Spotlight({ kinds, onPick, onClose, title, emptyHint }: Spotligh
   // Exit animation for the modal variant (no-op when embedded — onClose absent).
   const { closing, requestClose } = useModalDismiss(() => onClose?.());
   // dialogRef is only attached when onClose is set (the modal variant below),
-  // so this is a no-op for the embedded panel. No onEscape: the search
-  // input already closes on Escape itself (below), and this hook's Escape
-  // listener runs at the document level regardless of which control inside
-  // has focus, so adding it here would just fire requestClose a second,
-  // redundant time. initialFocus keeps the deliberate "focus the search
-  // box, not the Close button" behavior this component already had.
-  useModalFocus(dialogRef, { initialFocus: inputRef });
+  // so this is a no-op for the embedded panel. onEscape is wired even though
+  // the search input already closes on Escape itself (below): that local
+  // handler only fires while the input has focus, but Tab containment now
+  // keeps focus inside this dialog including on result buttons, where
+  // Escape would otherwise do nothing. When the input DOES have focus, both
+  // handlers fire for the same keypress -- harmless, since useModalDismiss's
+  // requestClose ignores a repeat call while already closing (timeoutRef
+  // guard). initialFocus keeps the deliberate "focus the search box, not the
+  // Close button" behavior this component already had.
+  useModalFocus(dialogRef, { initialFocus: inputRef, onEscape: requestClose });
 
   const results = useMemo(() => {
     const needle = query.trim().toLowerCase();

@@ -93,13 +93,20 @@ export function GraphManager({ activeGraphId, onSwitch, onCancelPendingSaves, on
   const [switching, setSwitching] = useState(false);
   const { closing, requestClose } = useModalDismiss(onClose);
   const dialogRef = useRef<HTMLDivElement>(null);
-  // No onEscape here: a rename row already binds its own Escape (to cancel
-  // just the rename, see its input's onKeyDown below). useModalFocus's
-  // listener is a document-level capture handler, so it would fire on every
-  // Escape before that input's own handler ever sees the key -- wiring
-  // onEscape here would close the whole dialog out from under an in-progress
-  // rename instead of only cancelling it.
-  useModalFocus(dialogRef);
+  // Guarded, not unconditional: a rename row binds its own Escape (to cancel
+  // just the rename, see its input's onKeyDown below), and useModalFocus's
+  // listener is a document-level capture handler that fires before that
+  // input's own bubble-phase handler ever sees the key. It only calls
+  // preventDefault(), never stopPropagation(), so the rename input's handler
+  // (which doesn't consult defaultPrevented) still runs afterward -- this
+  // guard just skips the dialog's own close while a rename is in progress,
+  // so Escape cancels ONLY the rename, not both. Outside a rename, Escape
+  // closes the dialog like every other Workbench dialog.
+  useModalFocus(dialogRef, {
+    onEscape: () => {
+      if (renamingId === null) requestClose();
+    },
+  });
 
   const refresh = () => {
     void listGraphs().then(setGraphs).catch(() => setGraphs([]));
