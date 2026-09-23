@@ -2,7 +2,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { DropdownSelect } from "../components/DropdownSelect";
 import { DitherReveal } from "../components/DitherReveal";
 import { SiteNavigation } from "../components/SiteNavigation";
@@ -514,6 +514,12 @@ export default function Home() {
   const layoutPreviewRef = useRef<string | null>(null);
   const apiKey = "";
   const [items, setItems] = useState<UiItem[]>(() => presetItems("bathroom_fixture_collage"));
+  // The item cards' label/input ids come from useId, not item.uiKey: uiKey is
+  // random, so the server-rendered HTML and the first client render would
+  // disagree and React would report a hydration mismatch. useId matches on
+  // both sides, and the card's index keeps each card's ids unique.
+  const fieldIdPrefix = useId();
+  const itemFieldId = (index: number) => `${fieldIdPrefix}-item${index}`;
   const [panelText, setPanelText] = useState("Board ready.");
   const [diagnostics, setDiagnostics] = useState<GenerationDiagnostics | null>(null);
   const [promptPreview, setPromptPreview] = useState("");
@@ -1942,24 +1948,24 @@ export default function Home() {
                   <summary>Item details</summary>
                   <div className="item-fields">
                     <div className="item-field">
-                      <FieldLabel htmlFor={`${item.uiKey}-role`} text="Item type" help="What this object contributes to the collage, such as main bathroom tile, vanity faucet, or countertop stone." />
-                      <input id={`${item.uiKey}-role`} aria-describedby={`${item.uiKey}-role-help`} value={item.role} onChange={(event) => updateItem(item.uiKey, { role: event.target.value })} />
+                      <FieldLabel htmlFor={`${itemFieldId(index)}-role`} text="Item type" help="What this object contributes to the collage, such as main bathroom tile, vanity faucet, or countertop stone." />
+                      <input id={`${itemFieldId(index)}-role`} aria-describedby={`${itemFieldId(index)}-role-help`} value={item.role} onChange={(event) => updateItem(item.uiKey, { role: event.target.value })} />
                     </div>
                     <div className="item-field">
-                      <FieldLabel htmlFor={`${item.uiKey}-name`} text="Product / model" help="The exact collection, model number, or SKU when known. Leave blank when the image does not prove it." />
-                      <input id={`${item.uiKey}-name`} aria-describedby={`${item.uiKey}-name-help`} value={item.name || ""} onChange={(event) => updateItem(item.uiKey, { name: event.target.value })} />
+                      <FieldLabel htmlFor={`${itemFieldId(index)}-name`} text="Product / model" help="The exact collection, model number, or SKU when known. Leave blank when the image does not prove it." />
+                      <input id={`${itemFieldId(index)}-name`} aria-describedby={`${itemFieldId(index)}-name-help`} value={item.name || ""} onChange={(event) => updateItem(item.uiKey, { name: event.target.value })} />
                     </div>
                     <div className="item-field">
-                      <FieldLabel htmlFor={`${item.uiKey}-brand`} text="Brand" help="The manufacturer name, not the retailer or showroom." />
-                      <input id={`${item.uiKey}-brand`} aria-describedby={`${item.uiKey}-brand-help`} value={item.brand || ""} onChange={(event) => updateItem(item.uiKey, { brand: event.target.value })} />
+                      <FieldLabel htmlFor={`${itemFieldId(index)}-brand`} text="Brand" help="The manufacturer name, not the retailer or showroom." />
+                      <input id={`${itemFieldId(index)}-brand`} aria-describedby={`${itemFieldId(index)}-brand-help`} value={item.brand || ""} onChange={(event) => updateItem(item.uiKey, { brand: event.target.value })} />
                     </div>
                     <div className="item-field wide-field">
-                      <FieldLabel htmlFor={`${item.uiKey}-finish`} text="Finish / color" help="Use the manufacturer finish name when known, or describe the visible material color and sheen." />
-                      <input id={`${item.uiKey}-finish`} aria-describedby={`${item.uiKey}-finish-help`} value={item.finish || ""} onChange={(event) => updateItem(item.uiKey, { finish: event.target.value })} />
+                      <FieldLabel htmlFor={`${itemFieldId(index)}-finish`} text="Finish / color" help="Use the manufacturer finish name when known, or describe the visible material color and sheen." />
+                      <input id={`${itemFieldId(index)}-finish`} aria-describedby={`${itemFieldId(index)}-finish-help`} value={item.finish || ""} onChange={(event) => updateItem(item.uiKey, { finish: event.target.value })} />
                     </div>
                     <div className="item-field wide-field">
-                      <FieldLabel htmlFor={`${item.uiKey}-notes`} text="Generation notes" help="Add exceptions the image cannot communicate, such as which face to show, details to preserve, or objects that must not appear." />
-                      <textarea id={`${item.uiKey}-notes`} aria-describedby={`${item.uiKey}-notes-help`} value={item.notes || ""} onChange={(event) => updateItem(item.uiKey, { notes: event.target.value })} />
+                      <FieldLabel htmlFor={`${itemFieldId(index)}-notes`} text="Generation notes" help="Add exceptions the image cannot communicate, such as which face to show, details to preserve, or objects that must not appear." />
+                      <textarea id={`${itemFieldId(index)}-notes`} aria-describedby={`${itemFieldId(index)}-notes-help`} value={item.notes || ""} onChange={(event) => updateItem(item.uiKey, { notes: event.target.value })} />
                     </div>
                   </div>
                 </details>

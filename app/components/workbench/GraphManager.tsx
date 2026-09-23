@@ -107,6 +107,17 @@ export function GraphManager({ activeGraphId, onSwitch, onCancelPendingSaves, on
       if (renamingId === null) requestClose();
     },
   });
+  const renameButtons = useRef(new Map<string, HTMLButtonElement>());
+  const refocusRename = useRef<string | null>(null);
+  // A rename ended from the keyboard (Enter or Escape) hands focus back to its
+  // row's Rename button; unmounting the input would otherwise drop it to
+  // <body>. This runs after the input is gone on purpose: focusing the button
+  // while the input still exists would blur it, and its onBlur commits.
+  useEffect(() => {
+    if (renamingId !== null || refocusRename.current === null) return;
+    renameButtons.current.get(refocusRename.current)?.focus();
+    refocusRename.current = null;
+  });
 
   const refresh = () => {
     void listGraphs().then(setGraphs).catch(() => setGraphs([]));
@@ -216,8 +227,18 @@ export function GraphManager({ activeGraphId, onSwitch, onCancelPendingSaves, on
                     onChange={(event) => setRenameValue(event.target.value)}
                     onBlur={() => void commitRename(meta.id)}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter") void commitRename(meta.id);
-                      if (event.key === "Escape") setRenamingId(null);
+                      if (event.key === "Enter") {
+                        // Focus reaches the Rename button before this key's
+                        // default action runs, so without this the same Enter
+                        // presses the button and reopens the rename.
+                        event.preventDefault();
+                        refocusRename.current = meta.id;
+                        void commitRename(meta.id);
+                      }
+                      if (event.key === "Escape") {
+                        refocusRename.current = meta.id;
+                        setRenamingId(null);
+                      }
                     }}
                   />
                 ) : (
@@ -246,6 +267,10 @@ export function GraphManager({ activeGraphId, onSwitch, onCancelPendingSaves, on
                 <button
                   type="button"
                   className={styles.smallButton}
+                  ref={(element) => {
+                    if (element) renameButtons.current.set(meta.id, element);
+                    else renameButtons.current.delete(meta.id);
+                  }}
                   onClick={() => {
                     setRenamingId(meta.id);
                     setRenameValue(meta.name || "");
