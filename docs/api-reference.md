@@ -51,7 +51,8 @@ Chunked upload pipeline that preserves original files end-to-end.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET / POST | `/api/economy` | Generation-cost accounting (see `tests/workbench-cost.test.mjs`) |
+| POST | `/api/economy` | Queue a final render through OpenAI's Batch API (half price, up to 24h) |
+| GET | `/api/economy` | Refresh up to two pending batches, then list the newest 30 jobs of every render kind. `?ids=<id>,<id>` (at most 200) also returns those Economy jobs as `tracked`, listed or not; the autoboard CLI's `batch-status` relies on it |
 | GET | `/api/economy/output/[id]` | Fetch a costed output |
 
 ## Example: dry-run a board

@@ -21,6 +21,7 @@ import { parseArgs } from "node:util";
 
 import { validateCollageRequest } from "../../app/lib/collage.ts";
 import { SUNBURST_MODEL } from "../../app/lib/sunburst.ts";
+import { RESUBMIT_WARNING } from "../../app/lib/economy-submission-status.ts";
 import {
   DEFAULT_LIBRARY_ROOT,
   SMARTSHEET_SHEET_ID,
@@ -186,13 +187,22 @@ function usage() {
                      stale saved-option/source check.
   autoboard batch-finalize --run <run-id> <variantId> [<variantId>...] [--quality <q>]
                      [--background opaque|transparent] [--base-url <url>] [--force]
+                     [--resubmit <variantId>[,<variantId>...]]
                      Same final render as finalize, submitted through OpenAI's
                      Batch API at 0.5x standard usage rates. Cost is unavailable
                      until the batch completes; check progress with batch-status.
+                     Skips a variant already submitted unless its job failed
+                     outright; one whose failure warns against resubmitting,
+                     or whose submission never got an answer, is skipped too.
+                     --resubmit buys another batch for the variants it names,
+                     and only those. --force only overrides the stale
+                     saved-option/source check.
   autoboard batch-status --run <run-id> [--base-url <url>]
                      Refreshes and reports every batch-finalize submission for
                      this run; downloads a local copy once a job completes
                      (it also becomes visible in the app Library automatically).
+                     Checks each job on the server it was submitted to;
+                     --base-url overrides that.
   autoboard review   --run <run-id> [--port <n>] [--base-url <url>]
                      Local review board: pick items, draft, pick a draft, add
                      notes, confirm, final — renders go to --base-url
@@ -1062,9 +1072,37 @@ async function commandFinalize(values, variantIds) {
 // one of these it will never change again, so batch-status stops waiting on it.
 const TERMINAL_ECONOMY_STATUSES = new Set(["completed", "failed", "expired", "cancelled"]);
 
+// Why batch-finalize must not buy another batch for a variant, or null when it
+// may. Only a job the server reports "failed" is resubmitted without
+// --resubmit, and not one whose error matches RESUBMIT_WARNING (a batch exists
+// or may exist). Anything else is still running, already produced its render,
+// ended (expired, cancelled) in a state its render may still have been billed
+// in, or never confirmed a job at all.
+function resubmitBlocker(submission) {
+  if (!submission) return null;
+  const where = submission.baseUrl ? ` on ${submission.baseUrl}` : "";
+  if (!submission.jobId) {
+    return `its submission${where} at ${submission.submittedAt ?? "an unknown time"} never confirmed a job, so a batch may exist that nothing here tracks; check the app's history and OpenAI's Batches page first`;
+  }
+  const job = `job ${submission.jobId}${where}`;
+  if (submission.status !== "failed") return `already submitted as ${job} (${submission.status ?? "status unknown"}); batch-status follows it`;
+  if (RESUBMIT_WARNING.test(submission.error ?? "")) return `${job} failed, but its error warns against resubmitting: ${submission.error}`;
+  return null;
+}
+
+// Every earlier submission for a variant, oldest first. Each was its own paid
+// batch, so its job id stays on record rather than being overwritten.
+function earlierSubmissions({ previousSubmissions = [], ...submission }) {
+  return [...previousSubmissions, submission];
+}
+
 async function commandBatchFinalize(values, variantIds) {
   if (!values.run) throw new Error("Pass --run <run-id>.");
-  if (!variantIds.length) throw new Error("Pass at least one variantId (e.g. penthouse-kitchen-material--A).");
+  // --resubmit names the variants to buy another batch for, never the whole
+  // command line: adding it to the command that skipped a variant, once that
+  // one is checked, must not rebuy everything else listed there.
+  const resubmit = new Set((values.resubmit ?? []).flatMap((value) => value.split(",")).map((id) => id.trim()).filter(Boolean));
+  if (!variantIds.length && !resubmit.size) throw new Error("Pass at least one variantId (e.g. penthouse-kitchen-material--A).");
   const runDir = runDirFor(values.run);
   const plan = await readJson(path.join(runDir, "plan.json"));
   const resultsPath = path.join(runDir, "results.json");
@@ -1075,7 +1113,19 @@ async function commandBatchFinalize(values, variantIds) {
   const apiKey = loadOpenAIKey();
   await waitForServer(baseUrl);
 
-  for (const variantId of variantIds) {
+  // Re-running with the same variant list is the natural move after one of
+  // them fails partway through, and every resubmit is another paid batch.
+  // A variant named twice is still one variant.
+  const uniqueVariantIds = [...new Set([...variantIds, ...resubmit])];
+  const skipped = [];
+  for (const variantId of uniqueVariantIds) {
+    const previous = results.economy[variantId];
+    const blocker = resubmit.has(variantId) ? null : resubmitBlocker(previous);
+    if (blocker) {
+      console.log(`  skipping ${variantId}: ${blocker}. Pass --resubmit ${variantId} to buy another batch for it anyway.`);
+      skipped.push(variantId);
+      continue;
+    }
     const { board, variant, candidate, boardForFinal, appliedSlotIds } = resolveApprovedBoard(plan, runDir, results, variantId, { renderOverrides: values, force: Boolean(values.force) });
     const renderOptions = resolveRenderOptions(board, "final", values);
 
@@ -1103,16 +1153,57 @@ async function commandBatchFinalize(values, variantIds) {
     });
     validateCollageRequest(payload);
 
+    // Recorded BEFORE the paid call, the way the server records its own row
+    // (POST in app/api/economy/route.ts): if this process dies mid-request or
+    // no answer arrives, a re-run finds this entry rather than nothing, and
+    // resubmitBlocker won't buy the batch a second time.
+    const pending = {
+      jobId: null,
+      status: "submitting",
+      baseUrl,
+      submittedAt: new Date().toISOString(),
+      savedPath: null,
+      ...(previous ? { previousSubmissions: earlierSubmissions(previous) } : {}),
+    };
+    results.economy[variantId] = pending;
+    await writeFile(resultsPath, JSON.stringify(results, null, 2), "utf8");
+    const keepAsUnconfirmed = async (error, jobId = null) => {
+      results.economy[variantId] = { ...pending, status: "failed", jobId, error };
+      await writeFile(resultsPath, JSON.stringify(results, null, 2), "utf8");
+    };
+
     process.stdout.write(`  submitting ${variantId} to the batch queue ... `);
     if (appliedSlotIds.length) console.log(`\n    reviewed notes carried into final: [${appliedSlotIds.join(", ")}]`);
-    const response = await fetch(`${baseUrl}/api/economy`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...activeAccessHeaders },
-      body: JSON.stringify({ payload }),
-    });
+    let response;
+    try {
+      response = await fetch(`${baseUrl}/api/economy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...activeAccessHeaders },
+        body: JSON.stringify({ payload }),
+      });
+    } catch (error) {
+      const guidance = `The submission to ${baseUrl} got no answer (${error instanceof Error ? error.message : error}), so a batch may have been bought anyway. Check the app's history and OpenAI's Batches page before resubmitting.`;
+      await keepAsUnconfirmed(guidance);
+      throw new Error(guidance, { cause: error });
+    }
     const json = await response.json().catch(() => null);
     if (!response.ok || !json?.ok) {
-      throw Object.assign(new Error(json?.error ?? json?.message ?? `HTTP ${response.status} from /api/economy`), {
+      const message = json?.error ?? json?.message ?? `HTTP ${response.status} from /api/economy`;
+      if (!json) {
+        // Not the app's own answer (a proxy's error page, a body cut off
+        // mid-read), so nothing rules out that the batch was bought.
+        await keepAsUnconfirmed(`${message} without the app's JSON answer, so a batch may have been bought anyway. Check the app's history and OpenAI's Batches page before resubmitting.`);
+      } else if (RESUBMIT_WARNING.test(message)) {
+        // The server's warning that the batch call may have gone through. It
+        // names the job it recorded, which batch-status can then follow.
+        await keepAsUnconfirmed(message, /material_collager_job = ([\w-]+)/.exec(message)?.[1] ?? null);
+      } else {
+        // A plain refusal: nothing was bought, so what was there before stands.
+        if (previous) results.economy[variantId] = previous;
+        else delete results.economy[variantId];
+        await writeFile(resultsPath, JSON.stringify(results, null, 2), "utf8");
+      }
+      throw Object.assign(new Error(message), {
         status: json?.status ?? response.status,
         code: json?.code ?? null,
         retryAfterMs: json?.retryAfterMs ?? null,
@@ -1131,15 +1222,19 @@ async function commandBatchFinalize(values, variantIds) {
       usage: null,
       renderOptionsHash: recordMetadata(payload, json).renderOptionsHash,
       appliedNoteSlotIds: appliedSlotIds,
+      // Where the job lives: batch-status checks it there by default.
+      baseUrl,
       submittedAt: new Date().toISOString(),
       savedPath: null,
+      ...(previous ? { previousSubmissions: earlierSubmissions(previous) } : {}),
     };
     await writeFile(resultsPath, JSON.stringify(results, null, 2), "utf8");
     console.log(`ok — job ${json.jobId} (${json.status}, quality ${renderOptions.quality}, ${renderOptions.background}, cost unavailable until completion)`);
   }
 
   console.log(
-    `\nSubmitted ${variantIds.length} board(s) to the batch queue (up to 24h). ` +
+    `\nSubmitted ${uniqueVariantIds.length - skipped.length} board(s) to the batch queue (up to 24h)` +
+      `${skipped.length ? `; skipped ${skipped.length} already submitted` : ""}. ` +
       `Check progress with: npm run autoboard -- batch-status --run ${plan.runId}`,
   );
 }
@@ -1180,8 +1275,36 @@ async function commandBatchStatus(values) {
     return;
   }
 
-  const baseUrl = (values["base-url"] ?? "http://localhost:3000").replace(/\/+$/, "");
-  await waitForServer(baseUrl);
+  // Each job is checked on the server batch-finalize submitted it to. Without
+  // that, leaving off --base-url sent every check to localhost, where a job
+  // living on the deployed Worker read as not found and its output was never
+  // saved. An explicit --base-url still wins; a submission recorded before
+  // servers were falls back to it, or to localhost as before.
+  const explicitBaseUrl = values["base-url"]?.replace(/\/+$/, "");
+  const entriesByServer = new Map();
+  for (const entry of entries) {
+    const baseUrl = explicitBaseUrl ?? entry[1].baseUrl ?? "http://localhost:3000";
+    entriesByServer.set(baseUrl, [...(entriesByServer.get(baseUrl) ?? []), entry]);
+  }
+  for (const [baseUrl, serverEntries] of entriesByServer) {
+    console.log(`Checking ${serverEntries.length} job(s) on ${baseUrl} ...`);
+    await waitForServer(baseUrl);
+    const { jobsById, lookedUp } = await pollEconomyJobs(baseUrl, serverEntries);
+    // Saved per server, so one that can't be reached afterwards doesn't cost
+    // the outputs an earlier one already delivered.
+    if (await reportEconomyJobs({ runDir, results, baseUrl, entries: serverEntries, jobsById, lookedUp })) {
+      await writeFile(resultsPath, JSON.stringify(results, null, 2), "utf8");
+    }
+  }
+}
+
+async function pollEconomyJobs(baseUrl, entries) {
+  // Looked up by id, not searched for in the history listing: that listing is
+  // the newest 30 rows of every render kind, drafts included, so a job still
+  // pending can fall out of it. A server that predates ?ids= ignores it and
+  // answers without `tracked`, and the listing is then all there is.
+  const ids = [...new Set(entries.map(([, submission]) => submission.jobId).filter(Boolean))];
+  const statusUrl = `${baseUrl}/api/economy?ids=${ids.map(encodeURIComponent).join(",")}`;
   // GET /api/economy refreshes only its two globally least-recently-updated
   // pending jobs per call (see the `pending` query in
   // app/api/economy/route.ts) — not necessarily two of THIS run's, since
@@ -1211,18 +1334,19 @@ async function commandBatchStatus(values) {
   let pollStartedAtIsLocal = true;
   const isSettled = (job) => !job || TERMINAL_ECONOMY_STATUSES.has(job.status) || job.updatedAt >= pollStartedAt;
   let jobsById = new Map();
+  let lookedUp = false;
   let hadSuccessfulRound = false;
   for (let poll = 0; ; poll++) {
     let json;
     let response;
     try {
-      response = await fetch(`${baseUrl}/api/economy`, { headers: activeAccessHeaders });
+      response = await fetch(statusUrl, { headers: activeAccessHeaders });
       json = await response.json().catch(() => null);
       if (!response.ok || !json?.ok) throw new Error(json?.error ?? `HTTP ${response.status} from /api/economy`);
     } catch (error) {
       if (!hadSuccessfulRound) {
         // Nothing learned yet to fall back to: every tracked job would
-        // otherwise be reported "not found (may have expired)" below, which
+        // otherwise be reported not found (see reportEconomyJobs), which
         // reads as "the jobs are gone" and invites a paid resubmit. Surface
         // the real failure (an Access rejection, a D1 outage) and exit
         // non-zero instead, exactly as before this loop could repeat at all.
@@ -1240,9 +1364,10 @@ async function commandBatchStatus(values) {
       pollStartedAtIsLocal = false;
     }
     hadSuccessfulRound = true;
-    jobsById = new Map(json.jobs.map((job) => [job.id, job]));
+    lookedUp = Array.isArray(json.tracked);
+    jobsById = new Map([...json.jobs, ...(lookedUp ? json.tracked : [])].map((job) => [job.id, job]));
     if (entries.every(([, submission]) => isSettled(jobsById.get(submission.jobId)))) break;
-    const pendingElsewhere = json.jobs.filter((job) => !TERMINAL_ECONOMY_STATUSES.has(job.status)).length;
+    const pendingElsewhere = [...jobsById.values()].filter((job) => !TERMINAL_ECONOMY_STATUSES.has(job.status)).length;
     const cap = Math.max(4, Math.ceil(pendingElsewhere / 2) + 2);
     if (poll + 1 >= cap) {
       const unsettled = entries
@@ -1252,12 +1377,17 @@ async function commandBatchStatus(values) {
       break;
     }
   }
+  return { jobsById, lookedUp };
+}
 
+// Reports one server's tracked jobs, saving the output of any that completed.
+// Returns whether `results` changed.
+async function reportEconomyJobs({ runDir, results, baseUrl, entries, jobsById, lookedUp }) {
   let changed = false;
   for (const [variantId, submission] of entries) {
     const job = jobsById.get(submission.jobId);
     if (!job) {
-      console.log(`  ${variantId}: job ${submission.jobId} not found (may have expired — six-month retention)`);
+      console.log(`  ${variantId}: ${missingJobMessage(submission, baseUrl, lookedUp)}`);
       continue;
     }
     if (job.status === "completed" && !submission.savedPath) {
@@ -1304,7 +1434,27 @@ async function commandBatchStatus(values) {
     }
     console.log(`  ${variantId}: ${job.status}${job.error ? ` — ${job.error}` : ""}`);
   }
-  if (changed) await writeFile(resultsPath, JSON.stringify(results, null, 2), "utf8");
+  return changed;
+}
+
+// What a tracked job's absence from the server's answer means depends on what
+// was asked, and none of it is "gone, so resubmit": a paid batch can be alive
+// on another server, or merely outside a listing.
+function missingJobMessage(submission, baseUrl, lookedUp) {
+  const { jobId } = submission;
+  if (!jobId) {
+    return "its submission never confirmed a job, so there is nothing here to look up. Check the app's history and OpenAI's Batches page before resubmitting.";
+  }
+  if (!lookedUp) {
+    return `job ${jobId} is not in ${baseUrl}'s recent history, and that server can't look jobs up by id, so it may still be running. Don't resubmit; check OpenAI's Batches page for metadata material_collager_job = ${jobId}.`;
+  }
+  if (submission.baseUrl && submission.baseUrl !== baseUrl) {
+    return `job ${jobId} not found on ${baseUrl}, but it was submitted to ${submission.baseUrl}; run batch-status without --base-url to check there.`;
+  }
+  if (!submission.baseUrl) {
+    return `job ${jobId} not found on ${baseUrl}. It predates batch-finalize recording its server: if it went to another one, pass that as --base-url; otherwise it may have expired (six-month retention).`;
+  }
+  return `job ${jobId} not found on ${baseUrl} (may have expired — six-month retention)`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1331,6 +1481,7 @@ const { values, positionals } = parseArgs({
     "min-slots": { type: "string" },
     port: { type: "string" },
     force: { type: "boolean" },
+    resubmit: { type: "string", multiple: true },
     qa: { type: "boolean" },
     "no-qa": { type: "boolean" },
     "no-merge": { type: "boolean" },
