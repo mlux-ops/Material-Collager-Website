@@ -18,6 +18,7 @@ import {
   isImageContentType,
   isLowResolution,
 } from "./autoboard/photo-sources.ts";
+import { fetchPublic, readCapped } from "./guarded-fetch.ts";
 
 export type PhotoStatus = "candidate" | "selected" | "rejected";
 
@@ -202,36 +203,26 @@ async function storePhoto(input: {
   return publicPhoto(row);
 }
 
-async function fetchGuarded(url: URL, accept: string): Promise<Response> {
-  const response = await fetch(url.toString(), {
+// Each hop is validated before it is requested (guarded-fetch.ts); a
+// redirect can no longer land somewhere the guard would have refused.
+async function fetchGuarded(url: URL, accept: string): Promise<{ response: Response; url: URL }> {
+  const fetched = await fetchPublic(url, {
     headers: {
       accept,
       // Some vendor sites serve a bot-blocking page to a default agent. Named
       // honestly rather than impersonating a browser.
       "user-agent": "MaterialCollager/1.0 (+design reference collection)",
     },
-    redirect: "follow",
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    timeoutMs: FETCH_TIMEOUT_MS,
   });
-  if (!response.ok) {
-    throw new Error(`${url.hostname} answered HTTP ${response.status}.`);
+  if (!fetched.response.ok) {
+    await fetched.response.body?.cancel();
+    throw new Error(`${fetched.url.hostname} answered HTTP ${fetched.response.status}.`);
   }
-  // A redirect can land somewhere the original guard would have refused, and
-  // `redirect: "follow"` means it already happened — so the final URL is checked
-  // before any body is read.
-  assertFetchableUrl(response.url || url.toString());
-  return response;
+  return fetched;
 }
 
-async function readCapped(response: Response, limit: number): Promise<Uint8Array> {
-  const declared = Number(response.headers.get("content-length") ?? "");
-  if (Number.isFinite(declared) && declared > limit) {
-    throw new Error(`That file is ${Math.round(declared / 1024 / 1024)} MB, over the limit.`);
-  }
-  const buffer = await response.arrayBuffer();
-  if (buffer.byteLength > limit) throw new Error("That file is over the size limit.");
-  return new Uint8Array(buffer);
-}
+const PHOTO_TOO_LARGE = `Images must be under ${Math.round(MAX_PHOTO_BYTES / 1024 / 1024)} MB.`;
 
 /**
  * What a reference URL actually offers.
@@ -242,14 +233,15 @@ async function readCapped(response: Response, limit: number): Promise<Uint8Array
  */
 export async function discoverPhotoUrls(rawUrl: unknown): Promise<{ kind: "image" | "page"; urls: string[] }> {
   const url = assertFetchableUrl(rawUrl);
-  const response = await fetchGuarded(url, "image/*,text/html;q=0.9,*/*;q=0.5");
+  const { response, url: landed } = await fetchGuarded(url, "image/*,text/html;q=0.9,*/*;q=0.5");
   const contentType = response.headers.get("content-type");
 
   if (isImageContentType(contentType)) {
-    return { kind: "image", urls: [response.url || url.toString()] };
+    await response.body?.cancel();
+    return { kind: "image", urls: [landed.toString()] };
   }
-  const html = new TextDecoder().decode(await readCapped(response, MAX_HTML_BYTES));
-  const urls = extractImageUrls(html, response.url || url.toString());
+  const html = new TextDecoder().decode(await readCapped(response, MAX_HTML_BYTES, { tooLarge: "That page is too large to read." }));
+  const urls = extractImageUrls(html, landed.toString());
   if (!urls.length) {
     throw new Error(
       `${url.hostname} returned a page with no image to collect. Open it and paste the photo's own URL, or upload the photo.`,
@@ -260,9 +252,9 @@ export async function discoverPhotoUrls(rawUrl: unknown): Promise<{ kind: "image
 
 export async function ingestPhotoFromUrl(projectId: string, rowId: string, rawUrl: unknown): Promise<ProjectPhoto> {
   const url = assertFetchableUrl(rawUrl);
-  const response = await fetchGuarded(url, "image/*");
-  const bytes = await readCapped(response, MAX_PHOTO_BYTES);
-  return storePhoto({ projectId, rowId, bytes, source: "url", sourceUrl: response.url || url.toString() });
+  const { response, url: landed } = await fetchGuarded(url, "image/*");
+  const bytes = await readCapped(response, MAX_PHOTO_BYTES, { tooLarge: PHOTO_TOO_LARGE });
+  return storePhoto({ projectId, rowId, bytes, source: "url", sourceUrl: landed.toString() });
 }
 
 const ALLOWED_UPLOAD_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -276,6 +268,9 @@ export async function ingestUploadedPhoto(
   if (!ALLOWED_UPLOAD_MIME.has(mimeType)) throw new Error("Images must be JPEG, PNG or WebP.");
   const data = String(input.dataBase64 ?? "");
   if (!data) throw new Error("No image data received.");
+  // Checked on the encoded length, before atob allocates the decoded copy:
+  // base64 carries 3 bytes in every 4 characters.
+  if (Math.floor((data.length * 3) / 4) > MAX_PHOTO_BYTES) throw new Error(PHOTO_TOO_LARGE);
   let binary: string;
   try {
     binary = atob(data);
