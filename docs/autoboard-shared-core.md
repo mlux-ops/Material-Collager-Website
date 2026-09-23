@@ -515,6 +515,13 @@ be self-consistent.
 
 It is a change detector. Do not reach for it where collision resistance matters.
 
+## Image digests in selectionHash
+
+`selectionHash` appends an item's `[digest|null, …]` only when one of its images
+has an entry in `board.imageDigests`; this keeps every existing hash byte-identical.
+The digest is computed by the CLI review server (`node:crypto`), never in the
+shared core. The web board doesn't need it because its uploads are content-addressed.
+
 ### `basename` is injected, finally
 
 `boardPayload` and `boardReferenceFiles` moved to the core and now take a
