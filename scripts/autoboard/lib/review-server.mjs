@@ -634,6 +634,7 @@ export async function startReviewServer({
           instructionSnapshot: record.instruction, selectionHash: selectionHash(board, record.instruction),
           renderOptionsSnapshot: options, dedupeKey,
           force: Boolean(body.force),
+          source: sourceIdentity,
         });
         sendJson(response, 200, { jobId, position, duplicate, accessError: access.error });
         return;

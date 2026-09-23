@@ -586,3 +586,38 @@ test("runRenderJob renders a stale final anyway when job.force is true", async (
   assert.equal(results.finals[`${boardId}--A`].jobId, "job-force");
   rmSync(runDir, { recursive: true, force: true });
 });
+
+test("a queued final renders from the source it was queued against, not whatever is picked when it runs", async (t) => {
+  const { runDir, plan, results } = scratchRun();
+  const boardId = plan.boards[0].id;
+  const fresh = selectionHash(plan.boards[0], "");
+  for (const id of ["d-0001", "d-0002"]) {
+    const rel = await saveRenderImage(runDir, boardId, "draft", id, PNG.toString("base64"));
+    recordDraft(results, boardId, { id, variant: "A", index: 1, path: rel, jobId: id, durationMs: 1, selectionHash: fresh, instruction: "", itemNotes: {} });
+  }
+  await pickDraft(results, runDir, boardId, "d-0001");
+  const queuedFrom = { kind: "draft", id: "d-0001" };
+  await pickDraft(results, runDir, boardId, "d-0002"); // re-picked while the final waited in the queue
+  t.mock.method(globalThis, "fetch", async () => Response.json({ ok: true, imageBase64: PNG.toString("base64"), mimeType: "image/png", jobId: "job-final", libraryVisible: true }));
+  const ctx = { plan, results, runDir, baseUrl: "https://w.example", accessHeaders: {}, signal: new AbortController().signal, onProgress: () => {}, persist: async () => {} };
+  await runRenderJob({ jobId: "q", boardId, kind: "final", instructionSnapshot: "", selectionHash: fresh, source: queuedFrom }, ctx);
+  assert.equal(results.renders[boardId].finals[0].fromRenderId, "d-0001");
+  rmSync(runDir, { recursive: true, force: true });
+});
+
+test("a queued final whose source was removed stops with 409 before any paid call", async (t) => {
+  const { runDir, plan, results } = scratchRun();
+  const boardId = plan.boards[0].id;
+  const rel = await saveRenderImage(runDir, boardId, "draft", "d-0002", PNG.toString("base64"));
+  recordDraft(results, boardId, { id: "d-0002", variant: "A", index: 1, path: rel, jobId: "j", durationMs: 1, selectionHash: selectionHash(plan.boards[0], ""), instruction: "", itemNotes: {} });
+  await pickDraft(results, runDir, boardId, "d-0002");
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async () => { calls += 1; return Response.json({ ok: true }); });
+  const ctx = { plan, results, runDir, baseUrl: "https://w.example", accessHeaders: {}, signal: new AbortController().signal, onProgress: () => {}, persist: async () => {} };
+  await assert.rejects(
+    runRenderJob({ jobId: "q", boardId, kind: "final", instructionSnapshot: "", selectionHash: "h", source: { kind: "draft", id: "d-0001" } }, ctx),
+    (error) => error.status === 409 && /was removed/.test(error.message),
+  );
+  assert.equal(calls, 0);
+  rmSync(runDir, { recursive: true, force: true });
+});

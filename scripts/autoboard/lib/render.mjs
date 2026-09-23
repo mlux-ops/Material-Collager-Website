@@ -462,6 +462,21 @@ function itemNotesOf(board) {
   return Object.fromEntries(board.items.filter((item) => String(item.note ?? "").trim()).map((item) => [item.slotId, String(item.note).trim()]));
 }
 
+// The render a queued confirm/final was enqueued against (job.source, set by
+// the review server). Resolving the pick again here would let a re-pick made
+// while the job waited silently change what the paid render is built from. A
+// source deleted in the meantime stops the job before anything is sent. Jobs
+// built without a source (direct callers, older fixtures) keep reading the
+// current pick.
+function queuedSource(results, boardId, { kind, id }) {
+  const record = ensureRenders(results, boardId)[DIR_FOR_KIND[kind]]?.find((entry) => entry.id === id);
+  if (!record) {
+    const label = kind === "confirm" ? "confirmed render" : "draft";
+    throw Object.assign(new Error(`The ${label} this job was queued from (${id}) was removed. Queue the step again.`), { status: 409 });
+  }
+  return { kind, record };
+}
+
 export async function runRenderJob(job, ctx) {
   const { plan, results, runDir } = ctx;
   const board = plan.boards.find((entry) => entry.id === job.boardId);
@@ -501,7 +516,7 @@ export async function runRenderJob(job, ctx) {
     return;
   }
 
-  const source = renderSource(results, board.id, job.kind);
+  const source = job.source ? queuedSource(results, board.id, job.source) : renderSource(results, board.id, job.kind);
   if (!source) {
     // Confirm can only ever be satisfied by a picked draft (see renderSource);
     // only Final may also be satisfied by an approved confirmed render.
