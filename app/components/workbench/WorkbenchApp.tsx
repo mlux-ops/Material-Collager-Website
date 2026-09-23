@@ -43,6 +43,7 @@ import { connectionIsValid, nodeKindsForWire, useWorkbenchStore } from "./store"
 import { Spotlight } from "./Spotlight";
 import { instantiateTemplate, TEMPLATES, type TemplateId } from "./templates";
 import { useModalDismiss } from "./useModalDismiss";
+import { useModalFocus } from "./useModalFocus";
 import { awaitTransitionSettled } from "@/app/lib/route-ready";
 import { motionReduced, potatoMode } from "@/app/lib/site-settings";
 import { SiteNavigation } from "../SiteNavigation";
@@ -89,8 +90,17 @@ function WireConnectionLine({ fromX, fromY, toX, toY, fromPosition, toPosition, 
 // view; picking blank (or closing) just dismisses the gallery.
 function TemplateGallery({ onPick, onClose }: { onPick: (id: TemplateId) => void; onClose: () => void }) {
   const { closing, requestClose } = useModalDismiss(onClose);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(dialogRef, { onEscape: requestClose });
   return (
-    <div className={`${styles.templateOverlay} ${closing ? styles.overlayClosing : ""}`} role="dialog" aria-modal="true" aria-label="Choose a starting template">
+    <div
+      ref={dialogRef}
+      tabIndex={-1}
+      className={`${styles.templateOverlay} ${closing ? styles.overlayClosing : ""}`}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Choose a starting template"
+    >
       <div className={styles.templateGallery}>
         <header className={styles.templateHeader}>
           <h2>Start a workbench</h2>
@@ -120,6 +130,8 @@ function ExportDialog({ nodes, edges, onClose }: { nodes: WorkbenchNode[]; edges
   const [busy, setBusy] = useState(false);
   const estimate = useMemo(() => estimateExportSize(nodes), [nodes]);
   const { closing, requestClose } = useModalDismiss(onClose);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(dialogRef, { onEscape: requestClose });
 
   const runExport = useCallback(async () => {
     setBusy(true);
@@ -135,7 +147,14 @@ function ExportDialog({ nodes, edges, onClose }: { nodes: WorkbenchNode[]; edges
   }, [nodes, edges, graphOnly, requestClose]);
 
   return (
-    <div className={`${styles.templateOverlay} ${closing ? styles.overlayClosing : ""}`} role="dialog" aria-modal="true" aria-label="Export workbench">
+    <div
+      ref={dialogRef}
+      tabIndex={-1}
+      className={`${styles.templateOverlay} ${closing ? styles.overlayClosing : ""}`}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Export workbench"
+    >
       <div className={styles.exportDialog}>
         <h2>Export workbench</h2>
         <p className={styles.hint}>

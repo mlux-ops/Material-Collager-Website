@@ -1,3 +1,55 @@
+# Visual QA - Workbench dialog focus containment (WP-3B, R14)
+
+Date: 2026-09-22
+Status: **KNOWN GAPS RECORDED - BROWSER PASS PENDING**
+
+## Scope
+
+`useModalFocus` (`app/components/workbench/useModalFocus.ts`) now contains
+Tab/Shift+Tab inside a Workbench dialog, moves focus in on open, supports
+Escape, and restores focus on close. Applied to the template chooser
+(`TemplateGallery`), `ExportDialog`, `GraphManager`'s dialog, and `Spotlight`'s
+own dismissible-modal render (the compact "Add node" overlay). This pass was
+implemented and verified via lint + the typecheck gate only; the controller
+runs the browser checks (see below) once, after integration, since several
+worktrees cannot share the one dev server.
+
+## Known gaps (deliberately not wired to useModalFocus)
+
+- **Wire-drop-to-empty-canvas prompt** (`WorkbenchApp.tsx`, the
+  `role="dialog"` rendered inline inside `CanvasInner`'s `wirePrompt && (...)`
+  block, `aria-label="Connect to a node"`). It renders inline in a
+  conditionally-executed branch of an existing component's render, not its
+  own function component, so a `useModalFocus` call there would be
+  conditional -- hooks cannot be called conditionally. Extracting it into its
+  own component is a larger change than this defect needs and was not
+  verified as part of this review.
+- **Restore-error alertdialog** (`WorkbenchApp.tsx`, `role="alertdialog"`,
+  `aria-label="Could not load your workbench"`). Same inline-conditional
+  constraint. This one is deliberately non-dismissable (no
+  `useModalDismiss`/backdrop-click/Escape path already, by design -- see its
+  own comment) and **must stay non-dismissable** in any later change that
+  gives it a focus trap; only a Retry that actually succeeds may let the user
+  out of it.
+
+## Browser checks not yet performed (skipped per controller instruction; for the controller to run)
+
+- Template chooser: after it opens on an empty canvas,
+  `document.activeElement.closest('[role="dialog"]') !== null`; Tab x10 stays
+  inside; Shift+Tab from the first control wraps to the last; Escape or
+  **Skip** closes it and focus is not left on a removed node.
+- Same two focus checks (open lands inside the dialog; Tab stays contained)
+  repeated for the Export dialog.
+- Task 3B.1 (R17): with `window.prompt` stubbed to return `null`, clicking
+  "+ New workbench" creates nothing -- the graph count in the manager is
+  unchanged and the active graph does not change.
+- Task 3B.3 (R15): `/workbench` still reaches the app normally (`read_page`
+  shows the canvas, not "Loading workbench…"). The failed-chunk branch itself
+  cannot be triggered in a preview without editing code, so it stays a code
+  read, not a browser check.
+
+---
+
 # Visual QA - Sunburst migration Task 2 Autoboard Review
 
 Date: 2026-09-08

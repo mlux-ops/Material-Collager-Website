@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NODE_SPECS } from "./nodes/index";
 import { useModalDismiss } from "./useModalDismiss";
+import { useModalFocus } from "./useModalFocus";
 import styles from "./workbench.module.css";
 import type { NodeKind } from "./types";
 
@@ -24,8 +25,17 @@ export type SpotlightProps = {
 export function Spotlight({ kinds, onPick, onClose, title, emptyHint }: SpotlightProps) {
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   // Exit animation for the modal variant (no-op when embedded — onClose absent).
   const { closing, requestClose } = useModalDismiss(() => onClose?.());
+  // dialogRef is only attached when onClose is set (the modal variant below),
+  // so this is a no-op for the embedded panel. No onEscape: the search
+  // input already closes on Escape itself (below), and this hook's Escape
+  // listener runs at the document level regardless of which control inside
+  // has focus, so adding it here would just fire requestClose a second,
+  // redundant time. initialFocus keeps the deliberate "focus the search
+  // box, not the Close button" behavior this component already had.
+  useModalFocus(dialogRef, { initialFocus: inputRef });
 
   const results = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -77,7 +87,15 @@ export function Spotlight({ kinds, onPick, onClose, title, emptyHint }: Spotligh
   if (!onClose) return body;
 
   return (
-    <div className={`${styles.templateOverlay} ${closing ? styles.overlayClosing : ""}`} role="dialog" aria-modal="true" aria-label={title ?? "Add a node"} onClick={requestClose}>
+    <div
+      ref={dialogRef}
+      tabIndex={-1}
+      className={`${styles.templateOverlay} ${closing ? styles.overlayClosing : ""}`}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title ?? "Add a node"}
+      onClick={requestClose}
+    >
       <div className={styles.spotlightModal} onClick={(event) => event.stopPropagation()}>
         <header className={styles.templateHeader}>
           <h2>{title ?? "Add a node"}</h2>

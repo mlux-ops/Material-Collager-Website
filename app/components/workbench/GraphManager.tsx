@@ -6,7 +6,7 @@
 // WorkbenchApp.tsx, which owns the active graphId ref and the load/save
 // effects.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createGraph,
   deleteGraph,
@@ -18,6 +18,7 @@ import {
   type GraphMeta,
 } from "./persistence";
 import { useModalDismiss } from "./useModalDismiss";
+import { useModalFocus } from "./useModalFocus";
 import styles from "./workbench.module.css";
 
 // issue-1: switching graphs may need to flush a pending debounced autosave
@@ -91,6 +92,14 @@ export function GraphManager({ activeGraphId, onSwitch, onCancelPendingSaves, on
   // if the flush fails and onSwitch declines to actually navigate away.
   const [switching, setSwitching] = useState(false);
   const { closing, requestClose } = useModalDismiss(onClose);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  // No onEscape here: a rename row already binds its own Escape (to cancel
+  // just the rename, see its input's onKeyDown below). useModalFocus's
+  // listener is a document-level capture handler, so it would fire on every
+  // Escape before that input's own handler ever sees the key -- wiring
+  // onEscape here would close the whole dialog out from under an in-progress
+  // rename instead of only cancelling it.
+  useModalFocus(dialogRef);
 
   const refresh = () => {
     void listGraphs().then(setGraphs).catch(() => setGraphs([]));
@@ -170,7 +179,15 @@ export function GraphManager({ activeGraphId, onSwitch, onCancelPendingSaves, on
   };
 
   return (
-    <div className={`${styles.templateOverlay} ${closing ? styles.overlayClosing : ""}`} role="dialog" aria-modal="true" aria-label="Manage workbenches" onClick={requestClose}>
+    <div
+      ref={dialogRef}
+      tabIndex={-1}
+      className={`${styles.templateOverlay} ${closing ? styles.overlayClosing : ""}`}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Manage workbenches"
+      onClick={requestClose}
+    >
       <div className={styles.graphManager} onClick={(event) => event.stopPropagation()}>
         <header className={styles.templateHeader}>
           <h2>Your workbenches</h2>
