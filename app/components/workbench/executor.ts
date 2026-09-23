@@ -73,7 +73,7 @@ function inputValues(context: GraphContext, nodeId: string, portId: string): Nod
 // stale-run aggregate and the per-node connected-image display always agree
 // on what a run would actually bill.
 function countConnectedImages(context: GraphContext, nodeId: string): number {
-  const node = currentNode(nodeId);
+  const node = snapshotNode(context, nodeId);
   const spec = specFor(node.data.kind);
   const imagePortIds = new Set(
     spec.inputs
@@ -84,7 +84,7 @@ function countConnectedImages(context: GraphContext, nodeId: string): number {
   let total = 0;
   for (const edge of context.incoming.get(nodeId) ?? []) {
     if (!imagePortIds.has(edge.targetHandle ?? "")) continue;
-    const source = currentNode(edge.source);
+    const source = snapshotNode(context, edge.source);
     const run = activeRunOf(source);
     if (!run) continue;
     const fallbackPort = specFor(source.data.kind).outputs[0]?.id ?? "";
