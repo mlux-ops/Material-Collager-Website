@@ -95,10 +95,17 @@ function countConnectedImages(context: GraphContext, nodeId: string): number {
   return total;
 }
 
-function signatureContextFor(context: GraphContext, draft: boolean): SignatureContext {
+function signatureContextFor(
+  context: GraphContext,
+  draft: boolean,
+  liveNode?: (id: string) => WorkbenchNode | undefined,
+): SignatureContext {
+  // The estimate reads signatures from a snapshot context; a run reads live
+  // because a signature computed late in execution must see the runIds
+  // produced earlier in the same run.
   return {
     incoming: context.incoming,
-    liveNode: (id) => useWorkbenchStore.getState().nodes.find((candidate) => candidate.id === id),
+    liveNode: liveNode ?? ((id) => useWorkbenchStore.getState().nodes.find((candidate) => candidate.id === id)),
     draft,
   };
 }
@@ -298,7 +305,7 @@ function scheduledOrder(context: GraphContext, targetIds: string[]): string[] {
 export function estimateStaleCost(targetIds: string[]): { totalUsd: number | null; staleCount: number; costUnknown: boolean } {
   const { nodes, edges, draft } = useWorkbenchStore.getState();
   const context = buildContext(nodes, edges, new AbortController().signal);
-  const signatureContext = signatureContextFor(context, draft);
+  const signatureContext = signatureContextFor(context, draft, (id) => context.nodes.get(id));
   let total = 0;
   let counted = false;
   let costUnknown = false;
