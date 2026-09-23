@@ -26,11 +26,7 @@ export async function POST(request: Request) {
     }
     const bytes = await readCapped(response, MAX_IMPORT_BYTES, { tooLarge: "The suggested image is too large." });
     if (!bytes.byteLength) throw new Error("The suggested image is empty.");
-    // readCapped's Uint8Array<ArrayBufferLike> return type is wider than
-    // BodyInit's ArrayBuffer-backed ArrayBufferView expects (same generic
-    // mismatch autoboard-photos.ts already casts through for R2's put()); the
-    // bytes themselves are a plain ArrayBuffer-backed view.
-    return new Response(bytes as unknown as BodyInit, { headers: { "Content-Type": contentType, "Cache-Control": "no-store" } });
+    return new Response(bytes, { headers: { "Content-Type": contentType, "Cache-Control": "no-store" } });
   } catch (error) {
     return errorResponse(error);
   }

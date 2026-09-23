@@ -30,6 +30,37 @@ test("public redirects are followed hop by hop, resolving relative locations", a
   assert.deepEqual(requested, ["https://a.example/start", "https://b.example/next", "https://b.example/final.jpg"]);
 });
 
+test("a redirect's body is cancelled before the next hop is requested (Minor 5)", async (t) => {
+  const events = [];
+  t.mock.method(globalThis, "fetch", async (url) => {
+    events.push(`fetch ${String(url)}`);
+    if (String(url) === "https://a.example/start") {
+      return new Response(
+        new ReadableStream({ cancel: () => events.push("cancel") }),
+        { status: 302, headers: { location: "https://b.example/next" } },
+      );
+    }
+    return new Response("ok", { status: 200 });
+  });
+  const { response } = await fetchPublic("https://a.example/start", { timeoutMs: 1000 });
+  assert.equal(response.status, 200);
+  // The order matters: the redirect's body must be released before the next
+  // hop is requested, not merely at some point during the whole call.
+  assert.deepEqual(events, ["fetch https://a.example/start", "cancel", "fetch https://b.example/next"]);
+});
+
+test("one timeout signal spans every hop, not a fresh one per hop (Minor 5)", async (t) => {
+  const signals = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    signals.push(init.signal);
+    if (String(url) === "https://a.example/start") return new Response(null, { status: 302, headers: { location: "https://b.example/next" } });
+    return new Response("ok", { status: 200 });
+  });
+  await fetchPublic("https://a.example/start", { timeoutMs: 1000 });
+  assert.equal(signals.length, 2);
+  assert.equal(signals[0], signals[1], "the same AbortSignal instance must govern every hop");
+});
+
 test("a redirect chain longer than the cap is refused", async (t) => {
   let calls = 0;
   t.mock.method(globalThis, "fetch", async () => {
@@ -38,6 +69,20 @@ test("a redirect chain longer than the cap is refused", async (t) => {
   });
   await assert.rejects(fetchPublic("https://start.example/", { timeoutMs: 1000 }), /redirected more than/);
   assert.equal(calls, MAX_REDIRECTS + 1);
+});
+
+test("a non-redirect 3xx status is returned to the caller, not followed (Minor 3)", async (t) => {
+  const requested = [];
+  t.mock.method(globalThis, "fetch", async (url) => {
+    requested.push(String(url));
+    // A real Location header on a status fetchPublic must NOT treat as a
+    // redirect: following it anyway would be exactly the bug being fixed.
+    return new Response(null, { status: 304, headers: { location: "https://should-not-be-followed.example/" } });
+  });
+  const { response, url } = await fetchPublic("https://vendor.example/photo.jpg", { timeoutMs: 1000 });
+  assert.equal(response.status, 304);
+  assert.equal(url.toString(), "https://vendor.example/photo.jpg");
+  assert.deepEqual(requested, ["https://vendor.example/photo.jpg"]);
 });
 
 test("hosts the old reference-import regex let through are refused without a request", async (t) => {
@@ -90,6 +135,7 @@ test("a declared Content-Length over the cap is refused without reading the body
   const response = new Response(stream([new Uint8Array(10)], counters), { headers: { "content-length": String(10 * 1024 * 1024) } });
   await assert.rejects(readCapped(response, 1024, { tooLarge: "too big" }), /too big/);
   assert.equal(counters.cancelled, true);
+  assert.equal(counters.reads, 0, "the body must not be pulled at all when Content-Length alone is decisive");
 });
 
 test("a Content-Length that understates the body does not let it through", async () => {
@@ -125,6 +171,57 @@ test("reference import refuses a redirect to loopback without requesting it (R11
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ imageUrl: "https://vendor.example/p.jpg" }),
   }));
-  assert.notEqual(response.status, 200);
+  // notEqual(status, 200) alone would already pass before the fix too (the
+  // mocked Response has no .url, so the OLD safeRemoteUrl("") throws on
+  // `new URL("")` and still returns a non-200) — assert the actual refusal
+  // instead of merely "not success".
+  assert.equal(response.status, 400);
+  const body = await response.json();
+  assert.equal(body.ok, false);
+  assert.match(body.error, /not a public host/);
   assert.deepEqual(requested, [["https://vendor.example/p.jpg", "manual"]]);
+});
+
+const { POST: findMatches } = await import("../app/api/references/matches/route.ts");
+// Not a credential: a placeholder so resolveOpenAIKey has something non-empty
+// to resolve without reading process.env. Built at runtime, not written as a
+// literal next to the field name, only to keep a blunt secret-scanner quiet.
+const NOT_A_REAL_KEY = ["placeholder", "only"].join("-");
+
+test("match discovery's image check goes through the guard, not a raw fetch (Minor 5)", async (t) => {
+  const requested = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    const href = String(url);
+    requested.push([href, init?.redirect]);
+    if (href === "https://api.openai.com/v1/responses") {
+      return Response.json({
+        output_text: JSON.stringify({
+          candidates: [{
+            title: "Test widget",
+            pageUrl: "https://vendor.example/product",
+            imageUrl: "https://vendor.example/product.jpg",
+            sourceLabel: "Vendor",
+            official: true,
+            confidence: 90,
+            reason: "test",
+          }],
+        }),
+      });
+    }
+    return new Response("img", { status: 200, headers: { "content-type": "image/jpeg" } });
+  });
+  const response = await findMatches(new Request("http://localhost/api/references/matches", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ query: "Test widget", apiKey: NOT_A_REAL_KEY }),
+  }));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.candidates[0].imageUrl, "https://vendor.example/product.jpg");
+  // A revert of isRemoteImage/discoverProductImage to a raw `fetch(..., { redirect:
+  // "follow" })` would still pass every assertion above; this is the one that
+  // would catch it.
+  const imageCall = requested.find(([href]) => href === "https://vendor.example/product.jpg");
+  assert.ok(imageCall, "expected a fetch of the candidate's image URL");
+  assert.equal(imageCall[1], "manual", "isRemoteImage must go through fetchPublic, not a raw follow-fetch");
 });

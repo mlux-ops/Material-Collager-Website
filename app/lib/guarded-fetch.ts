@@ -13,10 +13,22 @@
 // resolves to a private address is not caught here. Production egress cannot
 // reach private networks; local dev, where Miniflare runs on a developer's
 // machine, is the case the literal-host checks exist for.
+//
+// init.headers is sent to every hop, including one that has redirected to a
+// different host than the one the caller asked for — unlike a browser's own
+// redirect handling, nothing here strips anything cross-origin. Never pass an
+// Authorization header, cookie, or other credential through fetchPublic.
 
 import { assertFetchableUrl } from "./autoboard/photo-sources.ts";
 
 export const MAX_REDIRECTS = 5;
+
+// Only these statuses carry a Location a client is expected to follow. Every
+// other 3xx (300 Multiple Choices, 304 Not Modified, a bare 305/306/309-399)
+// is handed back to the caller's own `!response.ok` handling instead — treating
+// every 3xx as "follow the Location" is exactly the class of bug this module
+// exists to close.
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 export async function fetchPublic(
   url: URL | string,
@@ -26,7 +38,7 @@ export async function fetchPublic(
   let current = assertFetchableUrl(String(url));
   for (let hop = 0; ; hop++) {
     const response = await fetch(current.toString(), { headers: init.headers, redirect: "manual", signal });
-    if (response.status < 300 || response.status > 399) return { response, url: current };
+    if (!REDIRECT_STATUSES.has(response.status)) return { response, url: current };
     const location = response.headers.get("location");
     await response.body?.cancel();
     if (!location) throw new Error(`${current.hostname} answered a redirect with no destination.`);
@@ -45,7 +57,7 @@ export async function readCapped(
   response: Response,
   limit: number,
   options: { tooLarge?: string; onOverflow?: "throw" | "truncate" } = {},
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   const tooLarge = options.tooLarge ?? "That file is over the size limit.";
   const truncate = options.onOverflow === "truncate";
   const declared = Number(response.headers.get("content-length") ?? "");

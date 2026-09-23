@@ -62,6 +62,7 @@ function runtime(): RuntimeEnv {
 }
 
 export const MAX_PHOTO_BYTES = 20 * 1024 * 1024;
+const PHOTO_TOO_LARGE = `Images must be under ${Math.round(MAX_PHOTO_BYTES / 1024 / 1024)} MB.`;
 
 // A product page can be large; a photo cannot hide past this much HTML, and an
 // unbounded read of an untrusted URL is how one request becomes a memory
@@ -154,7 +155,7 @@ async function storePhoto(input: {
 
   if (bytes.length === 0) throw new Error("That image is empty.");
   if (bytes.length > MAX_PHOTO_BYTES) {
-    throw new Error(`Images must be under ${Math.round(MAX_PHOTO_BYTES / 1024 / 1024)} MB.`);
+    throw new Error(PHOTO_TOO_LARGE);
   }
 
   const contentType = sniffImageType(bytes);
@@ -221,8 +222,6 @@ async function fetchGuarded(url: URL, accept: string): Promise<{ response: Respo
   }
   return fetched;
 }
-
-const PHOTO_TOO_LARGE = `Images must be under ${Math.round(MAX_PHOTO_BYTES / 1024 / 1024)} MB.`;
 
 /**
  * What a reference URL actually offers.
