@@ -106,7 +106,12 @@ export async function GET() {
   try {
     await cleanupExpiredJobs();
     const DB = await ensureJobStorage();
-    const pending = await DB.prepare("SELECT * FROM generation_jobs WHERE mode = 'economy' AND output_key IS NULL AND status NOT IN ('failed', 'expired', 'cancelled') ORDER BY updated_at ASC LIMIT 8")
+    // Two per request: each refresh can wait on OpenAI (a status check, then
+    // possibly a result download) before history can answer. The page polls
+    // every 30 s while anything is pending, and a refreshed row's updated_at
+    // moves it to the back, so every pending job still gets its turn. A row
+    // with no batch id has nothing to check (see POST).
+    const pending = await DB.prepare("SELECT * FROM generation_jobs WHERE mode = 'economy' AND output_key IS NULL AND openai_batch_id IS NOT NULL AND status NOT IN ('failed', 'expired', 'cancelled') ORDER BY updated_at ASC LIMIT 2")
       .all<JobRow>();
     // Refresh jobs independently: one job with an unreadable batch output must
     // not take down the whole history listing for its six-month lifetime.

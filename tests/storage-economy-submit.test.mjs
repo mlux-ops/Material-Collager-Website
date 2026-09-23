@@ -73,3 +73,22 @@ test("a failed submission leaves a failed row that says how to check before payi
   assert.equal(row.openai_batch_id, null);
   assert.match(row.error, new RegExp(`material_collager_job = ${row.id}`));
 });
+
+test("history refreshes at most two pending batches per request, oldest first, and skips rows with no batch", async (t) => {
+  await DB.prepare("DELETE FROM generation_jobs").run();
+  const now = Date.now();
+  const insert = (id, status, batchId, updatedAt) => DB.prepare(`INSERT INTO generation_jobs
+      (id, mode, status, openai_batch_id, filename, format, prompt, payload_json, reference_ids_json, created_at, updated_at, expires_at)
+      VALUES (?, 'economy', ?, ?, 'f.png', '1536x1024', 'p', '{}', '[]', ?, ?, ?)`)
+    .bind(id, status, batchId, now, updatedAt, now + 1e9).run();
+  await insert("job-unsent", "submitting", null, now - 10);
+  for (let n = 0; n < 5; n++) await insert(`job-${n}`, "in_progress", `batch-${n}`, now + n);
+  const polled = [];
+  t.mock.method(globalThis, "fetch", async (url) => {
+    polled.push(String(url).split("/").pop());
+    return Response.json({ id: "x", status: "in_progress" });
+  });
+  const response = await GET();
+  assert.equal(response.status, 200);
+  assert.deepEqual(polled, ["batch-0", "batch-1"]);
+});
