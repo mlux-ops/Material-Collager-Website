@@ -594,6 +594,41 @@ export function decidePendingSave(structureDirty: boolean, blobDirty: boolean): 
   return "none";
 }
 
+// One autosave channel's dirty state, counted instead of flagged. A save
+// covers only the edits that existed when it read the store; an edit made
+// while it was in flight is still owed. With a boolean, that older save's
+// completion cleared the flag, a graph switch then decided nothing was
+// pending, skipped the save and reloaded the edit away. Pure and
+// framework-free, like decidePendingSave, so the ordering is unit-testable.
+export type DirtyChannel = {
+  /** An edit happened. */
+  edit(): void;
+  /** A save is reading the store now; hand the result to settle() when it succeeds. */
+  begin(): number;
+  /** The save that began at `begun` succeeded: everything up to it is stored. */
+  settle(begun: number): void;
+  readonly dirty: boolean;
+};
+
+export function createDirtyChannel(): DirtyChannel {
+  let edits = 0;
+  let saved = 0;
+  return {
+    edit() {
+      edits += 1;
+    },
+    begin() {
+      return edits;
+    },
+    settle(begun) {
+      if (begun > saved) saved = begun;
+    },
+    get dirty() {
+      return edits > saved;
+    },
+  };
+}
+
 // Writes ONLY the graph + meta records -- no blob-store read or write at all.
 // Safe to call on every position drag: it can never touch a single blob.
 // The thumbnail (either shape -- see GraphMeta) is deliberately NOT

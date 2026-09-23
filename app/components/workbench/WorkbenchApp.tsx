@@ -38,7 +38,7 @@ import {
 import { GraphManager, type SwitchGraphOptions } from "./GraphManager";
 import { computeHelperLines, tidyLayout, type HelperLines } from "./layout";
 import { Inspector } from "./Inspector";
-import { BlockedUpgradeError, decidePendingSave, DEFAULT_GRAPH_ID, loadGraph, saveGraph, saveGraphStructure } from "./persistence";
+import { BlockedUpgradeError, createDirtyChannel, decidePendingSave, DEFAULT_GRAPH_ID, loadGraph, saveGraph, saveGraphStructure } from "./persistence";
 import { connectionIsValid, nodeKindsForWire, useWorkbenchStore } from "./store";
 import { Spotlight } from "./Spotlight";
 import { instantiateTemplate, TEMPLATES, type TemplateId } from "./templates";
@@ -951,8 +951,21 @@ export default function WorkbenchApp() {
   // (by its own debounce timer firing, or by an early flush) -- cleared only
   // on a SUCCESSFUL attempt, so a failed attempt leaves it set and a later
   // switch's flush tries again rather than silently skipping it.
-  const structureDirtyRef = useRef(false);
-  const blobDirtyRef = useRef(false);
+  // Counted, not boolean: see createDirtyChannel (persistence.ts).
+  const [structureDirty] = useState(createDirtyChannel);
+  const [blobDirty] = useState(createDirtyChannel);
+  // Autosaves still writing. A flush waits for them before deciding what is
+  // owed, so it never races an older write for the same graph's records and
+  // never re-writes one that is about to land.
+  const inFlightSavesRef = useRef(new Set<Promise<void>>());
+  const trackSave = useCallback((save: Promise<void>) => {
+    inFlightSavesRef.current.add(save);
+    save.then(
+      () => inFlightSavesRef.current.delete(save),
+      () => inFlightSavesRef.current.delete(save),
+    );
+    return save;
+  }, []);
 
   // round 7 issue-1 (root fix): openDatabase can now REJECT a version-blocked
   // v1->v2 open (round 6's onblocked handler) instead of hanging forever --
@@ -1011,23 +1024,24 @@ export default function WorkbenchApp() {
   // only the graph/meta JSON records.
   useEffect(() => {
     if (!hasRestored.current || !dirtyStamp) return;
-    structureDirtyRef.current = true;
+    structureDirty.edit();
     const timeout = window.setTimeout(() => {
       structureTimeoutRef.current = null;
+      const begun = structureDirty.begin();
       const state = useWorkbenchStore.getState();
-      void saveGraphStructure(graphIdRef.current, state.nodes as WorkbenchNode[], state.edges)
-        .then(() => {
-          structureDirtyRef.current = false;
-        })
-        .catch(() => {
-          // Autosave is best-effort; the canvas keeps working without it.
-          // Leaves structureDirtyRef set so a later graph-switch flush still
-          // attempts this save rather than silently skipping it.
-        });
+      trackSave(
+        saveGraphStructure(graphIdRef.current, state.nodes as WorkbenchNode[], state.edges).then(() => {
+          structureDirty.settle(begun);
+        }),
+      ).catch(() => {
+        // Autosave is best-effort; the canvas keeps working without it.
+        // Leaves the channel dirty so a later graph-switch flush still
+        // attempts this save rather than silently skipping it.
+      });
     }, 900);
     structureTimeoutRef.current = timeout;
     return () => window.clearTimeout(timeout);
-  }, [dirtyStamp]);
+  }, [dirtyStamp, structureDirty, trackSave]);
 
   // Full blob write/GC + byte-budget autosave: fires ONLY on the new-run,
   // pin-toggle, and upload/source-change events that bump blobStamp (never on
@@ -1035,26 +1049,28 @@ export default function WorkbenchApp() {
   // the structure record, so this alone keeps a fresh canvas fully durable.
   useEffect(() => {
     if (!hasRestored.current || !blobStamp) return;
-    blobDirtyRef.current = true;
+    blobDirty.edit();
     const timeout = window.setTimeout(() => {
       blobTimeoutRef.current = null;
+      const blobBegun = blobDirty.begin();
+      const structureBegun = structureDirty.begin();
       const state = useWorkbenchStore.getState();
-      void saveGraph(graphIdRef.current, state.nodes as WorkbenchNode[], state.edges)
-        .then(() => {
-          blobDirtyRef.current = false;
+      trackSave(
+        saveGraph(graphIdRef.current, state.nodes as WorkbenchNode[], state.edges).then(() => {
+          blobDirty.settle(blobBegun);
           // saveGraph also rewrites the structure record in the same
-          // transaction (see its own comment), so a structure-only save is
-          // no longer separately outstanding either.
-          structureDirtyRef.current = false;
+          // transaction (see its own comment), so the structure edits it read
+          // are stored too — only those; a later edit stays owed.
+          structureDirty.settle(structureBegun);
           setSavedAt(Date.now());
-        })
-        .catch(() => {
-          // Autosave is best-effort; the canvas keeps working without it.
-        });
+        }),
+      ).catch(() => {
+        // Autosave is best-effort; the canvas keeps working without it.
+      });
     }, 400);
     blobTimeoutRef.current = timeout;
     return () => window.clearTimeout(timeout);
-  }, [blobStamp]);
+  }, [blobStamp, blobDirty, structureDirty, trackSave]);
 
   // issue-1: cancels whatever debounce timers are still pending -- their own
   // deferred calls must never fire AFTER a deliberate flush/skip-save (which
@@ -1080,22 +1096,27 @@ export default function WorkbenchApp() {
   // caller can abort the switch and a later retry still attempts the save.
   const flushPendingSaves = useCallback(async (): Promise<void> => {
     cancelPendingTimers();
-    const decision = decidePendingSave(structureDirtyRef.current, blobDirtyRef.current);
+    // Let autosaves already writing land (or fail) first; only then do the
+    // channels say what is still owed.
+    await Promise.allSettled([...inFlightSavesRef.current]);
+    const decision = decidePendingSave(structureDirty.dirty, blobDirty.dirty);
     if (decision === "none") return;
+    const structureBegun = structureDirty.begin();
+    const blobBegun = blobDirty.begin();
     const state = useWorkbenchStore.getState();
     const nodes = state.nodes as WorkbenchNode[];
     const edges = state.edges;
     const graphId = graphIdRef.current;
     if (decision === "full") {
       await saveGraph(graphId, nodes, edges);
-      blobDirtyRef.current = false;
-      structureDirtyRef.current = false;
+      blobDirty.settle(blobBegun);
+      structureDirty.settle(structureBegun);
       setSavedAt(Date.now());
       return;
     }
     await saveGraphStructure(graphId, nodes, edges);
-    structureDirtyRef.current = false;
-  }, [cancelPendingTimers]);
+    structureDirty.settle(structureBegun);
+  }, [cancelPendingTimers, structureDirty, blobDirty]);
 
   // issue-1 (root fix): graph creation/switching used to update the active
   // graph id and reload IMMEDIATELY, so an edit still inside the 900ms
