@@ -3,7 +3,7 @@
 // Downloads candidate reference photos, measures them, and stitches a labelled
 // contact sheet so a person can look at all of them at once.
 //
-//   node scripts/autoboard/review-candidates.mjs <candidates.json> [--out <dir>]
+//   node --experimental-strip-types scripts/autoboard/review-candidates.mjs <candidates.json> [--out <dir>]
 //
 // Why this exists: a scraper can verify that a URL returns HTTP 200 with an
 // image content type, and that check passes things that are not a picture of
@@ -26,6 +26,8 @@ import { parseArgs } from "node:util";
 
 import sharp from "sharp";
 
+import { downloadImage } from "./lib/download-image.mjs";
+
 const EXTENSION_BY_TYPE = { "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/avif": ".avif" };
 const TILE = 330;
 const LABEL = 30;
@@ -34,7 +36,7 @@ const COLUMNS = 4;
 const { values, positionals } = parseArgs({ options: { out: { type: "string" } }, allowPositionals: true });
 const source = positionals[0];
 if (!source) {
-  console.error("usage: node scripts/autoboard/review-candidates.mjs <candidates.json> [--out <dir>]");
+  console.error("usage: node --experimental-strip-types scripts/autoboard/review-candidates.mjs <candidates.json> [--out <dir>]");
   process.exit(2);
 }
 const name = path.basename(source, ".json");
@@ -53,14 +55,7 @@ for (const [key, entry] of Object.entries(candidates)) {
   for (const [index, image] of (entry.images ?? []).entries()) {
     const record = { url: image.url, kind: image.kind ?? "face", source: image.source ?? "" };
     try {
-      const response = await fetch(image.url, { headers: { "User-Agent": "Mozilla/5.0" } });
-      const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim();
-      if (!response.ok || !contentType.startsWith("image/")) {
-        record.error = `HTTP ${response.status} ${contentType || "no content-type"}`;
-        images.push(record);
-        continue;
-      }
-      const buffer = Buffer.from(await response.arrayBuffer());
+      const { buffer, contentType } = await downloadImage(image.url);
       const meta = await sharp(buffer).metadata();
       const file = `${key}-${index + 1}${EXTENSION_BY_TYPE[contentType] ?? ".bin"}`;
       writeFileSync(path.join(filesDir, file), buffer);

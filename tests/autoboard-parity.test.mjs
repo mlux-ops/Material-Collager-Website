@@ -230,6 +230,11 @@ test("reference names are basenames, matching node:path on this platform", () =>
 // signal for any of this, so the grep IS the gate.
 const AUTOBOARD_CORE_DIR = new URL("../app/lib/autoboard/", import.meta.url);
 
+// Outside app/lib/autoboard/, but loaded from a .mjs entry point all the same —
+// scripts/autoboard/lib/download-image.mjs downloads vendor photos through it —
+// so held to the same rules. Named relative to AUTOBOARD_CORE_DIR.
+const ALSO_LOADED_BY_CLI = ["../guarded-fetch.ts"];
+
 function coreModuleFiles() {
   let names = [];
   try {
@@ -241,10 +246,10 @@ function coreModuleFiles() {
   return names.filter((name) => name.endsWith(".ts"));
 }
 
-test("app/lib/autoboard modules import no node: builtin, no alias, and no JSON", () => {
+test("app/lib modules the CLI loads import no node: builtin, no alias, and no JSON", () => {
   const files = coreModuleFiles();
   assert.ok(files.length > 0, "expected at least one module under app/lib/autoboard/");
-  for (const name of files) {
+  for (const name of [...files, ...ALSO_LOADED_BY_CLI]) {
     const source = readFileSync(new URL(name, AUTOBOARD_CORE_DIR), "utf8");
     const specifiers = [...source.matchAll(/\bfrom\s+"([^"]+)"/g)].map((entry) => entry[1]);
     for (const specifier of specifiers) {
@@ -259,8 +264,8 @@ test("app/lib/autoboard modules import no node: builtin, no alias, and no JSON",
   }
 });
 
-test("app/lib/autoboard modules load from a .mjs entry point with no loader hooks", async () => {
-  for (const name of coreModuleFiles()) {
+test("app/lib modules the CLI loads import cleanly from a .mjs entry point with no loader hooks", async () => {
+  for (const name of [...coreModuleFiles(), ...ALSO_LOADED_BY_CLI]) {
     await import(new URL(name, AUTOBOARD_CORE_DIR).href);
   }
 });
