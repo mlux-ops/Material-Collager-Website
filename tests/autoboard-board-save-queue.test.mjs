@@ -8,6 +8,16 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // `inFlight`) hangs the whole suite rather than failing one test. Every test
 // here gets a bound, so that failure mode reports as a timeout instead.
 const TIMEOUT = { timeout: 5000 };
+// Polls instead of sleeping a fixed duration, so a slow CI run fails loudly
+// (past `timeoutMs`) rather than the test flaking on a margin a stall could
+// eat into.
+async function waitFor(predicate, { timeoutMs = 3000, intervalMs = 5 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error(`waitFor: condition still false after ${timeoutMs}ms`);
+    await sleep(intervalMs);
+  }
+}
 
 // A fake PATCH: records what reached the "server", can fail, can be held.
 function recorder({ fail = () => false, delay } = {}) {
@@ -126,7 +136,7 @@ test("flush waits for a debounced edit whose timer fires during the wait, so a r
   let releaseFirst;
   const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
   let n = 0;
-  const send = async (patch) => {
+  const send = async () => {
     const id = ++n;
     events.push(`send#${id} start`);
     if (id === 1) await firstGate;
@@ -257,7 +267,10 @@ test("typing through an in-flight write does not defeat the debounce (Important 
     await sleep(10); // steady typing, well inside the debounce window
   }
   assert.deepEqual(sent, ["warm"]); // typing alone never triggered a second write
-  await sleep(120); // typing has stopped; the last-armed debounce can finally fire
+  // Typing has stopped; the last-armed debounce fires on its own schedule
+  // once free of CPU contention, then the write itself takes another 30 ms —
+  // poll for it rather than sleeping a fixed duration a CI stall could eat.
+  await waitFor(() => sent.length === 2);
   assert.deepEqual(sent, ["warm", text]); // exactly one more write, with the latest text
 });
 
@@ -304,15 +317,24 @@ test("saveNow resolves false when the write it only rode along on fails (Minor 3
 // `while (inFlight) await inFlight` then spun on that settled promise
 // without end. `inFlight` is now cleared in a finally.
 test("an onError that throws does not wedge the queue (Minor 1)", TIMEOUT, async () => {
+  const sent = [];
+  let failing = true;
   const queue = createBoardSaveQueue({
-    send: async () => { throw new Error("HTTP 503"); },
+    send: async (patch) => {
+      if (failing) throw new Error("HTTP 503");
+      sent.push(structuredClone(patch));
+    },
     debounceMs: 5,
     onError: () => { throw new Error("onError threw"); },
   });
   const ok = await queue.saveNow({ instruction: "typed" });
   assert.equal(ok, false);
+  failing = false;
   queue.saveSoon({ instruction: "typed more" });
   await queue.flush().catch(() => {}); // must return, not spin forever
+  // Not just "didn't hang": the follow-up edit actually reached the server,
+  // so a regression that silently drops writes instead of wedging also fails.
+  assert.deepEqual(sent, [{ instruction: "typed more" }]);
 });
 
 // Minor 2: `pending = null` ran before the (possibly synchronously throwing)
@@ -329,4 +351,53 @@ test("a send that throws synchronously still keeps its patch for the next attemp
   const ok = await queue.saveNow({ instruction: "typed text" });
   assert.equal(ok, false);
   assert.deepEqual(queue.takePending(), { instruction: "typed text" });
+});
+
+// --- Fix round 3: re-review findings on the round-2 fix. ------------------
+
+// Minor 1 (this round, probe 10): the reviewer picks "high", then "low"
+// while "high" is still out. "high" fails, but a newer value for the SAME
+// field already replaced it — that field's failure must not make a drain
+// that only waited on it reject, because "low" (not "high") is what a
+// drain goes on to attempt, and it succeeds.
+test("a dropdown value replaced before its own failure does not make saveNow or flush reject (probe 10)", TIMEOUT, async () => {
+  const stored = [];
+  let calls = 0;
+  const send = async (patch) => {
+    calls += 1;
+    const call = calls;
+    await sleep(20);
+    if (call === 1) throw new Error("HTTP 503"); // "high", the first write, fails
+    stored.push(structuredClone(patch));
+  };
+  const queue = createBoardSaveQueue({ send, debounceMs: 5, onError: () => {} });
+  const high = queue.saveNow({ quality: "high" });
+  await sleep(5); // "high" is out
+  const low = queue.saveNow({ quality: "low" }); // the newer choice replaces "high"
+  assert.equal(await high, false); // "high" itself did fail
+  assert.equal(await low, true); // "low" replaced it and was stored instead
+  await queue.flush(); // must resolve — nothing "high"-shaped is left unresolved
+  assert.deepEqual(stored, [{ quality: "low" }]);
+});
+
+// Minor 2 (this round, probe 9): a rejection value String() cannot convert
+// (Object.create(null) has no toString) used to skip both the pending
+// restore and the dropped-counter update. Flushing while only WAITING on
+// the write (not making the attempt itself, so its only signal is `pending`
+// and the dropped counter) used to see neither updated and resolve
+// silently, losing the typed text outright. The message is now built with
+// a fallback that cannot throw, ahead of both those updates.
+test("a rejection value that cannot be stringified still restores pending and reports the failure (probe 9)", TIMEOUT, async () => {
+  const queue = createBoardSaveQueue({
+    send: async () => {
+      await sleep(10);
+      throw Object.create(null); // String(Object.create(null)) throws
+    },
+    debounceMs: 5,
+    onError: () => {},
+  });
+  queue.saveSoon({ instruction: "typed" });
+  await sleep(8); // the debounce fires; flush() below only waits, it does not attempt
+  await assert.rejects(queue.flush(), /could not be converted/);
+  assert.deepEqual(queue.takePending(), { instruction: "typed" });
 });

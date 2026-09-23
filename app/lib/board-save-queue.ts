@@ -61,12 +61,24 @@ function normalizePending(patch: BoardPatch): BoardPatch | null {
   return Object.keys(patch).length > 0 ? patch : null;
 }
 
+// String(cause) can itself throw — Object.create(null) has no toString to
+// fall back to (probe 9). This must never throw: it runs ahead of the
+// pending-restore and dropped-counter updates in the failure handler below,
+// which a throw here would otherwise skip entirely.
+function safeErrorMessage(cause: unknown): string {
+  try {
+    return String(cause);
+  } catch {
+    return "a rejection value that could not be converted to a message";
+  }
+}
+
 export type BoardSaveQueue = {
   /** Coalesces `patch` with anything pending; sends after `debounceMs` of quiet. */
   saveSoon(patch: BoardPatch): void;
   /** Sends `patch`, with anything pending, now. Resolves false on failure (reported through onError). */
   saveNow(patch: BoardPatch): Promise<boolean>;
-  /** Sends anything pending and waits for every write in flight; rejects if the write it makes (or the one it only waited on) failed. */
+  /** Sends anything pending and waits for every write in flight; rejects if the attempt it makes fails, or if a write it only waited on failed on a dropdown value nothing newer replaced. */
   flush(): Promise<void>;
   /** Removes and returns what has not been sent yet, without sending it. Used by tests; production code flushes instead, so nothing bypasses the queue. */
   takePending(): BoardPatch | null;
@@ -85,12 +97,11 @@ export function createBoardSaveQueue(options: {
   // current write settles (a debounce tick, saveNow riding along on someone
   // else's write) can await it without a try/catch of its own.
   let inFlight: Promise<void> | null = null;
-  // Counts every failure that dropped a dropdown value keepEditedFields will
-  // never resend. drainOrThrow compares this against its own starting count
-  // to tell "a write I only waited on just failed silently" from "nothing
-  // has gone wrong since I started" — a dropdown failure that empties
-  // `pending` would otherwise be invisible to a waiter who made no attempt
-  // of its own.
+  // Counts every failure that dropped a dropdown value nothing newer had
+  // already replaced. drainOrThrow compares this against its own starting
+  // count to tell "a write I only waited on just failed silently" from
+  // "nothing has gone wrong since I started" — such a failure would
+  // otherwise be invisible to a waiter who made no attempt of its own.
   let dropped = 0;
   let droppedError: Error | null = null;
 
@@ -133,21 +144,27 @@ export function createBoardSaveQueue(options: {
       },
       (cause: unknown) => {
         try {
-          const error = cause instanceof Error ? cause : new Error(String(cause));
-          // A dropdown value this attempt carried is filtered out below, so
-          // no later attempt will ever resend it. If that leaves nothing
-          // pending, record it so a waiter with no attempt of its own still
-          // learns the write failed (see drainOrThrow).
-          if (patch.quality !== undefined || patch.background !== undefined || patch.heroItemId !== undefined) {
-            dropped += 1;
-            droppedError = error;
-          }
+          const error = cause instanceof Error ? cause : new Error(safeErrorMessage(cause));
+          // `pending` here still holds exactly what accumulated while this
+          // write was out — the restore below hasn't run yet — so this is
+          // the only place a dropdown field's failure can still be told
+          // apart from one a newer edit already replaced. A replaced value
+          // is not something any drain should reject over: the newer one
+          // is what a drain attempts instead (see drainOrThrow).
+          const droppedUnreplaced =
+            (patch.quality !== undefined && pending?.quality === undefined) ||
+            (patch.background !== undefined && pending?.background === undefined) ||
+            (patch.heroItemId !== undefined && pending?.heroItemId === undefined);
           // Newer edits made while this was in flight are the only things
           // that belong in `pending` now; the failed patch (filtered to the
           // fields still shown as edited) goes back in beneath them, never
           // on top, so a stale value can never outrank an edit typed after
           // it.
           pending = normalizePending(mergeBoardPatch(keepEditedFields(patch), pending ?? {}));
+          if (droppedUnreplaced) {
+            dropped += 1;
+            droppedError = error;
+          }
           options.onError?.(error);
           // No auto-resend: the kept edit waits for the next save or flush.
           // Rethrown so `attempt` itself rejects — a direct awaiter (flush)
@@ -169,9 +186,11 @@ export function createBoardSaveQueue(options: {
   // Waits for anything already out, forces the rest of `pending` out
   // (cancelling its debounce), and rides through however many writes that
   // takes. Shared by saveNow and flush: rejects if the attempt it makes
-  // itself fails, or if a write it only waited on dropped a dropdown value
-  // that left nothing pending (`dropped`, above) — either way, no automatic
-  // retry after.
+  // itself fails, or if a write it only waited on dropped an unreplaced
+  // dropdown value (`dropped`, above) — either way, no automatic retry
+  // after. A waited-on write that failed but left something in `pending`
+  // (a kept text field, or a newer dropdown value) is not a rejection here:
+  // the loop below goes on to attempt that instead.
   async function drainOrThrow(): Promise<void> {
     const droppedAtStart = dropped;
     for (;;) {
