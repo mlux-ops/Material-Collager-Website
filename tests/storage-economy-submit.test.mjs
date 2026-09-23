@@ -8,8 +8,12 @@ let failJobInsert = false;
 // retry succeeds) or two (the retry fails too, both attempts exhausted).
 let failBatchIdUpdate = 0;
 const BATCH_ID_UPDATE = /^\s*UPDATE generation_jobs SET status = \?, openai_batch_id = \?/i;
+// The most parameters any one statement has bound. Real D1 refuses more than
+// 100 per statement; the in-memory SQLite behind this double does not.
+let maxBoundArgs = 0;
 const DB = createFakeD1({
-  beforeStatement: (_kind, sql) => {
+  beforeStatement: (_kind, sql, args) => {
+    maxBoundArgs = Math.max(maxBoundArgs, args.length);
     if (failJobInsert && /^\s*INSERT INTO generation_jobs/i.test(sql)) throw new Error("D1 unavailable");
     if (failBatchIdUpdate > 0 && BATCH_ID_UPDATE.test(sql)) {
       failBatchIdUpdate -= 1;
@@ -21,6 +25,9 @@ installWorkerEnv({ DB, OUTPUTS: createFakeR2() });
 process.env["OPENAI_API_KEY"] = "test-only";
 const { GET, POST } = await import("../app/api/economy/route.ts");
 const { ensureJobStorage } = await import("../app/lib/generation-jobs.ts");
+// batch-finalize (scripts/autoboard/cli.mjs) won't resubmit a job whose error
+// matches this, so every message saying a batch exists or may exist must.
+const { RESUBMIT_WARNING } = await import("../app/lib/economy-submission-status.ts");
 
 const payload = {
   collageType: "bathroom_fixture_collage",
@@ -107,6 +114,8 @@ test("a failed submission leaves a failed row that says how to check before payi
   assert.equal(row.openai_batch_id, null);
   assert.match(row.error, new RegExp(`material_collager_job = ${row.id}`));
   assert.match(body.error, new RegExp(`material_collager_job = ${row.id}`));
+  assert.match(row.error, RESUBMIT_WARNING);
+  assert.match(body.error, RESUBMIT_WARNING);
 });
 
 test("a timed-out batch create still carries the guidance, and is never retried (R09)", async (t) => {
@@ -137,6 +146,7 @@ test("a timed-out batch create still carries the guidance, and is never retried 
   assert.equal(row.status, "failed");
   assert.match(row.error, new RegExp(`material_collager_job = ${row.id}`));
   assert.match(body.error, new RegExp(`material_collager_job = ${row.id}`));
+  assert.match(body.error, RESUBMIT_WARNING);
 });
 
 test("the batch id write is retried once before giving up (R09)", async (t) => {
@@ -164,6 +174,9 @@ test("a batch id write that fails twice reports the batch as already created, no
     const body = await response.json();
     assert.match(body.error, /batch_1/);
     assert.match(body.error, /do not resubmit/i);
+    assert.match(body.error, RESUBMIT_WARNING);
+    // batch-finalize reads the job id from this, to keep tracking the job.
+    assert.match(body.error, /material_collager_job = [\w-]+/);
     // No mechanism retries the D1 write again later on its own — saying so
     // beside "do not resubmit" would invite exactly the wrong reading.
     assert.doesNotMatch(body.error, /retry recording/i);
@@ -251,6 +264,7 @@ test("a submitting row stuck past the stale threshold reads as failed, with guid
   const job = jobs.find((entry) => entry.id === "job-stale");
   assert.equal(job.status, "failed");
   assert.match(job.error, /material_collager_job = job-stale/);
+  assert.match(job.error, RESUBMIT_WARNING);
 });
 
 test("a bump never clobbers a row that became 'finalizing' since it was selected (R09)", async (t) => {
@@ -274,4 +288,77 @@ test("a bump never clobbers a row that became 'finalizing' since it was selected
   const row = await DB.prepare("SELECT status, updated_at FROM generation_jobs WHERE id = 'job-race'").first();
   assert.equal(row.status, "finalizing");
   assert.equal(row.updated_at, leaseUpdatedAt, "a row claimed as finalizing mid-check must keep its stale-claim lease timestamp");
+});
+
+function insertJob({ id, mode = "economy", status, batchId = null, updatedAt, finalizeAttempts = 0 }) {
+  return DB.prepare(`INSERT INTO generation_jobs
+      (id, mode, status, openai_batch_id, filename, format, prompt, payload_json, reference_ids_json, finalize_attempts, created_at, updated_at, expires_at)
+      VALUES (?, ?, ?, ?, 'f.png', '1536x1024', 'p', '{}', '[]', ?, ?, ?, ?)`)
+    .bind(id, mode, status, batchId, finalizeAttempts, updatedAt, updatedAt, Date.now() + 1e9).run();
+}
+
+test("history looks tracked Economy jobs up by id, even after 30 newer renders push them out of the listing", async (t) => {
+  await ensureJobStorage();
+  await DB.prepare("DELETE FROM generation_jobs").run();
+  const now = Date.now();
+  await insertJob({ id: "job-tracked", status: "in_progress", batchId: "batch-tracked", updatedAt: now - 60_000 });
+  // Drafts share the table, and the listing is the newest 30 rows of every kind.
+  for (let n = 0; n < 30; n++) await insertJob({ id: `draft-${n}`, mode: "immediate", status: "completed", updatedAt: now + n });
+  t.mock.method(globalThis, "fetch", async () => Response.json({ id: "batch-tracked", status: "in_progress" }));
+  const listing = await (await GET()).json();
+  assert.ok(!listing.jobs.some((job) => job.id === "job-tracked"), "setup: the tracked job must have fallen out of the listing");
+  assert.equal(listing.tracked, undefined, "the history page's own request is answered as before");
+  const body = await (await GET(new Request("http://localhost/api/economy?ids=job-tracked,job-unknown"))).json();
+  assert.deepEqual(body.tracked?.map((job) => job.id), ["job-tracked"]);
+  assert.equal(body.tracked[0].status, "in_progress");
+});
+
+test("an id lookup never binds more parameters than D1 allows in one statement", async (t) => {
+  await ensureJobStorage();
+  await DB.prepare("DELETE FROM generation_jobs").run();
+  await insertJob({ id: "job-last", status: "completed", updatedAt: Date.now() });
+  t.mock.method(globalThis, "fetch", async (url) => { throw new Error(`unexpected fetch ${url}`); });
+  const ids = [...Array.from({ length: 149 }, (_, n) => `job-missing-${n}`), "job-last"];
+  maxBoundArgs = 0;
+  const body = await (await GET(new Request(`http://localhost/api/economy?ids=${ids.join(",")}`))).json();
+  assert.deepEqual(body.tracked?.map((job) => job.id), ["job-last"]);
+  assert.ok(maxBoundArgs <= 100, `one statement bound ${maxBoundArgs} parameters; D1 allows 100`);
+});
+
+test("a malformed or oversized id list is refused before any job is refreshed", async (t) => {
+  await ensureJobStorage();
+  await DB.prepare("DELETE FROM generation_jobs").run();
+  await insertJob({ id: "job-pending", status: "in_progress", batchId: "batch-pending", updatedAt: Date.now() - 60_000 });
+  let refreshed = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    refreshed += 1;
+    return Response.json({ id: "batch-pending", status: "in_progress" });
+  });
+  const malformed = await GET(new Request("http://localhost/api/economy?ids=job-pending,job%3Bdrop"));
+  assert.equal(malformed.status, 400);
+  const oversized = await GET(new Request(`http://localhost/api/economy?ids=${Array.from({ length: 201 }, (_, n) => `job-${n}`).join(",")}`));
+  assert.equal(oversized.status, 400);
+  assert.equal(refreshed, 0);
+});
+
+test("a completed batch that can't be saved fails naming its batch and job, and says not to resubmit", async (t) => {
+  await ensureJobStorage();
+  await DB.prepare("DELETE FROM generation_jobs").run();
+  // Three finalize attempts already spent and the last claim gone stale: this
+  // poll's claim is the fourth, past the cap.
+  await insertJob({ id: "job-cap", status: "finalizing", batchId: "batch-cap", updatedAt: Date.now() - 6 * 60 * 1000, finalizeAttempts: 3 });
+  const downloads = [];
+  t.mock.method(globalThis, "fetch", async (url) => {
+    if (String(url).endsWith("/v1/batches/batch-cap")) return Response.json({ id: "batch-cap", status: "completed", output_file_id: "file-out" });
+    downloads.push(String(url));
+    throw new Error(`unexpected fetch ${url}`);
+  });
+  assert.equal((await GET()).status, 200);
+  const row = await DB.prepare("SELECT status, error FROM generation_jobs WHERE id = 'job-cap'").first();
+  assert.equal(row.status, "failed");
+  assert.match(row.error, /batch-cap/);
+  assert.match(row.error, /material_collager_job = job-cap/);
+  assert.match(row.error, /do not resubmit/i);
+  assert.match(row.error, RESUBMIT_WARNING);
+  assert.deepEqual(downloads, [], "past the cap, the output is not downloaded again");
 });

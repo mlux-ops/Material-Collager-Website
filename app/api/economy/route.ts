@@ -15,6 +15,13 @@ type BatchResponse = {
 };
 
 const COMPLETE_STATUSES = new Set(["completed", "failed", "expired", "cancelled"]);
+// Finalize claims a completed batch gets before it is failed (see refreshJob).
+const MAX_FINALIZE_ATTEMPTS = 3;
+// Economy jobs one GET may look up by id (see `tracked` in GET). An autoboard
+// run tracks far fewer; this only bounds what a single request can ask for.
+const MAX_TRACKED_IDS = 200;
+// D1 binds at most 100 parameters per statement.
+const D1_MAX_BOUND_PARAMETERS = 100;
 
 export async function POST(request: Request) {
   try {
@@ -130,8 +137,10 @@ export async function POST(request: Request) {
   }
 }
 
-export async function GET() {
+export async function GET(request?: Request) {
   try {
+    // Checked before anything is refreshed, so a malformed request costs nothing.
+    const trackedIds = trackedJobIds(request);
     await cleanupExpiredJobs();
     const DB = await ensureJobStorage();
     // Two per request: each refresh can wait on OpenAI (a status check, then
@@ -164,11 +173,40 @@ export async function GET() {
         return [DB.prepare("UPDATE generation_jobs SET updated_at = ? WHERE id = ? AND status != 'finalizing'").bind(bumpStamp, row.id).run()];
       }),
     );
+    // `jobs` is the history drawer's listing: the newest 30 rows of every
+    // render kind, drafts included, so an Economy job can fall out of it while
+    // it is still pending. A caller tracking particular jobs (the autoboard
+    // CLI's batch-status) names them in ?ids= and gets them back in
+    // `tracked`, where an id that is missing really is absent from this server.
     const jobs = await DB.prepare("SELECT * FROM generation_jobs ORDER BY created_at DESC LIMIT 30").all<JobRow>();
-    return Response.json({ ok: true, jobs: jobs.results.map(publicJob) });
+    const tracked = trackedIds && (await economyJobsById(DB, trackedIds)).map(publicJob);
+    return Response.json({ ok: true, jobs: jobs.results.map(publicJob), ...(tracked ? { tracked } : {}) });
   } catch (error) {
     return errorResponse(error);
   }
+}
+
+// The ids in ?ids=a,b (repeating ?ids= works too), or undefined when the
+// request names none — the history page's own request.
+function trackedJobIds(request?: Request) {
+  const params = request ? new URL(request.url).searchParams : undefined;
+  if (!params?.has("ids")) return undefined;
+  const ids = [...new Set(params.getAll("ids").flatMap((value) => value.split(",")).map((id) => id.trim()).filter(Boolean))];
+  if (ids.length > MAX_TRACKED_IDS) throw new Error(`Look up at most ${MAX_TRACKED_IDS} job ids per request.`);
+  if (ids.some((id) => !/^[A-Za-z0-9_-]{1,64}$/.test(id))) throw new Error("A job id may only contain letters, digits, hyphens and underscores.");
+  return ids;
+}
+
+async function economyJobsById(DB: D1Database, ids: string[]) {
+  const rows: JobRow[] = [];
+  for (let start = 0; start < ids.length; start += D1_MAX_BOUND_PARAMETERS) {
+    const chunk = ids.slice(start, start + D1_MAX_BOUND_PARAMETERS);
+    const found = await DB.prepare(`SELECT * FROM generation_jobs WHERE mode = 'economy' AND id IN (${chunk.map(() => "?").join(", ")})`)
+      .bind(...chunk)
+      .all<JobRow>();
+    rows.push(...found.results);
+  }
+  return rows;
 }
 
 async function submitEconomyBatch(
@@ -249,9 +287,16 @@ async function refreshJob(row: JobRow) {
   };
   // Bound retries: after a few finalize attempts a permanently unreadable
   // output should fail terminally instead of re-downloading and re-running the
-  // paid QA review every stale-claim window forever.
-  if (row.finalize_attempts + 1 > 3) {
-    await failJob("The Economy render could not be finalized after multiple attempts.");
+  // paid QA review every stale-claim window forever. The batch itself DID
+  // complete, though: it is billed and its output file is still at OpenAI, so
+  // the message says where, and not to buy it again. batch-finalize in
+  // scripts/autoboard/cli.mjs won't resubmit a job whose error matches
+  // RESUBMIT_WARNING (app/lib/economy-submission-status.ts); keep it matching.
+  if (row.finalize_attempts + 1 > MAX_FINALIZE_ATTEMPTS) {
+    await failJob(
+      `Batch ${row.openai_batch_id} completed at OpenAI, but its output could not be saved here after ${MAX_FINALIZE_ATTEMPTS} attempts. ` +
+        `Do not resubmit — it is already paid for. Its output file (${batch.output_file_id}) is on OpenAI's Batches page under metadata material_collager_job = ${row.id}.`,
+    );
     return;
   }
   try {

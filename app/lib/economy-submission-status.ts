@@ -13,6 +13,15 @@
 // never mistakes a submission that is still genuinely in flight.
 export const SUBMITTING_STALE_MS = 5 * 60 * 1000;
 
+// The wording of every Economy message about a batch that exists, or may,
+// even though its job can read as failed: the POST errors and the
+// finalize-attempt cap in app/api/economy/route.ts, and
+// staleSubmittingGuidance below. The last alternative is the cap's wording
+// before it named the batch, which rows capped by older deployments still
+// carry. The autoboard CLI's batch-finalize won't resubmit a job whose error
+// matches, so a new message of that kind must match too.
+export const RESUBMIT_WARNING = /\b(?:do not resubmit|before resubmitting|could not be finalized after multiple attempts)\b/i;
+
 export function isStaleSubmitting(status: string, updatedAt: number, now: number = Date.now()): boolean {
   return status === "submitting" && now - updatedAt > SUBMITTING_STALE_MS;
 }
