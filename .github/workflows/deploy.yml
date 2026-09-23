@@ -3,14 +3,43 @@ name: Deploy to Cloudflare
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch: {}
 
-concurrency:
-  group: deploy-production
-  cancel-in-progress: false
-
 jobs:
+  # Runs on every pull request and before every deploy. A red test, a lint
+  # error or a NEW type error stops the deploy; pre-existing type errors are
+  # allowed up to scripts/typecheck-baseline.json.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests
+        run: npm run test:transitions
+
+      - name: Typecheck (no new errors)
+        run: node scripts/typecheck-baseline.mjs
+
   deploy:
+    needs: verify
+    if: github.event_name != 'pull_request'
+    # Moved here from the workflow level so pull-request verify runs never
+    # queue behind (or hold up) a production deploy.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
