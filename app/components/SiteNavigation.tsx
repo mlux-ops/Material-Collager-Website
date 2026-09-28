@@ -65,9 +65,10 @@ function warmOnIdle() {
   else window.setTimeout(run, 1800);
 }
 
-export type SiteNavigationActive = "library" | "generator" | "workbench";
+export type SiteNavigationActive = "library" | "generator" | "workbench" | "review";
 
-// The one shared top bar for all three pages (Library, Generator, Workbench).
+// The one shared top bar for every page (Library, Generator, Workbench,
+// Review Board).
 // Max explicitly likes this bar as-is -- it is the reference everything else
 // on the page adopts. Do not restyle `.site-navigation` in app/globals.css;
 // this component only centralizes the markup so every page renders the exact
@@ -94,7 +95,7 @@ export function SiteNavigation({
     if (active === "workbench") return;
     warmOnIdle();
   }, [active]);
-  // The black block is one element that slides between the three links rather
+  // The black block is one element that slides between the links rather
   // than a background that blinks from one link to the next.
   useNavPillSlide(trackRef, pillRef, active);
 
@@ -148,6 +149,7 @@ export function SiteNavigation({
         {item("library", "/", "Library")}
         {item("generator", "/generator", "Generator")}
         {item("workbench", "/workbench", "Workbench")}
+        {item("review", "/review-boards", "Review Board")}
       </nav>
       <div className="site-nav-right">
         {right}

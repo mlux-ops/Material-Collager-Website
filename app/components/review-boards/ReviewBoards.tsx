@@ -400,7 +400,7 @@ export function ReviewBoards() {
   return (
     <div className={styles.page}>
       <RouteReady path="/review-boards" />
-      <SiteNavigation active={null} />
+      <SiteNavigation active="review" />
 
       <div className={`${styles.shell} ${view === "boards" ? styles.shellWide : ""}`}>
         <aside className={styles.rail} aria-label="Stored projects">
