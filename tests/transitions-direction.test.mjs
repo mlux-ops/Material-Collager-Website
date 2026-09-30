@@ -4,10 +4,20 @@ import assert from "node:assert/strict";
 const { navDirection, NAV_ORDER } = await import("../app/lib/nav-direction.ts");
 
 test("nav order is the main routes in progression order", () => {
-  assert.deepEqual(NAV_ORDER, ["/", "/generator", "/workbench", "/archive"]);
+  assert.deepEqual(NAV_ORDER, ["/", "/generator", "/workbench", "/review-boards", "/archive"]);
 });
 
-// Exhaustive 4×4 matrix. Forward = moving right in NAV_ORDER, back = left,
+test("the review board wipes in the tab-bar direction", () => {
+  assert.equal(navDirection("/generator", "/review-boards"), "forward");
+  assert.equal(navDirection("/workbench", "/review-boards"), "forward");
+  assert.equal(navDirection("/review-boards", "/workbench"), "back");
+  assert.equal(navDirection("/review-boards", "/"), "back");
+  assert.equal(navDirection("/review-boards", "/archive"), "forward");
+  assert.equal(navDirection("/archive", "/review-boards"), "back");
+  assert.equal(navDirection("/review-boards", "/review-boards"), "none");
+});
+
+// Exhaustive matrix over the original four routes. Forward = moving right in NAV_ORDER, back = left,
 // none = no movement. Browser back/forward needs no special casing: history
 // traversal lands on a route whose index comparison gives the same answer.
 const MATRIX = [
