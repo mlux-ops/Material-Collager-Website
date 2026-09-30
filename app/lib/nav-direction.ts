@@ -6,9 +6,9 @@
  */
 
 /** The main surfaces in progression order. Forward = moving right. The
- * archive sits past the workbench: entering it from anywhere wipes forward,
- * leaving it wipes back. */
-export const NAV_ORDER = ["/", "/generator", "/workbench", "/archive"] as const;
+ * review board follows the workbench, matching the tab bar; the archive sits
+ * past both: entering it from anywhere wipes forward, leaving it wipes back. */
+export const NAV_ORDER = ["/", "/generator", "/workbench", "/review-boards", "/archive"] as const;
 
 export type NavDirection = "forward" | "back" | "none";
 
