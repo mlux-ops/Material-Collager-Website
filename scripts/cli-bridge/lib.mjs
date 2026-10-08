@@ -24,8 +24,13 @@ export const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
 export const PROVIDERS = {
   claude: { models: ["sonnet", "opus", "haiku"], defaultModel: "sonnet" },
-  // "default" means no -m flag: the model the ChatGPT plan gives Codex.
-  codex: { models: ["default"], defaultModel: "default" },
+  // "default" means no -m flag: the model the ChatGPT plan gives Codex. The
+  // rest are the models `codex debug models` lists as visible for this
+  // ChatGPT plan, each verified 2026-10-08 to answer under the bridge's flags.
+  codex: {
+    models: ["default", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+    defaultModel: "default",
+  },
 };
 
 // Same wording as the assist route's server-owned system prompt.

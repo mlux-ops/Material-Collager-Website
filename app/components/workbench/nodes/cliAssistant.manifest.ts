@@ -16,7 +16,7 @@ export type CliProvider = "claude" | "codex";
 // "default" sends no model flag — the ChatGPT plan picks.
 export const CLI_MODELS: Record<CliProvider, readonly string[]> = {
   claude: ["sonnet", "opus", "haiku"],
-  codex: ["default"],
+  codex: ["default", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
 };
 export const CLI_DEFAULT_MODEL: Record<CliProvider, string> = {
   claude: "sonnet",

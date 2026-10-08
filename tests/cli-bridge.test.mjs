@@ -126,6 +126,13 @@ test("codex runs read-only with every tool feature disabled and the prompt on st
   assert.ok(codexPrompt("hi").startsWith(SYSTEM_PROMPT) && codexPrompt("hi").endsWith("hi"));
 });
 
+test("a named codex model is passed with -m and must be on the allowlist", () => {
+  const args = codexArgs({ model: "gpt-6-sol", workDir: "W", imagePaths: [], outFile: "W/out.txt" });
+  assert.equal(args[args.indexOf("-m") + 1], "gpt-6-sol");
+  assert.equal(validateRunPayload({ provider: "codex", model: "gpt-5.6-luna", instruction: "hi" }).model, "gpt-5.6-luna");
+  assert.throws(() => validateRunPayload({ provider: "codex", model: "gpt-reserve", instruction: "hi" }), (error) => error.status === 400);
+});
+
 test("subscription checks accept only a claude.ai login and a ChatGPT login", () => {
   assert.equal(claudeUsesSubscription(JSON.stringify({ authMethod: "claude.ai" })), true);
   assert.equal(claudeUsesSubscription(JSON.stringify({ authMethod: "api_key" })), false);
