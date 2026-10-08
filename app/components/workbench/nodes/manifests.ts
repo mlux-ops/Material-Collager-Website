@@ -16,6 +16,7 @@ import type {
   WorkbenchParams,
 } from "../types";
 import { aiAssistantManifest } from "./aiAssistant.manifest.ts";
+import { claudeCliManifest, codexCliManifest } from "./cliAssistant.manifest.ts";
 import { collageBoardManifest } from "./collageBoard.manifest.ts";
 import { compareManifest } from "./compare.manifest.ts";
 import { cropManifest } from "./crop.manifest.ts";
@@ -62,6 +63,8 @@ export const MANIFESTS: Record<NodeKind, NodeManifest> = {
   maskedEdit: maskedEditManifest,
   upscaler: upscalerManifest,
   aiAssistant: aiAssistantManifest,
+  claudeCli: claudeCliManifest,
+  codexCli: codexCliManifest,
   resize: resizeManifest,
   crop: cropManifest,
   patch: patchManifest,

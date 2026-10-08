@@ -25,6 +25,8 @@ export type NodeKind =
   | "maskedEdit"
   | "upscaler"
   | "aiAssistant"
+  | "claudeCli"
+  | "codexCli"
   | "resize"
   | "crop"
   | "patch"
@@ -231,7 +233,7 @@ export type WorkbenchParams = {
   patchFit?: "auto" | "aligned" | "region";
   patchFeather?: number;
   patchColorMatch?: boolean;
-  // aiAssistant
+  // aiAssistant, claudeCli, codexCli
   instruction?: string;
   model?: string;
   // resize

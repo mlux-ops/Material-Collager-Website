@@ -31,6 +31,8 @@ const DOM_WRAPPED_KINDS = new Set([
   "patch",
   "exportDownload",
   "aiAssistant",
+  "claudeCli",
+  "codexCli",
   "collageBoard",
   "relight",
   "variations",
