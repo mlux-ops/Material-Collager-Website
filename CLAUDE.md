@@ -29,7 +29,7 @@ Node 22.13+ required (`engines` in `package.json`).
 ### Tests
 
 `npm run test:transitions` is misnamed: its glob is `tests/*.test.mjs`, so it runs
-the **entire** suite (859 tests), not just transitions. Use it as the run-all.
+the **entire** suite (870 tests), not just transitions. Use it as the run-all.
 
 Individual suites:
 
@@ -135,6 +135,17 @@ reference photos from the project's `<id>-images.json` (URLs only — the image 
 third-party product photography and are never committed). 651 Belmont is the first — see
 `docs/autoboard-651-belmont.md`, which also covers running its review board on port 4791
 alongside Wieland's on 4790.
+
+### CLI bridge
+
+`npm run cli-bridge` starts a loopback-only helper on **port 4795** that the
+workbench's Claude CLI and Codex CLI nodes call directly from the browser, so
+they run on the user's Claude / ChatGPT subscriptions, not API keys. It strips
+every API-key env var from the CLIs (one left set, in the environment or in
+`~/.claude/settings.json`'s `env` block, would be billed instead of the
+login) and runs them with no tools. Pure logic
+is in `scripts/cli-bridge/lib.mjs`, tested by `tests/cli-bridge.test.mjs`;
+`docs/cli-bridge.md` has the rules and the reasons.
 
 ## Architecture
 

@@ -5,6 +5,7 @@
 import type { NodeExecute, NodeKind } from "../types";
 import { MANIFESTS, NODE_KINDS } from "./manifests";
 import { Component as AiAssistantComponent, execute as aiAssistantExecute } from "./aiAssistant";
+import { ClaudeCliComponent, claudeCliExecute, CodexCliComponent, codexCliExecute } from "./cliAssistant";
 import { Component as CollageBoardComponent, execute as collageBoardExecute } from "./collageBoard";
 import { Component as CompareComponent } from "./compare";
 import { Component as CropComponent, execute as cropExecute } from "./crop";
@@ -50,6 +51,8 @@ export const NODE_TYPES = {
   maskedEdit: MaskedEditComponent,
   upscaler: UpscalerComponent,
   aiAssistant: AiAssistantComponent,
+  claudeCli: ClaudeCliComponent,
+  codexCli: CodexCliComponent,
   resize: ResizeComponent,
   crop: CropComponent,
   patch: PatchComponent,
@@ -71,6 +74,8 @@ const DOM_EXECUTES: Partial<Record<NodeKind, NodeExecute>> = {
   patch: patchExecute,
   exportDownload: exportDownloadExecute,
   aiAssistant: aiAssistantExecute,
+  claudeCli: claudeCliExecute,
+  codexCli: codexCliExecute,
   collageBoard: collageBoardExecute,
   relight: relightExecute,
   variations: variationsExecute,
