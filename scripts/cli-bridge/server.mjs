@@ -157,10 +157,10 @@ async function checkCodex() {
   return { bin, available: true };
 }
 
-async function runClaude({ model, instruction, images }, signal) {
+async function runClaude({ model, effort, instruction, images }, signal) {
   let subscriptionChecked = false;
   let refusedSource = null;
-  const outcome = await withWorkDir((dir) => runChild(providers.claude.bin, claudeArgs(model), {
+  const outcome = await withWorkDir((dir) => runChild(providers.claude.bin, claudeArgs(model, effort), {
     cwd: dir,
     stdin: claudeStdin(instruction, images),
     signal,
@@ -185,7 +185,7 @@ async function runClaude({ model, instruction, images }, signal) {
   return result.text;
 }
 
-async function runCodex({ model, instruction, images }, signal) {
+async function runCodex({ model, effort, instruction, images }, signal) {
   return withWorkDir(async (dir) => {
     const imagePaths = [];
     for (const [index, image] of images.entries()) {
@@ -194,7 +194,7 @@ async function runCodex({ model, instruction, images }, signal) {
       imagePaths.push(file);
     }
     const outFile = path.join(dir, "answer.txt");
-    const outcome = await runChild(providers.codex.bin, codexArgs({ model, workDir: dir, imagePaths, outFile }), {
+    const outcome = await runChild(providers.codex.bin, codexArgs({ model, effort, workDir: dir, imagePaths, outFile }), {
       cwd: dir,
       stdin: codexPrompt(instruction),
       signal,

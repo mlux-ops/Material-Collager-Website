@@ -5,7 +5,7 @@ import { fileToBase64 } from "@/app/lib/image-transport";
 import { useWorkbenchStore } from "../store";
 import styles from "../workbench.module.css";
 import type { ExecuteContext, NodeOutputValue } from "../types";
-import { CLI_BRIDGE_ORIGIN, CLI_DEFAULT_MODEL, CLI_MODELS, type CliProvider } from "./cliAssistant.manifest";
+import { CLI_BRIDGE_ORIGIN, CLI_DEFAULT_MODEL, CLI_EFFORTS, CLI_MODELS, type CliProvider } from "./cliAssistant.manifest";
 import { imageCacheKeysFromValue } from "./generation";
 import { fileFromCacheKey, NodeShell, RunFooter, useConnectedImageCount, type WorkbenchNodeProps } from "./shared";
 
@@ -65,6 +65,16 @@ function CliNodeBody({ id, data, provider }: WorkbenchNodeProps & { provider: Cl
           </select>
         </label>
       )}
+      <label className={styles.field}>
+        <span>Effort</span>
+        <select
+          className="nodrag"
+          value={data.params.effort ?? "default"}
+          onChange={(event) => updateParams(id, { effort: event.target.value })}
+        >
+          {CLI_EFFORTS.map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+      </label>
       <textarea
         className={`${styles.textarea} nodrag nowheel`}
         rows={3}
@@ -98,6 +108,9 @@ function cliExecute(provider: CliProvider) {
     const requestedModel = String(ctx.params.model ?? "").trim();
     const model = CLI_MODELS[provider].find((entry) => entry === requestedModel) ?? CLI_DEFAULT_MODEL[provider];
 
+    const requestedEffort = String(ctx.params.effort ?? "").trim();
+    const effort = CLI_EFFORTS.find((entry) => entry === requestedEffort) ?? "default";
+
     const contextText = ctx.inputs("text")
       .filter((value): value is Extract<NodeOutputValue, { kind: "text" }> => value.kind === "text")
       .map((value) => value.text)
@@ -119,7 +132,7 @@ function cliExecute(provider: CliProvider) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: ctx.signal,
-        body: JSON.stringify({ provider, model, instruction: combinedInstruction, images }),
+        body: JSON.stringify({ provider, model, effort, instruction: combinedInstruction, images }),
       });
     } catch (error) {
       if (ctx.signal.aborted) throw error;

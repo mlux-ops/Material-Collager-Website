@@ -97,3 +97,14 @@ Nothing but answer:
   lists as visible for the ChatGPT plan. When that catalog changes, update
   `PROVIDERS.codex` in `scripts/cli-bridge/lib.mjs` and `CLI_MODELS` in
   `cliAssistant.manifest.ts` together; a test keeps them equal.
+- Effort is picked on the node too: `default`, `low`, `medium`, `high`, `xhigh`
+  or `max`. `default` sends nothing, so each model runs at its CLI's own
+  default (for Codex, the catalog's: `low` for `gpt-6-astra`, `medium` for the
+  rest). Otherwise Claude gets `--effort <level>` and Codex gets
+  `-c model_reasoning_effort="<level>"` — needed because `--ignore-user-config`
+  skips the effort in `config.toml`, and `--setting-sources project` skips the
+  one in Claude's `settings.json`. Codex's extra `ultra` level exists on only
+  some models, so it isn't offered. Every level was verified 2026-10-09 to run
+  on every listed model; Codex echoes the applied level in its run header. The
+  list lives in `EFFORT_LEVELS` (`lib.mjs`) and `CLI_EFFORTS`
+  (`cliAssistant.manifest.ts`); a test keeps them equal.
