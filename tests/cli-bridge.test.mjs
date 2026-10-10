@@ -63,6 +63,10 @@ test("validateRunPayload applies the assist route's caps and model allowlists", 
   assert.equal(validateRunPayload({ provider: "codex", instruction: "hi" }).model, "default");
 
   const rejects = (body, status) => assert.throws(() => validateRunPayload(body), (error) => error.status === status);
+  for (const model of ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]) {
+    assert.equal(validateRunPayload({ provider: "claude", model, instruction: "hi" }).model, model);
+  }
+  rejects({ provider: "claude", model: "claude-opus-5-5-extra", instruction: "hi" }, 400);
   rejects(null, 400);
   rejects({ provider: "gemini", instruction: "hi" }, 400);
   rejects({ provider: "claude", model: "claude-opus-4", instruction: "hi" }, 400);
