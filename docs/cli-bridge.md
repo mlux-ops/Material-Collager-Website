@@ -87,5 +87,10 @@ Nothing but answer:
   A ChatGPT subscription doesn't cover that.
 - Runs count against the same usage limits as your normal Claude and ChatGPT
   use, and each call pays a few seconds of CLI start-up.
-- Codex offers only its default model (whatever the ChatGPT plan gives it).
-  Claude offers `sonnet`, `opus` and `haiku`.
+- Models are picked on the node. Claude offers `sonnet`, `opus` and `haiku`
+  (aliases for the newest model in each line). Codex offers `default` (no
+  `-m`; Codex's built-in default, not the `model` in `~/.codex/config.toml`,
+  which `--ignore-user-config` skips) plus the models `codex debug models`
+  lists as visible for the ChatGPT plan. When that catalog changes, update
+  `PROVIDERS.codex` in `scripts/cli-bridge/lib.mjs` and `CLI_MODELS` in
+  `cliAssistant.manifest.ts` together; a test keeps them equal.

@@ -152,6 +152,9 @@ export type WorkbenchParams = {
   fileFingerprint?: string;
   // text / note
   text?: string;
+  // text only: true once the user has typed over text arriving on its input,
+  // so a re-run of the upstream node doesn't clobber the edit.
+  textEdited?: boolean;
   // promptBuilder
   domain?: "interior" | "exterior" | "collage";
   lighting?: string;
