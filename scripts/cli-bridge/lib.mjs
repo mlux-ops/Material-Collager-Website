@@ -23,7 +23,12 @@ export const MAX_BODY_BYTES = 32 * 1024 * 1024;
 export const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
 export const PROVIDERS = {
-  claude: { models: ["sonnet", "opus", "haiku"], defaultModel: "sonnet" },
+  // The three aliases track the newest model in each line; the full ids pin
+  // one model so a graph's answers don't shift when an alias moves.
+  claude: {
+    models: ["sonnet", "opus", "haiku", "claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
+    defaultModel: "sonnet",
+  },
   // "default" means no -m flag: the model the ChatGPT plan gives Codex. The
   // rest are the models `codex debug models` lists as visible for this
   // ChatGPT plan, each verified 2026-10-08 to answer under the bridge's flags.

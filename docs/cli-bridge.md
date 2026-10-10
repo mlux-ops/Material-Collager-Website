@@ -88,7 +88,10 @@ Nothing but answer:
 - Runs count against the same usage limits as your normal Claude and ChatGPT
   use, and each call pays a few seconds of CLI start-up.
 - Models are picked on the node. Claude offers `sonnet`, `opus` and `haiku`
-  (aliases for the newest model in each line). Codex offers `default` (no
+  (aliases for the newest model in each line) plus the pinned ids
+  `claude-fable-5-1`, `claude-opus-5-5`, `claude-sonnet-5-5` and
+  `claude-haiku-5-5`, each verified 2026-10-09 to answer through the bridge on
+  a subscription login. Codex offers `default` (no
   `-m`; Codex's built-in default, not the `model` in `~/.codex/config.toml`,
   which `--ignore-user-config` skips) plus the models `codex debug models`
   lists as visible for the ChatGPT plan. When that catalog changes, update
