@@ -239,6 +239,8 @@ export type WorkbenchParams = {
   // aiAssistant, claudeCli, codexCli
   instruction?: string;
   model?: string;
+  // claudeCli, codexCli: reasoning effort; "default" sends no flag.
+  effort?: string;
   // resize
   targetWidth?: number;
   targetHeight?: number;

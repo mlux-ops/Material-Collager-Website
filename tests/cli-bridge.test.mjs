@@ -9,6 +9,7 @@ import {
   codexArgs,
   codexPrompt,
   codexUsesChatGpt,
+  EFFORT_LEVELS,
   inspectClaudeEvent,
   isAllowedHost,
   isAllowedOrigin,
@@ -20,7 +21,7 @@ import {
   SYSTEM_PROMPT,
   validateRunPayload,
 } from "../scripts/cli-bridge/lib.mjs";
-import { CLI_DEFAULT_MODEL, CLI_MODELS } from "../app/components/workbench/nodes/cliAssistant.manifest.ts";
+import { CLI_DEFAULT_MODEL, CLI_EFFORTS, CLI_MODELS } from "../app/components/workbench/nodes/cliAssistant.manifest.ts";
 
 const PNG = { imageBase64: "iVBORw0KGgo=", mimeType: "image/png" };
 
@@ -59,7 +60,7 @@ test("origin check is an exact allowlist match", () => {
 
 test("validateRunPayload applies the assist route's caps and model allowlists", () => {
   const ok = validateRunPayload({ provider: "claude", instruction: "  hi  ", images: [PNG] });
-  assert.deepEqual(ok, { provider: "claude", model: "sonnet", instruction: "hi", images: [{ data: PNG.imageBase64, mimeType: "image/png" }] });
+  assert.deepEqual(ok, { provider: "claude", model: "sonnet", effort: "default", instruction: "hi", images: [{ data: PNG.imageBase64, mimeType: "image/png" }] });
   assert.equal(validateRunPayload({ provider: "codex", instruction: "hi" }).model, "default");
 
   const rejects = (body, status) => assert.throws(() => validateRunPayload(body), (error) => error.status === status);
@@ -135,6 +136,31 @@ test("a named codex model is passed with -m and must be on the allowlist", () =>
   assert.equal(args[args.indexOf("-m") + 1], "gpt-6-sol");
   assert.equal(validateRunPayload({ provider: "codex", model: "gpt-5.6-luna", instruction: "hi" }).model, "gpt-5.6-luna");
   assert.throws(() => validateRunPayload({ provider: "codex", model: "gpt-reserve", instruction: "hi" }), (error) => error.status === 400);
+});
+
+test("effort is optional, allowlisted, and sent to each CLI only when set", () => {
+  assert.equal(validateRunPayload({ provider: "claude", instruction: "hi" }).effort, "default");
+  for (const effort of EFFORT_LEVELS) {
+    assert.equal(validateRunPayload({ provider: "codex", effort, instruction: "hi" }).effort, effort);
+  }
+  assert.throws(() => validateRunPayload({ provider: "claude", effort: "turbo", instruction: "hi" }), (error) => error.status === 400);
+  assert.throws(() => validateRunPayload({ provider: "claude", effort: 3, instruction: "hi" }), (error) => error.status === 400);
+
+  assert.ok(!claudeArgs("haiku").includes("--effort"));
+  assert.ok(!claudeArgs("haiku", "default").includes("--effort"));
+  const claude = claudeArgs("haiku", "high");
+  assert.equal(claude[claude.indexOf("--effort") + 1], "high");
+
+  const base = { model: "gpt-6-sol", workDir: "W", imagePaths: [], outFile: "W/out.txt" };
+  assert.ok(!codexArgs(base).includes("-c"));
+  const codex = codexArgs({ ...base, effort: "low" });
+  assert.equal(codex[codex.indexOf("-c") + 1], 'model_reasoning_effort="low"');
+  // The trailing positional arguments must stay last.
+  assert.deepEqual(codex.slice(-5), ["-C", "W", "-o", "W/out.txt", "-"]);
+});
+
+test("the workbench nodes' effort list mirrors the bridge", () => {
+  assert.deepEqual([...CLI_EFFORTS], EFFORT_LEVELS);
 });
 
 test("subscription checks accept only a claude.ai login and a ChatGPT login", () => {

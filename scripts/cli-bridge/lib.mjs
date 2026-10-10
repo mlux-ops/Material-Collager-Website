@@ -22,6 +22,11 @@ export const MAX_TOTAL_BASE64_CHARS = 30_000_000;
 export const MAX_BODY_BYTES = 32 * 1024 * 1024;
 export const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
+// "default" sends no effort flag: each model keeps the CLI's own default.
+// The rest are the levels every listed model accepts (Codex's extra "ultra"
+// exists on only some of them, so it is left out).
+export const EFFORT_LEVELS = ["default", "low", "medium", "high", "xhigh", "max"];
+
 export const PROVIDERS = {
   // The three aliases track the newest model in each line; the full ids pin
   // one model so a graph's answers don't shift when an alias moves.
@@ -108,6 +113,12 @@ export function validateRunPayload(body) {
   const model = requestedModel ? config.models.find((entry) => entry === requestedModel) : config.defaultModel;
   if (!model) throw new BridgeError(400, `Choose a supported ${provider} model.`);
 
+  // Unlike model, a wrong-typed effort is refused rather than read as unset.
+  if (body.effort !== undefined && typeof body.effort !== "string") throw new BridgeError(400, "effort must be a string.");
+  const requestedEffort = (body.effort ?? "").trim();
+  const effort = requestedEffort ? EFFORT_LEVELS.find((entry) => entry === requestedEffort) : "default";
+  if (!effort) throw new BridgeError(400, `Choose a supported effort level (${EFFORT_LEVELS.join(", ")}).`);
+
   const instruction = typeof body.instruction === "string" ? body.instruction.trim() : "";
   if (!instruction) throw new BridgeError(400, "Enter an instruction before running the node.");
   if (instruction.length > MAX_INSTRUCTION_CHARS) {
@@ -129,15 +140,15 @@ export function validateRunPayload(body) {
   });
   if (totalChars > MAX_TOTAL_BASE64_CHARS) throw new BridgeError(413, "The images are too large for one request.");
 
-  return { provider, model, instruction, images };
+  return { provider, model, effort, instruction, images };
 }
 
 // Claude runs with every tool removed (--tools ""), user settings skipped
 // (their `env` block can carry ANTHROPIC_API_KEY, and their hooks and plugins
 // would fire per call), no MCP servers and no saved session. Images travel
 // inside the stream-json user message, so no file is ever handed to it.
-export function claudeArgs(model) {
-  return [
+export function claudeArgs(model, effort = "default") {
+  const args = [
     "-p",
     "--input-format", "stream-json",
     "--output-format", "stream-json",
@@ -150,6 +161,8 @@ export function claudeArgs(model) {
     "--system-prompt", SYSTEM_PROMPT,
     "--model", model,
   ];
+  if (effort !== "default") args.push("--effort", effort);
+  return args;
 }
 
 export function claudeStdin(instruction, images) {
@@ -178,7 +191,7 @@ export function inspectClaudeEvent(line) {
   return null;
 }
 
-export function codexArgs({ model, workDir, imagePaths, outFile }) {
+export function codexArgs({ model, effort = "default", workDir, imagePaths, outFile }) {
   const args = [
     "exec",
     "--ephemeral",
@@ -190,6 +203,8 @@ export function codexArgs({ model, workDir, imagePaths, outFile }) {
   ];
   for (const feature of CODEX_DISABLED_FEATURES) args.push("--disable", feature);
   if (model !== "default") args.push("-m", model);
+  // --ignore-user-config drops config.toml, so the effort has to be set here.
+  if (effort !== "default") args.push("-c", `model_reasoning_effort="${effort}"`);
   args.push("-C", workDir);
   for (const imagePath of imagePaths) args.push("-i", imagePath);
   args.push("-o", outFile, "-");

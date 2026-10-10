@@ -18,6 +18,11 @@ export const CLI_MODELS: Record<CliProvider, readonly string[]> = {
   claude: ["sonnet", "opus", "haiku", "claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
   codex: ["default", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
 };
+// Mirrors the bridge's EFFORT_LEVELS. "default" sends no flag, so the CLI's own
+// per-model default applies.
+export const CLI_EFFORTS = ["default", "low", "medium", "high", "xhigh", "max"] as const;
+export type CliEffort = (typeof CLI_EFFORTS)[number];
+
 export const CLI_DEFAULT_MODEL: Record<CliProvider, string> = {
   claude: "sonnet",
   codex: "default",
@@ -38,11 +43,12 @@ function cliManifest(kind: NodeKind, provider: CliProvider, title: string, descr
       ],
       outputs: [{ id: "text", kind: "text", label: "Answer" }],
     },
-    defaultParams: { instruction: "", model: CLI_DEFAULT_MODEL[provider] },
+    defaultParams: { instruction: "", model: CLI_DEFAULT_MODEL[provider], effort: "default" },
     importSchema: {
       paramKeys: {
         instruction: { type: "string", optional: true, maxLength: 4_000 },
         model: { type: "enum", optional: true, values: CLI_MODELS[provider] },
+        effort: { type: "enum", optional: true, values: CLI_EFFORTS },
       },
       sourceBlobKeys: [],
     },
