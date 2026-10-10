@@ -21,7 +21,7 @@ import {
   SYSTEM_PROMPT,
   validateRunPayload,
 } from "../scripts/cli-bridge/lib.mjs";
-import { CLI_DEFAULT_MODEL, CLI_EFFORTS, CLI_MODELS } from "../app/components/workbench/nodes/cliAssistant.manifest.ts";
+import { claudeCliManifest, CLI_DEFAULT_MODEL, CLI_EFFORTS, CLI_MODELS, codexCliManifest } from "../app/components/workbench/nodes/cliAssistant.manifest.ts";
 
 const PNG = { imageBase64: "iVBORw0KGgo=", mimeType: "image/png" };
 
@@ -196,5 +196,14 @@ test("the workbench nodes' model lists mirror the bridge allowlist", () => {
   for (const provider of ["claude", "codex"]) {
     assert.deepEqual([...CLI_MODELS[provider]], PROVIDERS[provider].models);
     assert.equal(CLI_DEFAULT_MODEL[provider], PROVIDERS[provider].defaultModel);
+  }
+});
+
+test("both CLI nodes take several photos or reference sets on one image port", () => {
+  for (const manifest of [claudeCliManifest, codexCliManifest]) {
+    const port = manifest.spec.inputs.find((input) => input.id === "image");
+    assert.ok(port, `${manifest.kind}: image port keeps its id so saved wires still attach`);
+    assert.equal(port.multi, true, `${manifest.kind}: image port must accept several connections`);
+    assert.deepEqual(port.acceptedKinds, ["image", "references"]);
   }
 });

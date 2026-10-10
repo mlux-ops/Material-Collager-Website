@@ -29,7 +29,7 @@ Node 22.13+ required (`engines` in `package.json`).
 ### Tests
 
 `npm run test:transitions` is misnamed: its glob is `tests/*.test.mjs`, so it runs
-the **entire** suite (871 tests), not just transitions. Use it as the run-all.
+the **entire** suite (883 tests), not just transitions. Use it as the run-all.
 
 Individual suites:
 

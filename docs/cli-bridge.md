@@ -60,7 +60,10 @@ Nothing but answer:
 - Codex: `--sandbox read-only` with the shell (`shell_tool`, `unified_exec`),
   browser, computer use, apps, plugins, hooks, code mode and image generation
   disabled (`CODEX_DISABLED_FEATURES` in `scripts/cli-bridge/lib.mjs`).
-  Verified against codex-cli 0.158.0: asked to run a command, it has no shell.
+  Verified against codex-cli 0.158.0 and 0.162.1: asked to run a command, it
+  has no shell. Newer models can need a newer CLI (`gpt-6.1-sol` needed
+  0.162.1); update with `codex update` from PowerShell, since Git Bash's `tar`
+  breaks the installer on a drive-letter path.
   Images are written to the run's temp directory and passed with `-i`.
 - Both start in a fresh empty temp directory, deleted afterwards, so no
   project's CLAUDE.md, AGENTS.md or `.claude/` settings load.
