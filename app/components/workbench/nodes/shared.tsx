@@ -597,6 +597,26 @@ export function useConnectedImageValue(id: string, portId: string | undefined): 
   }, [edges, nodes, id, portId]);
 }
 
+// The live text arriving on one input port (several connections join with a
+// newline, matching what a text-consuming execute() does), or undefined when
+// nothing is connected or the upstream node has not produced text yet.
+export function useConnectedText(id: string, portId: string): string | undefined {
+  const edges = useEdges();
+  const nodes = useNodes<WorkbenchNode>();
+  return useMemo(() => {
+    const parts: string[] = [];
+    for (const edge of edges) {
+      if (edge.target !== id || edge.targetHandle !== portId) continue;
+      const source = nodes.find((candidate) => candidate.id === edge.source);
+      const run = source ? activeRunOf(source) : undefined;
+      if (!source || !run) continue;
+      const value = outputValuesFor(source, run, edge.sourceHandle ?? specFor(source.data.kind).outputs[0]?.id ?? "")[0];
+      if (value?.kind === "text" && value.text) parts.push(value.text);
+    }
+    return parts.length ? parts.join("\n") : undefined;
+  }, [edges, nodes, id, portId]);
+}
+
 // The cacheKey of the single image on one input port, for UI that needs the
 // input's pixel dimensions (GenerationSettings' "Match input image" size).
 export function useConnectedImageCacheKey(id: string, portId: string | undefined): string | undefined {
