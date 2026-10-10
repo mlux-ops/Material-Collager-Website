@@ -16,7 +16,7 @@ export type CliProvider = "claude" | "codex";
 // "default" sends no model flag — the ChatGPT plan picks.
 export const CLI_MODELS: Record<CliProvider, readonly string[]> = {
   claude: ["sonnet", "opus", "haiku", "claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
-  codex: ["default", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+  codex: ["default", "gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
 };
 // Mirrors the bridge's EFFORT_LEVELS. "default" sends no flag, so the CLI's own
 // per-model default applies.
@@ -38,7 +38,9 @@ function cliManifest(kind: NodeKind, provider: CliProvider, title: string, descr
       title,
       description,
       inputs: [
-        { id: "image", kind: "image", label: "Image" },
+        // Several photos or reference sets, in wire order; the bridge caps a
+        // run at 16 images. The id stays "image" so saved wires still attach.
+        { id: "image", kind: "image", label: "Images", multi: true, acceptedKinds: ["image", "references"] },
         { id: "text", kind: "text", label: "Context" },
       ],
       outputs: [{ id: "text", kind: "text", label: "Answer" }],
