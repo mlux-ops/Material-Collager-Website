@@ -9,20 +9,24 @@ import {
   type NodeChange,
 } from "@xyflow/react";
 import { releaseBlob, releaseByPrefix } from "./blob-cache";
-import { importSchemaMap, NODE_KINDS } from "./nodes/manifests";
+import { importSchemaMap } from "./nodes/manifests";
 import { replaceTextOutput } from "./run-output";
 import {
-  acceptedKindsFor,
   defaultParams,
   specFor,
   type NodeKind,
   type NodeRun,
   type NodeStatus,
   type PendingReferenceSelection,
-  type PortKind,
   type WorkbenchNode,
   type WorkbenchParams,
 } from "./types";
+import { connectionIsValid, portSpecFor } from "./wiring";
+
+// The wire rules moved to wiring.ts (framework-free, so they can be unit
+// tested under Node); re-exported here so existing `from "./store"` imports
+// keep working.
+export { connectionIsValid, nodeKindsForWire, portSpecFor } from "./wiring";
 
 // The OUTPUT-class blob-cache keys a run's own values reference (C4) --
 // mirrors persistence.ts's valueBlobKeys: only "image"/"mask" values carry a
@@ -48,63 +52,6 @@ function createNodeId() {
 
 function createOutputEditRunId() {
   return globalThis.crypto?.randomUUID?.().slice(0, 8) ?? `edit-${Date.now()}-${Math.random()}`;
-}
-
-export function portSpecFor(node: WorkbenchNode | undefined, handleId: string | null | undefined, direction: "in" | "out") {
-  if (!node) return undefined;
-  const spec = specFor(node.data.kind);
-  const ports = direction === "in" ? spec.inputs : spec.outputs;
-  return ports.find((port) => port.id === handleId);
-}
-
-// Type-checked, acyclic connections: an output can only reach an input that
-// accepts its data kind, and a connection that would create a cycle is
-// refused. A port accepts its own kind unless it lists acceptedKinds (e.g.
-// reference inputs take both "image" and "references").
-export function connectionIsValid(nodes: WorkbenchNode[], edges: Edge[], connection: Connection | Edge): boolean {
-  if (!connection.source || !connection.target || connection.source === connection.target) return false;
-  const source = nodes.find((node) => node.id === connection.source);
-  const target = nodes.find((node) => node.id === connection.target);
-  const sourcePort = portSpecFor(source, connection.sourceHandle, "out");
-  const targetPort = portSpecFor(target, connection.targetHandle, "in");
-  if (!sourcePort || !targetPort) return false;
-  if (!acceptedKindsFor(targetPort).includes(sourcePort.kind)) return false;
-
-  // Reject cycles: walk downstream from the target; if we reach the source,
-  // this edge would close a loop.
-  const outgoing = new Map<string, string[]>();
-  for (const edge of edges) {
-    const list = outgoing.get(edge.source) ?? [];
-    list.push(edge.target);
-    outgoing.set(edge.source, list);
-  }
-  const queue = [connection.target];
-  const seen = new Set<string>();
-  while (queue.length) {
-    const current = queue.pop()!;
-    if (current === connection.source) return false;
-    if (seen.has(current)) continue;
-    seen.add(current);
-    for (const next of outgoing.get(current) ?? []) queue.push(next);
-  }
-  return true;
-}
-
-// Node kinds with a compatible port for a wire dropped on empty canvas
-// (S29/AC24, drag-wire-to-empty-canvas): derived from the registry, never a
-// hand-maintained list. Dragging from a SOURCE (output) handle of kind
-// `portKind` looks for candidates with an INPUT port that accepts it (reusing
-// acceptedKindsFor -- the same rule connectionIsValid enforces, so a wire
-// completed this way is always one connectionIsValid would already accept);
-// dragging from a TARGET (input) handle looks for candidates with an OUTPUT
-// port of exactly that kind.
-export function nodeKindsForWire(handleType: "source" | "target", portKind: PortKind): NodeKind[] {
-  return NODE_KINDS.filter((candidate) => {
-    const spec = specFor(candidate);
-    return handleType === "source"
-      ? spec.inputs.some((port) => acceptedKindsFor(port).includes(portKind))
-      : spec.outputs.some((port) => port.kind === portKind);
-  });
 }
 
 export function downstreamOf(edges: Edge[], nodeId: string): Set<string> {

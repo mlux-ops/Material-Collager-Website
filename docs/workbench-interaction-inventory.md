@@ -9,6 +9,9 @@ experience are out of scope for this change.
 
 - `npm run test:workbench`
 - 127 tests passed, 0 failed.
+- `tests/workbench-wiring.test.mjs` (picker and validity rules) was added after
+  this baseline and runs under the same command via its
+  `tests/workbench-*.test.mjs` glob; the 127 above predates it.
 - The existing local-only `.gitignore`, `.agents/`, `.claude/`, and
   `skills-lock.json` changes were present before this work and are not part of
   the workbench implementation.
@@ -20,14 +23,38 @@ experience are out of scope for this change.
 - Add a node from the desktop palette or compact `+ Add` spotlight.
 - Start a connection from either side, type-check it, reject cycles, replace a
   single-input connection, or append to a multi-input connection.
+- Port strip under each card header: input i on the left, output i on the
+  right, each with its name in 8.4px uppercase. Labels are black when wired,
+  `#657069` when unwired and optional, `#b3261e` for a required input with no
+  wire. A multi port with wires shows its count, e.g. `REFERENCES · 3`.
+- Port glyphs by data kind, all black ink: image ●, text ■, references ◆,
+  mask ▲. Hollow when unwired, filled when wired. Wires keep their dash
+  language: solid image, dashed text, dotted references, dash-dot mask.
+- Each port has an invisible grab zone the size of its row (20px for fine
+  pointers, 28px for coarse). The glyph grows on hover; wire endpoints still
+  meet the glyph's box. `scripts/qa/workbench-wire-qa.mjs` drags real wires
+  headlessly and reports these geometries and the drop outcomes.
+- While a wire is in flight, ports it can validly land on (kind match, no
+  self-wire, no cycle) enlarge with a halo and every other port dims. Cards
+  with no compatible port fade (the origin card stays as is); hovering a card
+  that has one outlines it.
+- Drop a wire anywhere on a card body to attach it: to an empty single input
+  first, then a multi input, then an occupied single input (replaced). A wire
+  dragged backwards from an input attaches to the card's first visible
+  compatible output. If nothing fits, nothing happens, and the add-node prompt
+  never opens over a card.
 - Drop a wire on empty canvas and choose a compatible node from the filtered
-  spotlight.
+  spotlight; the node it adds is wired with the same picker.
 - Select, drag, snap to the 22 px grid, align with helper lines, auto-tidy,
   pan, zoom, and use the desktop minimap.
 - Delete a selected node by keyboard, corner affordance, or floating toolbar;
   duplicate or run a selected node from the floating toolbar.
 - Delete selected wires from the compact toolbar.
 - Inspect the selected node in the docked inspector.
+- A card's Run button stays full width, with the "Missing required input"
+  reason wrapping beneath it. On desktop the toolbar never overlaps the Add
+  node palette; its run-blocker reason sits beneath the buttons,
+  right-aligned.
 
 ### Workflow toolbar
 
@@ -43,7 +70,8 @@ experience are out of scope for this change.
 
 - Status, error, progress, paid/cached cost, required-input state, and
   run/cancel controls.
-- Typed input/output handles and color-coded edges.
+- Typed input/output ports, shape-coded by kind, with black wires told apart by
+  dash pattern.
 - Full-resolution preview lightbox backed by cached thumbnails.
 - Browse run history and pin/unpin a run so downstream execution remains
   frozen to it.
