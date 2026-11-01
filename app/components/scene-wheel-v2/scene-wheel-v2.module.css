@@ -192,6 +192,28 @@
   to { transform: translateX(102%); }
 }
 
+/* The frost is its own layer, a sibling of the viewer - never an ancestor
+   of the image. On open the image is the captured wheel-card element, and
+   an ancestor of a captured element is rendered with its effects stripped
+   for the whole morph: an opacity ramp there is ignored and the frost
+   popped in at full strength. Nothing inside this layer is ever captured. */
+.viewerFrost {
+  position: fixed;
+  inset: 0;
+  z-index: 49;
+  background: rgb(250 250 250 / 55%);
+  backdrop-filter: blur(22px) saturate(1.05);
+  animation: viewer-frost-in 460ms var(--ease-smooth-out) both;
+  pointer-events: none;
+}
+
+.viewerFrost.viewerLeaving {
+  animation: viewer-frost-out 340ms var(--ease-smooth-out) both;
+}
+
+/* The viewer host: lays the panel out over the frost and catches clicks
+   outside it. It paints and animates nothing itself; .viewerLeaving on it
+   is only the hook for the panel, sheet and content leaving rules below. */
 .viewerBackdrop {
   position: fixed;
   inset: 0;
@@ -199,9 +221,6 @@
   display: flex;
   align-items: stretch;
   justify-content: flex-end;
-  background: rgb(250 250 250 / 55%);
-  backdrop-filter: blur(22px) saturate(1.05);
-  animation: viewer-frost-in 460ms var(--ease-smooth-out) both;
 }
 
 /* The panel's glass surface is declared once, as properties, so a morphed
@@ -230,7 +249,8 @@
    card arced out past the panel before settling). So the panel box stays
    transparent and still, and the same glass sheet slides in from the right
    on a pseudo-element behind the content. The figure, caption and close
-   button hold their place and arrive on the backdrop's live frost-in.
+   button hold their place; the caption and button fade themselves in
+   (below), and the image arrives as the card.
    No isolation on the panel: the sheet's z-index -1 resolves against the
    backdrop's stacking context (fixed, z 50), which is what keeps it under
    the figure, and an isolated panel would be a backdrop root - the sheet's
@@ -255,17 +275,13 @@
   animation: viewer-slide-in 460ms var(--ease-smooth-out) both;
 }
 
-.viewerLeaving {
-  animation: viewer-frost-out 340ms var(--ease-smooth-out) both;
-}
-
 .viewerLeaving .viewerPanel {
   animation: viewer-slide-out 340ms var(--ease-smooth-out) both;
 }
 
 /* Closing a morphed viewer: the panel box holds still while the card flies
    back out of it - (0,3,0) beats the slide-out above - and only its surface
-   slides away; the backdrop's frost-out (.viewerLeaving) fades the content. */
+   slides away; the caption and button fade themselves out (below). */
 .viewerStatic.viewerLeaving .viewerPanel {
   animation: none;
 }
@@ -315,15 +331,44 @@
   cursor: pointer;
 }
 
+/* The host no longer fades (see .viewerFrost), so the panel's content fades
+   itself, in both paths: plain (sliding panel) and morph (sliding sheet). */
+.viewerFigure img,
+.viewerFigure figcaption,
+.viewerClose {
+  animation: viewer-frost-in 460ms var(--ease-smooth-out) both;
+}
+
+.viewerLeaving .viewerFigure img,
+.viewerLeaving .viewerFigure figcaption,
+.viewerLeaving .viewerClose {
+  animation: viewer-frost-out 340ms var(--ease-smooth-out) both;
+}
+
+/* Except the morphed image: its own opacity would be captured into the
+   flying card. On close it is hidden and has handed its name to the proxy;
+   the rule keeps it still regardless. Later and more specific than the
+   fades above. */
+.viewerStatic .viewerFigure img,
+.viewerStatic.viewerLeaving .viewerFigure img {
+  animation: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .viewerBackdrop,
+  .viewerFrost,
+  .viewerFrost.viewerLeaving,
   .viewerPanel,
   .viewerStatic .viewerPanel,
   .viewerStatic .viewerPanel::before,
-  .viewerLeaving,
   .viewerLeaving .viewerPanel,
   .viewerStatic.viewerLeaving .viewerPanel,
-  .viewerStatic.viewerLeaving .viewerPanel::before {
+  .viewerStatic.viewerLeaving .viewerPanel::before,
+  .viewerFigure img,
+  .viewerFigure figcaption,
+  .viewerClose,
+  .viewerLeaving .viewerFigure img,
+  .viewerLeaving .viewerFigure figcaption,
+  .viewerLeaving .viewerClose {
     animation: none;
   }
 }

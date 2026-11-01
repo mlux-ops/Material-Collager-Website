@@ -669,44 +669,53 @@ export default function SceneWheelV2() {
       </div>
 
       {selectedItem ? (
-        <div
-          className={[
-            styles.viewerBackdrop,
-            viewerMorphed ? styles.viewerStatic : "",
-            viewerClosing ? styles.viewerLeaving : "",
-          ].filter(Boolean).join(" ")}
-          role="presentation"
-          onPointerDown={(event) => {
-            if (event.target === event.currentTarget) requestCloseViewer();
-          }}
-        >
-          <section
-            className={styles.viewerPanel}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="scene-wheel-viewer-title"
+        <>
+          {/* The frost is a sibling, not the host: on open the image is the
+              captured card, and an ancestor of a captured element has its
+              opacity ramp ignored for the whole morph (see .viewerFrost). */}
+          <div
+            className={viewerClosing ? `${styles.viewerFrost} ${styles.viewerLeaving}` : styles.viewerFrost}
+            aria-hidden="true"
+          />
+          <div
+            className={[
+              styles.viewerBackdrop,
+              viewerMorphed ? styles.viewerStatic : "",
+              viewerClosing ? styles.viewerLeaving : "",
+            ].filter(Boolean).join(" ")}
+            role="presentation"
+            onPointerDown={(event) => {
+              if (event.target === event.currentTarget) requestCloseViewer();
+            }}
           >
-            <button
-              ref={closeButtonRef}
-              type="button"
-              className={styles.viewerClose}
-              aria-label="Close viewer"
-              onClick={requestCloseViewer}
+            <section
+              className={styles.viewerPanel}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="scene-wheel-viewer-title"
             >
-              ×
-            </button>
-            <figure className={styles.viewerFigure}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                className={viewerImageHidden ? undefined : "mc-wheel-viewer-image"}
-                src={selectedItem.url}
-                alt={selectedItem.title}
-                style={viewerImageHidden ? { visibility: "hidden" } : undefined}
-              />
-              <figcaption id="scene-wheel-viewer-title">{selectedItem.title}</figcaption>
-            </figure>
-          </section>
-        </div>
+              <button
+                ref={closeButtonRef}
+                type="button"
+                className={styles.viewerClose}
+                aria-label="Close viewer"
+                onClick={requestCloseViewer}
+              >
+                ×
+              </button>
+              <figure className={styles.viewerFigure}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  className={viewerImageHidden ? undefined : "mc-wheel-viewer-image"}
+                  src={selectedItem.url}
+                  alt={selectedItem.title}
+                  style={viewerImageHidden ? { visibility: "hidden" } : undefined}
+                />
+                <figcaption id="scene-wheel-viewer-title">{selectedItem.title}</figcaption>
+              </figure>
+            </section>
+          </div>
+        </>
       ) : null}
     </main>
   );
