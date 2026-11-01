@@ -766,3 +766,35 @@ fade themselves.
 
 Not re-checked live on my side (pane frozen); the user confirmed the panel
 sheet after 61a592e. The frost fade after a592681 is theirs to confirm.
+
+## Frost and caption popping in at landing, round 7 (2026-11-01, measured)
+
+Reported after a592681: the frost and the caption still appeared
+instantaneously, the moment the image arrived in the panel.
+
+This round was measured instead of reasoned: a headless Chrome driven over
+the DevTools protocol (`scratchpad/morph-capture/capture.mjs`) screencast the
+open and close at real speed, and per-frame brightness of the deck, nav and
+panel regions was computed with sharp (`stats.mjs`). Findings:
+
+- With the root UNCAPTURED (0fa50fc's `view-transition-name: none` on
+  `html[data-wheel-viewer]`), the live page's new fixed-layer content - the
+  frost, the caption, the close button, and even the nav bar's text - was not
+  painted until the transition ended, although their computed opacity ramped
+  normally. Deck brightness sat flat through the flight and jumped +23 in one
+  frame at the end: exactly the pop reported. Removing every backdrop-filter
+  changed nothing, so the filters were not the cause.
+- With the root CAPTURED, the live new root image renders the fades frame by
+  frame (deck 201 -> 211 -> 218 -> 223 -> 225 -> 227 over the flight), and a
+  close at scrollY 3000 fades out with no end-of-transition jump. The scrolled
+  flash to white seen in round 4 is explained by the close proxy (paper-backed
+  `.thumbCard`) painting opaque for the one frame between the overlay lifting
+  and `finished`, which the self-fading proxy from 0fa50fc already removes.
+- A captured nav rides its own group above the root image and pops under the
+  frost when the overlay lifts (nav band 215.8 -> 234.7 in one step); left
+  unnamed during a morph it fades under the frost with the rest.
+
+Fix: the root is captured again (rule removed, comment and guard test
+rewritten); `html[data-wheel-viewer] .site-navigation { view-transition-name:
+none }` stays. Re-recorded at scrollY 3000 and 0: open and close both fade
+gradually, nav included, with no jump at either end.

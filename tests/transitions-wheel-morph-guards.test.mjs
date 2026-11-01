@@ -52,14 +52,18 @@ test("the nav frost freeze stands down during a wheel morph", async () => {
   );
 });
 
-test("a morph captures neither the root nor the nav", async () => {
-  // A captured root (the sticky WebGL deck) flashed paper for a frame when
-  // torn down after scrolling; a captured nav lost its frost. Both stay live.
+test("a morph keeps the root captured but leaves the nav out", async () => {
+  // An uncaptured root left the live frost, caption, close button and nav
+  // text unpainted until the morph ended (they popped in as the card
+  // landed); the captured root renders their fades frame by frame. A
+  // captured nav, by contrast, rides above the root image and pops under
+  // the frost at the end, so the nav alone is unnamed during a morph. The
+  // comment above the wheel-card rules in effects.css has the measurement.
   const { readFile } = await import("node:fs/promises");
   const css = await readFile(new URL("../app/effects.css", import.meta.url), "utf8");
-  assert.match(css, /html\[data-wheel-viewer\]\s*\{\s*view-transition-name:\s*none;\s*\}/);
+  assert.doesNotMatch(css, /html\[data-wheel-viewer\]\s*\{\s*view-transition-name:\s*none;?\s*\}/);
   assert.match(
     css,
-    /html\[data-wheel-viewer\]\s+\.site-navigation\s*\{\s*view-transition-name:\s*none;\s*\}/,
+    /html\[data-wheel-viewer\]\s+\.site-navigation\s*\{\s*view-transition-name:\s*none;?\s*\}/,
   );
 });

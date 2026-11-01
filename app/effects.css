@@ -356,24 +356,29 @@ html:active-view-transition:not([data-wheel-viewer]) .site-navigation {
   view-transition-name: wheel-card;
 }
 
-/* Nothing but the card is captured during a morph. The deck lives in a
-   sticky box inside the 900vh rail: once scrolled, its layout and
-   composited positions differ, and the frame where the engine tears down a
-   root snapshot and re-presents the live sticky/WebGL layer showed page
-   paper for a frame - a flash to white at the end of the close. An
-   uncaptured root (View Transitions Level 2) leaves the live page showing
-   through, so there is no snapshot to tear down. The nav is kept out too: a
-   captured bar loses its frost and re-surfaces the deck when it lands. */
-html[data-wheel-viewer] {
-  view-transition-name: none;
-}
-
+/* The root IS captured during a morph - on purpose, and measured. An
+   uncaptured root (View Transitions Level 2) was tried to spare the sticky
+   WebGL deck a snapshot teardown; in Chrome it left the live page's new
+   fixed-layer content - the frost, the caption, the close button, even the
+   nav bar's text - unpainted until the transition ended, so they all popped
+   in at once as the card landed (headless screencast, 2026-11-01). With the
+   root captured, the live new root image renders the frost's fade and the
+   caption's fade frame by frame, and a scrolled close showed no end-of-
+   transition jump. The flash to white seen earlier was the close proxy
+   (paper-backed .thumbCard) painting opaque for the one frame between the
+   overlay lifting and `finished`; the proxy now fades itself out
+   (mc-wheel-card-landing) so that frame is transparent. Do not reinstate
+   `view-transition-name: none` on html[data-wheel-viewer]; a test guards it.
+   The NAV, though, stays out of the capture during a morph: named, it rides
+   its own group above the root image, crisp while the frost fades in under
+   it, and only drops under the live frost when the overlay lifts - a pop in
+   the bar at both ends. Unnamed, it is part of the root image and the frost
+   fades over it frame by frame (same screencast). */
 html[data-wheel-viewer] .site-navigation {
   view-transition-name: none;
 }
 
-/* Fallback for engines that still capture the root: the page under the
-   morph does not change, so both root snapshots hold for the morph's length
+/* The page under the morph does not change, so both root snapshots hold for the morph's length
    instead of wiping. `animation: none` would drop the outgoing one (see the
    root rule above), and there is no wipe edge to draw a rule along. The
    close runs on the shorter out duration, like the frost lifting. */
