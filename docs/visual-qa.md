@@ -773,9 +773,9 @@ Reported after a592681: the frost and the caption still appeared
 instantaneously, the moment the image arrived in the panel.
 
 This round was measured instead of reasoned: a headless Chrome driven over
-the DevTools protocol (`scratchpad/morph-capture/capture.mjs`) screencast the
+the DevTools protocol (`scripts/qa/morph-capture.mjs`) screencast the
 open and close at real speed, and per-frame brightness of the deck, nav and
-panel regions was computed with sharp (`stats.mjs`). Findings:
+panel regions was computed with sharp (`scripts/qa/frame-stats.mjs`). Findings:
 
 - With the root UNCAPTURED (0fa50fc's `view-transition-name: none` on
   `html[data-wheel-viewer]`), the live page's new fixed-layer content - the
