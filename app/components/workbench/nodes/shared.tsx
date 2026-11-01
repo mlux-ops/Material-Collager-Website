@@ -6,6 +6,7 @@ import {
   Handle,
   NodeToolbar,
   Position,
+  useConnection,
   useEdges,
   useNodeId,
   useNodes,
@@ -28,15 +29,15 @@ import { useModalDismiss } from "../useModalDismiss";
 import styles from "../workbench.module.css";
 import {
   acceptedKindsFor,
-  PORT_COLORS,
   type ExecuteContext,
   type NodeKind,
   type NodeOutputValue,
-  type NodeSpec,
+  type PortKind,
   type PortSpec,
   type WorkbenchNode,
   type WorkbenchNodeData,
 } from "../types";
+import { compatiblePorts } from "../wiring";
 import {
   buildGenerationPayload,
   customSizeError,
@@ -83,8 +84,132 @@ const STATUS_LABEL: Record<WorkbenchNodeData["status"], string> = {
   "needs-selection": "Needs Selection",
 };
 
-function PortHandles({ spec, visibleOutputIds }: { spec: NodeSpec; visibleOutputIds?: readonly string[] }) {
-  const nodeId = useNodeId();
+// --- Wire-drag state -------------------------------------------------------
+// While a wire is being dragged every card answers one question: could this
+// wire land on me, and on which ports? The answer drives the drag-time
+// highlighting (compatible ports grow and ring, the rest dim, cards with
+// nothing to offer fade) and the drop-target hover outline the canvas-root
+// `.wiring` class gates in the stylesheet.
+
+// The handle a wire is being dragged from, as one primitive string ("" while
+// no drag is in progress). useConnection re-renders its caller whenever its
+// selector's result changes, and `to`/`pointer` change on every pointer move,
+// so the selector reads only the fixed end: each card re-renders exactly
+// twice per drag, when it starts and when it ends. Node and port ids never
+// contain "|" (kind-uuid ids, manifest port ids).
+function useWireDragKey(): string {
+  return useConnection((connection) =>
+    connection.inProgress
+      ? `${connection.fromHandle.type}|${connection.fromHandle.nodeId}|${connection.fromHandle.id ?? ""}`
+      : "",
+  );
+}
+
+type WireDragState =
+  | { phase: "idle" }
+  // The card the drag started on: rendered exactly as normal, so the port the
+  // wire is coming out of stays legible (no port on it can take the wire --
+  // connectionIsValid refuses self-wires).
+  | { phase: "origin" }
+  // Any other card, with the ids of its ports the wire could validly land on
+  // (possibly none) and the side they are on: inputs for a drag that started
+  // on an output, outputs for one dragged backwards from an input. The side
+  // matters because ids repeat across sides (Image Edit has an "image" input
+  // AND an "image" output) -- an id match alone would light up the wrong one.
+  | { phase: "drop"; side: "in" | "out"; compatible: ReadonlySet<string> };
+
+const IDLE_DRAG: WireDragState = { phase: "idle" };
+
+function useWireDragState(nodeId: string | null): WireDragState {
+  const dragKey = useWireDragKey();
+  // A primitive again ("" | "origin" | "drop:<in|out>:<ids>"), so the card
+  // only re-renders when its answer actually changes. Returns "" before
+  // touching the graph whenever no drag is in progress: this selector runs
+  // on every store update, node drags included.
+  const answer = useWorkbenchStore((state) => {
+    if (!dragKey || !nodeId) return "";
+    const [handleType, fromNodeId, fromHandleId] = dragKey.split("|");
+    if (fromNodeId === nodeId) return "origin";
+    const self = state.nodes.find((node) => node.id === nodeId);
+    if (!self) return "";
+    const from = { nodeId: fromNodeId, handleId: fromHandleId || null, handleType: handleType as "source" | "target" };
+    const side = from.handleType === "source" ? "in" : "out";
+    return `drop:${side}:${compatiblePorts(state.nodes, state.edges, from, self).map((port) => port.id).join(",")}`;
+  });
+  return useMemo<WireDragState>(() => {
+    if (answer === "origin") return { phase: "origin" };
+    if (!answer.startsWith("drop:")) return IDLE_DRAG;
+    const side = answer.startsWith("drop:in:") ? "in" : "out";
+    const ids = answer.slice(`drop:${side}:`.length);
+    return { phase: "drop", side, compatible: new Set(ids ? ids.split(",") : []) };
+  }, [answer]);
+}
+
+// --- Port strip ------------------------------------------------------------
+
+// Port glyphs by data kind. Every port is the same plotter-ink black
+// (PORT_COLORS), so the SHAPE carries the kind the way PORT_DASHES does for
+// wires: image ● circle, text ■ square, references ◆ diamond, mask ▲
+// triangle. Hollow until the port has a wire, filled once it has one. Drawn
+// in a 10-unit box inset by half the 1.5-unit stroke so the outline is never
+// clipped; round joins (a plotter pen is round) keep the diamond's and the
+// triangle's points inside the box too. The <svg> fills its handle, which
+// must itself stay glyph-sized: React Flow takes a wire's endpoint from the
+// handle element's own box, so this is what makes wires meet the glyph's
+// outer edge. Every scale (hover, compatible-port highlight) is applied to
+// this <svg>, never to the handle element, whose transform React Flow owns
+// for positioning and whose box it re-measures.
+function PortGlyph({ kind, filled }: { kind: PortKind; filled: boolean }) {
+  return (
+    <svg
+      className={`${styles.portGlyph}${filled ? ` ${styles.portGlyphFilled}` : ""}`}
+      viewBox="0 0 10 10"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {kind === "image" && <circle cx="5" cy="5" r="4.25" />}
+      {kind === "text" && <rect x="1.25" y="1.25" width="7.5" height="7.5" />}
+      {kind === "references" && <path d="M5 0.75 9.25 5 5 9.25 0.75 5Z" />}
+      {kind === "mask" && <path d="M5 0.9 9.25 9.1H0.75Z" />}
+    </svg>
+  );
+}
+
+function inputPortTitle(port: PortSpec): string {
+  return `${port.label} (${acceptedKindsFor(port).join(" | ")}${port.multi ? ", multiple" : ""}${port.required ? ", required" : ""})`;
+}
+
+function outputPortTitle(port: PortSpec): string {
+  return `${port.label} (${port.kind})`;
+}
+
+// The drag-time treatment for one port: on a card a wire could land on, its
+// compatible ports are highlighted and every other port (incompatible, or on
+// the wrong side for this drag) dims. Idle and origin cards get neither.
+function dragPortClass(drag: WireDragState, side: "in" | "out", portId: string): string {
+  if (drag.phase !== "drop") return "";
+  return side === drag.side && drag.compatible.has(portId) ? styles.portCompatible : styles.portDimmed;
+}
+
+// The card's ports, named, directly under its header: one row per port
+// index, inputs on the left edge and outputs on the right. Each row spans the
+// card's full border-box width (negative margins cancel its padding and
+// border) and is the containing block for its <Handle>s, so React Flow's own
+// left:0/right:0 + translate(-50%,-50%) centres each glyph on the card's
+// border line -- no hand-maintained pixel offsets that drift whenever the
+// header changes.
+function PortStrip({
+  nodeId,
+  kind,
+  visibleOutputIds,
+  drag,
+}: {
+  nodeId: string | null;
+  kind: NodeKind;
+  visibleOutputIds?: readonly string[];
+  drag: WireDragState;
+}) {
+  const spec = specFor(kind);
   const updateNodeInternals = useUpdateNodeInternals();
   const visible = useMemo(() => visibleOutputIds ? new Set(visibleOutputIds) : undefined, [visibleOutputIds]);
   const outputs = useMemo(
@@ -95,34 +220,104 @@ function PortHandles({ spec, visibleOutputIds }: { spec: NodeSpec; visibleOutput
 
   // React Flow caches handle geometry. Re-measure whenever Variations reveals
   // or hides its optional per-candidate handles so new wires start at the
-  // actual rendered positions.
+  // actual rendered positions. (Anything that MOVES the strip -- the header
+  // wrapping, a row added -- also resizes the card, and React Flow's own
+  // ResizeObserver re-measures on that.)
   useEffect(() => {
     if (nodeId) updateNodeInternals(nodeId);
   }, [nodeId, outputKey, updateNodeInternals]);
 
+  // Wires per declared port, inputs first then outputs, in one shallow-
+  // compared array so the strip re-renders only when a count changes. A
+  // null handle id is React Flow's "first handle of that type", so it counts
+  // against the first declared port, like coloredEdges' fallback.
+  const wireCounts = useWorkbenchStore(
+    useShallow((state) => {
+      const counts: number[] = new Array(spec.inputs.length + spec.outputs.length).fill(0);
+      if (!nodeId) return counts;
+      for (const edge of state.edges) {
+        if (edge.target === nodeId) {
+          const index = edge.targetHandle ? spec.inputs.findIndex((port) => port.id === edge.targetHandle) : 0;
+          if (index >= 0 && index < spec.inputs.length) counts[index] += 1;
+        }
+        if (edge.source === nodeId) {
+          const index = edge.sourceHandle ? spec.outputs.findIndex((port) => port.id === edge.sourceHandle) : 0;
+          if (index >= 0 && index < spec.outputs.length) counts[spec.inputs.length + index] += 1;
+        }
+      }
+      return counts;
+    }),
+  );
+  // The same unmet-required rule the disabled Run button uses, so a required
+  // port satisfied by a param instead of a wire (Reference Finder's query
+  // override) never reads as missing here while Run is enabled.
+  const missing = useMissingRequiredInputs(nodeId ?? "", kind);
+  const missingIds = useMemo(() => new Set(missing.map((port) => port.id)), [missing]);
+
+  const rows = Math.max(spec.inputs.length, outputs.length);
+  if (!rows) return null;
+
   return (
-    <>
-      {spec.inputs.map((port, index) => (
-        <Handle
-          key={port.id}
-          id={port.id}
-          type="target"
-          position={Position.Left}
-          style={{ top: 44 + index * 22, background: PORT_COLORS[port.kind] }}
-          title={`${port.label} (${acceptedKindsFor(port).join(" | ")}${port.multi ? ", multiple" : ""})`}
-        />
-      ))}
-      {outputs.map((port, index) => (
-        <Handle
-          key={port.id}
-          id={port.id}
-          type="source"
-          position={Position.Right}
-          style={{ top: 44 + index * 22, background: PORT_COLORS[port.kind] }}
-          title={`${port.label} (${port.kind})`}
-        />
-      ))}
-    </>
+    <div className={styles.portStrip}>
+      {Array.from({ length: rows }, (_, index) => {
+        const input = spec.inputs[index];
+        const output = outputs[index];
+        const inputCount = input ? wireCounts[index] : 0;
+        const outputCount = output ? wireCounts[spec.inputs.length + spec.outputs.indexOf(output)] : 0;
+        // Ink only: black once wired, the chrome grey while optional and
+        // empty, the card's error red while required and empty (the same
+        // fact as RunFooter's "Missing required input", shown at the port).
+        const inputTone = !input
+          ? ""
+          : inputCount > 0
+            ? styles.portLabelConnected
+            : missingIds.has(input.id)
+              ? styles.portLabelMissing
+              : "";
+        return (
+          <div key={index} className={styles.portRow}>
+            {input && (
+              <>
+                <Handle
+                  id={input.id}
+                  type="target"
+                  position={Position.Left}
+                  className={`${styles.portHandle} ${dragPortClass(drag, "in", input.id)}`}
+                  title={inputPortTitle(input)}
+                >
+                  <PortGlyph kind={input.kind} filled={inputCount > 0} />
+                </Handle>
+                <span
+                  className={`${styles.portLabel} ${inputTone} ${dragPortClass(drag, "in", input.id)}`}
+                  title={inputPortTitle(input)}
+                >
+                  {input.label}{input.multi && inputCount > 0 ? ` · ${inputCount}` : ""}
+                </span>
+              </>
+            )}
+            {output && (
+              <>
+                <span
+                  className={`${styles.portLabel} ${styles.portLabelOut} ${outputCount > 0 ? styles.portLabelConnected : ""} ${dragPortClass(drag, "out", output.id)}`}
+                  title={outputPortTitle(output)}
+                >
+                  {output.label}
+                </span>
+                <Handle
+                  id={output.id}
+                  type="source"
+                  position={Position.Right}
+                  className={`${styles.portHandle} ${dragPortClass(drag, "out", output.id)}`}
+                  title={outputPortTitle(output)}
+                >
+                  <PortGlyph kind={output.kind} filled={outputCount > 0} />
+                </Handle>
+              </>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -200,10 +395,15 @@ export function NodeShell({
   visibleOutputIds?: readonly string[];
 }) {
   const spec = specFor(data.kind);
+  const nodeId = useNodeId();
+  const drag = useWireDragState(nodeId);
+  // While a wire is being dragged, a card it could land on becomes a drop
+  // target (the hover outline, gated on the canvas-root .wiring class) and a
+  // card with nothing to offer fades back. The origin card stays as it is.
+  const dragClass = drag.phase !== "drop" ? "" : drag.compatible.size ? styles.nodeDropTarget : styles.nodeFaded;
   return (
-    <div className={`${styles.node} ${data.status === "error" ? styles.nodeError : ""}`}>
+    <div className={`${styles.node} ${data.status === "error" ? styles.nodeError : ""} ${dragClass}`}>
       <NodeQuickActions />
-      <PortHandles spec={spec} visibleOutputIds={visibleOutputIds} />
       <NodeDeleteButton />
       <header className={styles.nodeHeader}>
         <span className={styles.nodeTitle}>{spec.title}</span>
@@ -217,12 +417,10 @@ export function NodeShell({
           <span className={`${styles.status} ${styles[`status_${data.status}`]}`}>{STATUS_LABEL[data.status]}</span>
         </span>
       </header>
+      <PortStrip nodeId={nodeId} kind={data.kind} visibleOutputIds={visibleOutputIds} drag={drag} />
       <div className={styles.nodeBody}>{children}</div>
       {data.error && <p className={styles.errorText}>{data.error}</p>}
       {footer}
-      <span className={styles.portLabels}>
-        {spec.inputs.map((port) => <em key={port.id}>{port.label}</em>)}
-      </span>
     </div>
   );
 }

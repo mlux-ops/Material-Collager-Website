@@ -205,6 +205,30 @@
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+  /* Desktop: wrapped rows hug the right edge, and the toolbar is capped so
+     it stays clear of the 264px palette docked top-left. 310px = the
+     palette's 15px left margin + its 264px width + a 16px gap + the
+     toolbar panel's own 15px right margin. A percentage would not do here:
+     the panel is shrink-to-fit, so it resolves against the toolbar's own
+     content width. --flow-width is the canvas's own measured width
+     (WorkbenchApp sets it from React Flow's store), because the 280px docked
+     inspector narrows the canvas without changing 100vw; 100vw is only the
+     fallback for the first frame before React Flow has measured. The compact
+     block below replaces this max-width. */
+  justify-content: flex-end;
+  max-width: calc(var(--flow-width, 100vw) - 310px);
+}
+
+/* Desktop: the "why Run is disabled" line renders after every button (order)
+   and right-aligned, on its own line beneath them. contain:inline-size
+   drops the line's intrinsic width out of the toolbar's, so showing the
+   reason never widens the toolbar -- the buttons keep their place and the
+   text wraps to the toolbar's width instead. The compact block resets all
+   three; there the line stays where it is in the source, after Menu. */
+.toolbar > .disabledReason {
+  order: 1;
+  text-align: right;
+  contain: inline-size;
 }
 
 /* Floating add-node window pinned to the left of the canvas. It owns a real
@@ -287,10 +311,12 @@
   padding: 10px 12px 12px;
   font-family: var(--font-inter, inherit);
   box-shadow: none;
-  /* Anchors the corner delete button. Safe for the port handles: this box and
-     React Flow's own node wrapper have identical bounds, so switching the
-     handles' containing block does not move them. */
+  /* Anchors the corner delete button. The port handles are NOT positioned
+     against this box: each sits in its own .portRow, which spans the card's
+     full border-box width (see the port strip section below). */
   position: relative;
+  /* The wire-drag fade (.nodeFaded). */
+  transition: opacity 120ms ease;
 }
 
 /* Selection affordances. React Flow stamps .selected on its own node wrapper,
@@ -609,8 +635,19 @@
 
 .runRow {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: 9px;
+}
+
+/* The missing-input reason is flex-basis:100%, so it needs a line of its own
+   -- and in a row that cannot wrap that basis squeezed Run to a 61px square
+   with its label on three lines. With wrap, Run keeps the full width, and
+   order puts the reason after Retry / Cancel / the cache badge (which come
+   later in the source) so they stay on Run's line instead of dropping below
+   the reason. */
+.runRow > .disabledReason {
+  order: 1;
 }
 
 .runButton {
@@ -839,8 +876,170 @@
   width: 100%;
 }
 
-.portLabels {
-  display: none;
+/* --- Port strip (NodeShell's PortStrip) --------------------------------- */
+/* Every port, named, directly under the card header: row i holds input i on
+   the left edge and output i on the right. Plotter ink throughout -- the
+   glyph's SHAPE carries the data kind, its fill says whether it is wired,
+   and the label's ink says connected / optional / required-and-missing. */
+
+.portStrip {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 6px;
+}
+
+/* -13px cancels .node's 12px horizontal padding plus its 1px border, so each
+   row spans the card's full border-box width and is the containing block
+   for its handles: React Flow's own left:0 / right:0 + translate(-50%,-50%)
+   then centres each glyph on the card's outer edge. The padding puts the
+   labels back on the card's content edge. */
+.portRow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 20px;
+  margin: 0 -13px;
+  padding: 0 13px;
+}
+
+.portLabel {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 48%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 8.4px;
+  line-height: 1.2;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+  color: #657069;
+  transition: color 120ms ease, opacity 120ms ease;
+}
+
+.portLabelOut {
+  margin-left: auto;
+  text-align: right;
+}
+
+.portLabelConnected {
+  color: #000;
+}
+
+/* An unconnected REQUIRED input: the same fact as the card's "Missing
+   required input" reason, in the same red. */
+.portLabelMissing {
+  color: #b3261e;
+}
+
+/* The handle element stays glyph-sized because React Flow takes a wire's
+   endpoint from its box (Left -> its left-centre, Right -> its right-
+   centre), so wires meet the glyph's outer edge. The library's 6px dot is
+   switched off and the SVG glyph drawn inside instead; two classes beat the
+   library's single-class .react-flow__handle rule whatever order the
+   stylesheets load in. Its positioning (top/left/right/transform) is left
+   entirely to React Flow. z-index 3: above card content where the grab zone
+   overlaps the card's edge, below the corner delete button (.nodeDelete,
+   z-index 4). */
+.portRow .portHandle {
+  width: 10px;
+  height: 10px;
+  min-width: 0;
+  min-height: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  z-index: 3;
+  cursor: crosshair;
+}
+
+/* The enlarged, invisible grab zone: a square exactly one row pitch across,
+   centred on the glyph, so neighbouring rows' zones touch but never overlap.
+   A pseudo-element hit-tests as its host element, so this grows both the
+   drag-start target and React Flow's drop-on-handle check (elementFromPoint)
+   without moving the wire endpoint. Nothing between the handle and the
+   canvas clips overflow, so the half that hangs outside the card works. */
+.portRow .portHandle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  transform: translate(-50%, -50%);
+}
+
+.portGlyph {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: #fff;
+  stroke: #000;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  pointer-events: none;
+  transform-origin: 50% 50%;
+  transition: transform 120ms ease, opacity 120ms ease;
+}
+
+.portGlyphFilled {
+  fill: #000;
+}
+
+@media (hover: hover) {
+  .portHandle:hover .portGlyph {
+    transform: scale(1.3);
+  }
+}
+
+/* --- Wire-drag highlighting ---------------------------------------------
+   While a wire is being dragged (WorkbenchApp puts .wiring on the canvas
+   root), every card a wire could land on marks the ports that would take
+   it -- glyph grown with a thin ink halo, label in black -- and dims the
+   rest; a card with nothing to offer fades back. The origin card is left as
+   it is. Classes come from NodeShell (shared.tsx), which computes them with
+   the same connectionIsValid the drop itself is checked against. */
+
+.portHandle.portCompatible .portGlyph {
+  transform: scale(1.35);
+}
+
+/* Square, like every pseudo-element on the site (globals.css forces
+   border-radius: 0 on all of them). */
+.portRow .portHandle.portCompatible::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 18px;
+  height: 18px;
+  border: 1px solid #000;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.portLabel.portCompatible {
+  color: #000;
+}
+
+.portHandle.portDimmed .portGlyph,
+.portLabel.portDimmed {
+  opacity: 0.25;
+}
+
+.nodeFaded,
+.wiring .note {
+  opacity: 0.35;
+}
+
+/* The drop-target cue for dropping a wire anywhere on a card: only cards
+   that have a compatible port get it. Gated on a hover-capable pointer like
+   every other :hover rule here (a finger leaves :hover stuck). */
+@media (hover: hover) {
+  .wiring .nodeDropTarget:hover {
+    outline: 1.5px solid #000;
+  }
 }
 
 .note {
@@ -852,6 +1051,19 @@
   /* Anchors the corner delete button (the note kind renders its own root
      instead of NodeShell). */
   position: relative;
+  /* The wire-drag fade (.wiring .note: a note has no ports, so it always
+     fades while a wire is being dragged). */
+  transition: opacity 120ms ease;
+}
+
+/* After .node and .note so it beats their own transition declarations. */
+@media (prefers-reduced-motion: reduce) {
+  .node,
+  .note,
+  .portLabel,
+  .portGlyph {
+    transition: none;
+  }
 }
 
 .noteText {
@@ -1487,6 +1699,15 @@
     max-width: calc(100vw - 90px);
   }
 
+  /* Undo the desktop-only placement above: here the reason keeps its source
+     position (after Menu, before the dropdown), left-aligned, and still
+     sizes the toolbar as it always did. */
+  .toolbar > .disabledReason {
+    order: 0;
+    text-align: start;
+    contain: none;
+  }
+
   .toolbarSecondary {
     position: absolute;
     top: calc(100% + 6px);
@@ -1563,17 +1784,29 @@
 }
 
 @media (pointer: coarse) {
-  /* React Flow ships 6x6px port handles -- effectively impossible to hit
-     with a fingertip, which makes wiring (the whole point of the canvas)
-     unusable on touch. They stay centred on the same anchor point because
-     React Flow positions them with translate(-50%, -50%). */
-  .node :global(.react-flow__handle),
-  .note :global(.react-flow__handle) {
-    width: 15px;
-    height: 15px;
-    min-width: 15px;
-    min-height: 15px;
-    border-width: 1.5px;
+  /* Ports for a fingertip, which makes wiring (the whole point of the
+     canvas) usable on touch: rows open up to a 28px pitch, the glyph grows
+     to 13px, and the invisible grab zone grows with the row so neighbouring
+     zones still touch without overlapping. The glyph stays centred on the
+     card's edge because React Flow positions the handle with
+     translate(-50%, -50%) whatever its size. */
+  .portRow {
+    height: 28px;
+  }
+
+  .portRow .portHandle {
+    width: 13px;
+    height: 13px;
+  }
+
+  .portRow .portHandle::after {
+    width: 28px;
+    height: 28px;
+  }
+
+  .portRow .portHandle.portCompatible::before {
+    width: 22px;
+    height: 22px;
   }
 
   /* Edges carry an invisible 20px-wide interaction stroke for hit-testing.

@@ -11,7 +11,9 @@ import {
   Panel,
   ReactFlow,
   ReactFlowProvider,
+  useConnection,
   useReactFlow,
+  useStore,
   ViewportPortal,
   type ConnectionLineComponentProps,
   type IsValidConnection,
@@ -44,11 +46,12 @@ import { Spotlight } from "./Spotlight";
 import { instantiateTemplate, TEMPLATES, type TemplateId } from "./templates";
 import { useModalDismiss } from "./useModalDismiss";
 import { useModalFocus } from "./useModalFocus";
+import { autoAttachConnection } from "./wiring";
 import { awaitTransitionSettled } from "@/app/lib/route-ready";
 import { motionReduced, potatoMode } from "@/app/lib/site-settings";
 import { SiteNavigation } from "../SiteNavigation";
 import styles from "./workbench.module.css";
-import { acceptedKindsFor, PORT_COLORS, PORT_DASHES, specFor, type NodeKind, type PortKind, type WorkbenchNode } from "./types";
+import { PORT_COLORS, PORT_DASHES, specFor, type NodeKind, type WorkbenchNode } from "./types";
 
 function bytesLabel(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -183,17 +186,33 @@ function ExportDialog({ nodes, edges, onClose }: { nodes: WorkbenchNode[]; edges
 }
 
 // Drag-wire-to-empty-canvas prompt (S29/AC24): captured from onConnectEnd when
-// a connection is released over the pane instead of a handle. `kinds` is the
-// registry-derived compatible subset (nodeKindsForWire) -- Spotlight never
-// offers a kind that couldn't actually be wired.
+// a connection is released over the pane instead of a handle or a card. `kinds`
+// is the registry-derived compatible subset (nodeKindsForWire) -- Spotlight
+// never offers a kind that couldn't actually be wired.
 type WirePrompt = {
   position: { x: number; y: number };
   sourceNodeId: string;
   sourceHandleId: string;
   handleType: "source" | "target";
-  portKind: PortKind;
   kinds: NodeKind[];
 };
+
+// What a released wire is over. xyflow's own connectionState.toNode is only
+// set within connectionRadius of a HANDLE, so a wire released over a card's
+// body has to be hit-tested; elementsFromPoint lists the stack top-down, so
+// the first match is what the user sees. React Flow panels (toolbar, palette,
+// minimap, zoom controls) float above the cards: a release on one is neither
+// a drop on the card panned underneath nor a request for a new node there.
+type WireDropTarget = { kind: "card"; id: string } | { kind: "chrome" } | { kind: "pane" };
+
+function wireDropTargetAt(clientX: number, clientY: number): WireDropTarget {
+  for (const element of document.elementsFromPoint(clientX, clientY)) {
+    if (element.closest(".react-flow__panel")) return { kind: "chrome" };
+    const card = element.closest<HTMLElement>(".react-flow__node");
+    if (card?.dataset.id) return { kind: "card", id: card.dataset.id };
+  }
+  return { kind: "pane" };
+}
 
 // Points at the single graph WorkbenchApp autosaves/restores. Defaults to
 // DEFAULT_GRAPH_ID, which is exactly the id an existing v1 user's migrated
@@ -283,6 +302,10 @@ function CanvasInner({
     })),
   );
   const { screenToFlowPosition, fitView, deleteElements } = useReactFlow();
+  // Boolean-only selector: the canvas re-renders at drag start and end, not on
+  // every pointer move. Drives the .wiring class that lights up ports.
+  const wiring = useConnection((connection) => connection.inProgress);
+  const flowWidth = useStore((state) => state.width);
   const placedCount = useRef(0);
   // Auto-offer is entirely DERIVED from render inputs (restored/nodes.length/
   // dismissed) rather than toggled from an effect: once restored settles
@@ -465,15 +488,38 @@ function CanvasInner({
     return addNode(kind, position);
   }, [addNode, screenToFlowPosition]);
 
-  // Drag-wire-to-empty-canvas (S29/AC24): a connection dropped on the pane
-  // (not a handle -- `connectionState.toNode` stays null) opens Spotlight
-  // filtered to registry-derived compatible kinds instead of silently
-  // discarding the drag.
+  // Where a released wire goes. One that landed on a handle has already
+  // reached onConnect (isValid), so it is never wired twice. One released over
+  // a card's body -- xyflow reports no toNode there, so the card is
+  // hit-tested -- attaches to the card's best free port (autoAttachConnection),
+  // or does nothing when no port fits: the Spotlight never opens on top of a
+  // card, the origin card included. Only a release over bare pane opens it
+  // (S29/AC24, drag-wire-to-empty-canvas), filtered to registry-derived
+  // compatible kinds instead of silently discarding the drag.
   const handleConnectEnd: OnConnectEnd = useCallback(
     (event, connectionState) => {
-      if (connectionState.toNode || !connectionState.fromNode || !connectionState.fromHandle) return;
+      if (connectionState.isValid) return;
       const fromNode = connectionState.fromNode;
       const fromHandle = connectionState.fromHandle;
+      if (!fromNode || !fromHandle) return;
+      const point = "changedTouches" in event ? event.changedTouches[0] : event;
+
+      const target: WireDropTarget = connectionState.toNode
+        ? { kind: "card", id: connectionState.toNode.id }
+        : wireDropTargetAt(point.clientX, point.clientY);
+      if (target.kind === "chrome") return;
+      if (target.kind === "card") {
+        const state = useWorkbenchStore.getState();
+        const connection = autoAttachConnection(
+          state.nodes as WorkbenchNode[],
+          state.edges,
+          { nodeId: fromNode.id, handleId: fromHandle.id ?? null, handleType: fromHandle.type },
+          target.id,
+        );
+        if (connection) onConnect(connection);
+        return;
+      }
+
       if (!fromHandle.type || !fromHandle.id) return;
       // ReactFlow's own generics don't flow through onConnectEnd cleanly, so
       // fromNode.data comes back as the library's generic NodeBase shape --
@@ -482,30 +528,27 @@ function CanvasInner({
       const ports = fromHandle.type === "source" ? spec.outputs : spec.inputs;
       const port = ports.find((candidate) => candidate.id === fromHandle.id);
       if (!port) return;
-      const kinds = nodeKindsForWire(fromHandle.type, port.kind);
+      const kinds = nodeKindsForWire(fromHandle.type, port);
       if (!kinds.length) return;
-      const point = "changedTouches" in event ? event.changedTouches[0] : event;
       const position = screenToFlowPosition({ x: point.clientX, y: point.clientY });
-      setWirePrompt({ position, sourceNodeId: fromNode.id, sourceHandleId: fromHandle.id, handleType: fromHandle.type, portKind: port.kind, kinds });
+      setWirePrompt({ position, sourceNodeId: fromNode.id, sourceHandleId: fromHandle.id, handleType: fromHandle.type, kinds });
     },
-    [screenToFlowPosition],
+    [screenToFlowPosition, onConnect],
   );
 
+  // The new node is wired through the same picker as a wire dropped on an
+  // existing card, so it takes the first empty input and never a cyclic one.
   const pickWireTarget = useCallback((kind: NodeKind) => {
     if (!wirePrompt) return;
     const newId = place(kind, wirePrompt.position);
-    const spec = specFor(kind);
-    if (wirePrompt.handleType === "source") {
-      const targetPort = spec.inputs.find((port) => acceptedKindsFor(port).includes(wirePrompt.portKind));
-      if (targetPort) {
-        onConnect({ source: wirePrompt.sourceNodeId, sourceHandle: wirePrompt.sourceHandleId, target: newId, targetHandle: targetPort.id });
-      }
-    } else {
-      const sourcePort = spec.outputs.find((port) => port.kind === wirePrompt.portKind);
-      if (sourcePort) {
-        onConnect({ source: newId, sourceHandle: sourcePort.id, target: wirePrompt.sourceNodeId, targetHandle: wirePrompt.sourceHandleId });
-      }
-    }
+    const state = useWorkbenchStore.getState();
+    const connection = autoAttachConnection(
+      state.nodes as WorkbenchNode[],
+      state.edges,
+      { nodeId: wirePrompt.sourceNodeId, handleId: wirePrompt.sourceHandleId, handleType: wirePrompt.handleType },
+      newId,
+    );
+    if (connection) onConnect(connection);
     setWirePrompt(null);
   }, [wirePrompt, place, onConnect]);
 
@@ -617,6 +660,9 @@ function CanvasInner({
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
       onConnectEnd={handleConnectEnd}
+      // styles.wiring is applied only mid-drag; the guard keeps a missing
+      // module class from rendering as the text "undefined".
+      className={wiring && styles.wiring ? styles.wiring : undefined}
       connectionLineComponent={WireConnectionLine}
       isValidConnection={isValidConnection}
       snapToGrid
@@ -636,8 +682,9 @@ function CanvasInner({
       // drag -- which swallows the tap on every in-card control. 5px is
       // below the browser's own tap-slop so a deliberate drag still feels
       // immediate. connectionRadius is the snap distance when a wire is
-      // released near a port: 20px is a mouse figure, and the ports are only
-      // 15px across even after the coarse-pointer bump in the stylesheet.
+      // released near a port: 20px is a mouse figure, and a port's grab zone
+      // is only 28px across (a 13px glyph) even with the coarse-pointer sizing
+      // in the stylesheet.
       // Both are compact-only so the desktop feel is unchanged.
       nodeDragThreshold={compact ? 5 : undefined}
       connectionRadius={compact ? 34 : undefined}
@@ -690,7 +737,14 @@ function CanvasInner({
         )}
       </Panel>
       <Panel position="top-right">
-        <div className={styles.toolbar}>
+        <div
+          className={styles.toolbar}
+          // The canvas's measured width, which the stylesheet's desktop cap
+          // subtracts the palette column from: the docked inspector narrows
+          // the canvas without changing 100vw. Unset until React Flow has
+          // measured (width 0), so the cap falls back to 100vw.
+          style={flowWidth > 0 ? ({ "--flow-width": `${flowWidth}px` } as React.CSSProperties) : undefined}
+        >
           <button type="button" className={styles.toolbarButton} disabled={runDisabled} title={runReason} onClick={handleRunAll}>
             {/* The full desktop label ("Run workflow · 4 to run · ~$0.12")
                 is wider than the whole toolbar has to spare next to the
@@ -724,9 +778,10 @@ function CanvasInner({
               never surfaces on touch, so this text is the ONLY explanation a
               phone user gets for a disabled Run button. Rendered after the
               Menu toggle because .disabledReason is flex-basis:100% and so
-              forces a line break for everything that follows it (which is
-              exactly the existing desktop behaviour, unchanged: the toggle
-              does not render there). */}
+              forces a line break for everything that follows it. On desktop
+              (no toggle) the stylesheet moves it after every button instead
+              (`order`), right-aligned beneath them, so it never splits the
+              button row. */}
           {runReason && <span className={styles.disabledReason}>{runReason}</span>}
           {/* display:contents on desktop, so these stay direct flex children
               of .toolbar and the row is laid out exactly as before; in the
