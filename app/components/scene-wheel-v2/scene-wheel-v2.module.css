@@ -230,14 +230,17 @@
    card arced out past the panel before settling). So the panel box stays
    transparent and still, and the same glass sheet slides in from the right
    on a pseudo-element behind the content. The figure, caption and close
-   button hold their place and arrive on the backdrop's live frost-in. */
+   button hold their place and arrive on the backdrop's live frost-in.
+   No isolation on the panel: the sheet's z-index -1 resolves against the
+   backdrop's stacking context (fixed, z 50), which is what keeps it under
+   the figure, and an isolated panel would be a backdrop root - the sheet's
+   blur would then sample only the panel's own (transparent) content. */
 .viewerStatic .viewerPanel {
   background: transparent;
   backdrop-filter: none;
   border-left: 0;
   box-shadow: none;
   animation: none;
-  isolation: isolate;
 }
 
 .viewerStatic .viewerPanel::before {
