@@ -852,3 +852,45 @@ Three additive effects on the existing dither / plotter / mono vocabulary:
   verified with the same classes in /dither-lab only.
 - Review boards and archive were not measured live (no local data).
 - The reference tray prints in only where the pane scrolls (1280px+).
+
+# Visual QA - Library veil Bayer dissolve
+
+Date: 2026-11-01
+Status: **PASSED - LOCAL ONLY** (not deployed; headless Chrome against
+`npm run dev`, which sat on port 3002 because Windows held 3000 and 3001)
+
+## Scope
+
+The Library's first-arrival loading veil now leaves through the site's Bayer
+dither dissolve instead of a plain fade. At 100% SceneWheelV2 adds the global
+`.mc-veil-dissolve` class (app/effects.css) to `.loadingVeil`. It runs the
+shared `mc-bayer-dissolve` keyframes in reverse, with a 6px tile and
+`steps(17, end)`, on the new `--veil-dissolve-dur` token (620ms). The cards
+snap opaque beneath the veil and print through it, and the counter goes
+with it. The veil unmounts on its own `animationend`, with a 1200ms timer
+as a fallback. The scroll lock now holds until the veil is gone. The chrome
+fade, the dithered thumb row, `RouteReady` and SPA re-entry are unchanged.
+Under either reduced-motion source the veil exits at once, and the CSS
+strips the mask under both sources as well.
+
+Captured with the new `scripts/qa/veil-capture.mjs`. It starts the
+screencast before navigating and stamps the dissolve from inside the page,
+because CDP polling lags a busy main thread by hundreds of ms.
+
+## Checks
+
+| Check | Result |
+| --- | --- |
+| Dissolve, warm dev server (real GPU, ANGLE D3D11) | Passed; 636ms from class to unmount, 99 painted frames, no long tasks; frames show the cards printing through a dot grid and the counter breaking up |
+| `prefers-reduced-motion: reduce` (emulated) | Passed; no dissolve class, veil gone at once |
+| Site REDUCE MOTION setting (`mc:site-settings:v1`) | Passed; no dissolve class, veil gone at once |
+| SPA re-entry (Library to Generator and back) | Passed; veil never mounts, canvas present |
+| Computed style mid-dissolve | `mc-bayer-dissolve`, 0.62s, `reverse`, 6px mask tile |
+
+## Remaining known deviations
+
+- The very first load after `npm run dev` starts, while Vite compiles cold,
+  stalled the main thread about 330ms just as the veil flipped. The
+  `mask-image` steps run on the main thread, so that run skipped the
+  dissolve and the veil vanished in one step, as the old opacity fade would
+  not have. Warm loads do not stall. A production build was not measured.
