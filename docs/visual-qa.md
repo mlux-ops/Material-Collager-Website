@@ -615,3 +615,240 @@ before this pass, from the static trace.
   - At 390x844 the phone bubble renders at full height with its text (307x46.8 px).
 - The two known-gap dialogs from Task 3B.2 remain as recorded in the WP-3B entry
   above.
+
+# Visual QA - Library viewer card morph (shared-element view transition)
+
+Date: 2026-11-01
+Status: **PASSED - LOCAL ONLY** (not deployed; user approval pending)
+
+## Scope
+
+Clicking a wheel card on `/` morphs the card into the viewer's image through a
+same-document view transition (`wheel-card` / `wheel-viewer` names in
+`app/effects.css`, orchestration in `SceneWheelV2.tsx`), and closing morphs the
+image back onto the card's rest pose. The scene, the panel field, the nav and
+the reference scroll behaviour are untouched; only the viewer's open/close
+motion changed, and only when the View Transitions API is present and motion is
+on.
+
+## Environment
+
+- Local URL: `http://localhost:3000/` (`npm run dev` from the worktree)
+- Browser: in-app Chromium, `document.startViewTransition` with transition types
+- Viewports: 800 x 704 desktop (pane size), 375 x 812 mobile emulation
+- Method: `--wheel-morph-dur` / `--wheel-morph-out-dur` overridden to 3000ms,
+  the `::view-transition-*` animations paused with the Web Animations API and
+  stepped to fixed times, screenshots at each step; state read from the DOM
+  (`html[data-wheel-viewer]`, `.mc-wheel-card`, `.mc-wheel-viewer`).
+
+## Checks
+
+| Check | Result |
+| --- | --- |
+| Open morph, desktop: card flies straight from its projected quad to the viewer image | Passed after fix (see below); at 15% the card is already on its line to the image, no arc |
+| Panel keyframes during a morphed open | Passed; `document.getAnimations()` lists no `viewer-slide-in` / `viewer-frost-in`, backdrop carries `viewerStatic` |
+| Close morph, desktop: image flies back and lands on the 3D card's rest pose | Passed; proxy removed on `finished`, no double image, frost lifts via `mc-fade-out` |
+| Open + close, 375 x 812 | Passed; full-width panel, same flight, scroll lock and `inert` released after close |
+| Reduced motion (site setting `reduceMotion`) | Passed; `startViewTransition` never called, viewer opens and closes instantly, no proxy mounted |
+| `html[data-wheel-viewer]` cleared after every transition | Passed |
+| Console errors across all runs | Passed; 0 errors |
+
+## Discrepancies fixed
+
+- **Card arced out past the panel on open.** The viewer panel's own
+  `viewer-slide-in` kept running inside the live new capture, so the
+  `wheel-card` group's target started off-screen right. Fixed by `viewerStatic`
+  (`scene-wheel-v2.module.css`): a viewer opened by a morph runs no keyframes
+  of its own; the view transition fades the frost and flies the card.
+
+## Remaining known deviations
+
+- The source 3D card stays drawn in the rail while its copy flies (by design;
+  the proxy covers it at the start and the frost covers it after).
+- Mid-flight frames of the `matrix3d` interpolation show a slight skew as the
+  perspective quad flattens; it reads as the card turning to face the viewer.
+- Browser back/forward and the nav wipe are unchanged; the names are unscoped
+  but no page wipe can start while the viewer is open (the nav is inside the
+  inert track).
+- Pre-existing, not touched here: with the site's `reduceMotion` setting on
+  (not the OS preference), the viewer's module keyframes still run on a plain
+  open; the OS media query is the only thing the module's reduced-motion block
+  checks.
+
+## Close landing, round 2 (2026-11-01, user eyeball)
+
+Reported: the returning card moved back OVER the card in front of it in the
+deck, sat there for a moment, then the front card popped back in front.
+
+Cause: the `wheel-card` group paints above the whole root snapshot for the
+full close, so nearer cards cannot occlude it; then the live proxy (stacked
+over the canvas by z-index) painted for a frame or two until React dropped it.
+
+Fixed in e5905f7: the close direction fades the flying card out over the final
+stretch (`mc-wheel-depart` / `mc-wheel-land`, 340ms out duration) so the live
+canvas, correct occlusion included, shows through where the card lands; the
+proxy is hidden synchronously when the transition settles, before the state
+update removes it.
+
+Re-checked at 2138 x 1266 on a mid-deck card with a neighbour in front: the
+close transition lists exactly those keyframes on the `wheel-card` old/new
+images, and at 90% of the flight the deck already shows the card at rest with
+the front card in front of it. 0 console errors.
+
+## End-of-close deck flicker, round 3 (2026-11-01, user eyeball)
+
+Reported: the close landing is right, but as the transition ends the whole
+deck flickers once.
+
+Measured (MutationObserver plus 4ms polling of canvas size, sticky box, body
+overflow and the nav's computed styles across a close): nothing resizes the
+canvas. At `finished`, three things changed: `data-wheel-viewer` was removed,
+the proxy was hidden then removed from inside `.canvas`, and 16ms later the
+nav bar's computed `backdrop-filter` went `none` to `blur(24px)` with its
+background returning from opaque to 86% - the page-wipe freeze rule
+(`html:active-view-transition .site-navigation`) letting go. Re-enabling a
+backdrop filter on a full-width fixed bar over the live WebGL canvas
+re-surfaces everything under it for a frame.
+
+Fixed in 422eb09: the freeze rule is now
+`html:active-view-transition:not([data-wheel-viewer]) .site-navigation`, so a
+morph never touches the bar (the root is held, so only the flying card passes
+under it); and the proxy lives in an always-mounted fixed `.morphLayer`
+outside `.canvas`, so a morph adds and removes nothing next to the canvas.
+
+Not re-checked live: the pane's page was fully throttled (0 animation frames
+per second) when the fix landed, so this round is verified against the
+measurement above, not by eye.
+
+## Flash to paper after scrolling, round 4 (2026-11-01, user eyeball)
+
+Reported: the first closes were perfect; after scrolling the rail, a tiny
+flash to white at the very end of the close.
+
+Why only when scrolled: the deck is a `position: sticky` box inside the 900vh
+track. At scroll 0 its layout and composited positions coincide; scrolled,
+they differ, and the frame in which Chrome tears down the root snapshot and
+re-presents the live sticky WebGL layer shows page background for one frame.
+Chromium also resolves `finished` after the frame that removes the overlay
+(blink-dev PSA, "View Transition finished promise timing change"), so any
+visible work in that callback lands a frame late.
+
+Fixed in 0fa50fc, structurally: during a morph the root is not captured
+(`html[data-wheel-viewer] { view-transition-name: none }`, CSS View
+Transitions Level 2; engines that still capture the root keep the held-root
+fallback rules), the nav is not captured either, and the viewer is no longer
+named - it animates live with its own frost keyframes and stays mounted while
+the card flies back. The only snapshot is the card. The close proxy fades
+itself out on its own element (`mc-wheel-card-landing`), so it is already
+transparent when the overlay lifts; nothing visible depends on `finished`.
+
+Not re-checked live: the pane's page sat under its loading veil at 0
+animation frames per second after the hot reload. The new rules are confirmed
+present in the page's stylesheets. The user's real-speed close is the check.
+
+## Viewer entrance after the capture redesign, rounds 5-6 (2026-11-01, user eyeball)
+
+Reported, in turn: the panel appeared with no transition; then the frosted
+area left of the panel popped in instantly.
+
+Panel (61a592e, 7f04483): sliding the panel moves the image, which is the
+card's landing spot, so the panel box stays still and its glass surface
+slides in and out on a `::before` sheet; the figure, caption and close button
+hold their place. No `isolation` on the panel: it would be a backdrop root and
+the sheet's blur would sample nothing.
+
+Frost (a592681): the frost was the image's ancestor, and an ancestor of a
+captured element has its opacity ramp ignored for the whole morph (the sheet,
+a sibling of the figure, animated fine inside the same element). The frost is
+now its own fixed sibling layer under the host, which paints and animates
+nothing itself; the caption, close button and (plain path only) the image
+fade themselves.
+
+Not re-checked live on my side (pane frozen); the user confirmed the panel
+sheet after 61a592e. The frost fade after a592681 is theirs to confirm.
+
+## Frost and caption popping in at landing, round 7 (2026-11-01, measured)
+
+Reported after a592681: the frost and the caption still appeared
+instantaneously, the moment the image arrived in the panel.
+
+This round was measured instead of reasoned: a headless Chrome driven over
+the DevTools protocol (`scripts/qa/morph-capture.mjs`) screencast the
+open and close at real speed, and per-frame brightness of the deck, nav and
+panel regions was computed with sharp (`scripts/qa/frame-stats.mjs`). Findings:
+
+- With the root UNCAPTURED (0fa50fc's `view-transition-name: none` on
+  `html[data-wheel-viewer]`), the live page's new fixed-layer content - the
+  frost, the caption, the close button, and even the nav bar's text - was not
+  painted until the transition ended, although their computed opacity ramped
+  normally. Deck brightness sat flat through the flight and jumped +23 in one
+  frame at the end: exactly the pop reported. Removing every backdrop-filter
+  changed nothing, so the filters were not the cause.
+- With the root CAPTURED, the live new root image renders the fades frame by
+  frame (deck 201 -> 211 -> 218 -> 223 -> 225 -> 227 over the flight), and a
+  close at scrollY 3000 fades out with no end-of-transition jump. The scrolled
+  flash to white seen in round 4 is explained by the close proxy (paper-backed
+  `.thumbCard`) painting opaque for the one frame between the overlay lifting
+  and `finished`, which the self-fading proxy from 0fa50fc already removes.
+- A captured nav rides its own group above the root image and pops under the
+  frost when the overlay lifts (nav band 215.8 -> 234.7 in one step); left
+  unnamed during a morph it fades under the frost with the rest.
+
+Fix: the root is captured again (rule removed, comment and guard test
+rewritten); `html[data-wheel-viewer] .site-navigation { view-transition-name:
+none }` stays. Re-recorded at scrollY 3000 and 0: open and close both fade
+gradually, nav included, with no jump at either end.
+
+# Visual QA - Working field, scroll print-in, completion sweep
+
+Date: 2026-11-01
+Status: **PASSED - LOCAL ONLY** (not deployed; checked through /dither-lab
+and headless Chrome, not through a paid render)
+
+## Scope
+
+Three additive effects on the existing dither / plotter / mono vocabulary:
+
+- **Working field** (603c4df): while a generator render is in flight, the
+  `.progress-track` fill and the `.status-pill.working` carry a seeded,
+  dithered Velaris field in teal-on-paper (`WorkingField`, palette pinned by
+  tests against the live `:root` tokens; white pill text holds 5.97:1).
+  Potato mode renders nothing (existing flat look); reduced motion freezes
+  one frame; the loop stops when the tab is hidden or the field is off
+  screen. Velaris gained `paused` / `frozen` / `maxDpr`; the wordmark menu's
+  hover gradient is unchanged (re-checked headless, generator page).
+- **Scroll print-in** (f4ac6e7, 2d13d3e): gallery photos below the fold
+  dissolve in on their own view timeline (`animation-timeline: view()`,
+  `entry 0%` to `entry 60%`, inside `@supports`); photos on screen at mount
+  keep the 620ms load dissolve (IntersectionObserver split, decided once per
+  photo, `usePrintInLater` / `partitionPrintIn`). Applied to the archive, the
+  review-board photo grid and built-board mosaic, and the generator reference
+  tray (a named `.mc-print-scope` row timeline; the pane scrolls only at
+  1280px and up). Plates moved from `overflow: hidden` to `clip` so the plate
+  is not the photo's scroller. 6px tile kept. Reduced motion and potato:
+  no animation, no mask.
+- **Completion sweep** (ba9548b, 5c5fe9b): after a render's reveal settles
+  (`DitherReveal` `onSettled`), one 22%-wide skewed band of light crosses
+  the output on `--sweep-dur` 900ms `--sweep-ease` ease-in-out, blended
+  `overlay`, once per result, cleared on the next render start so a cancel
+  or failure never replays it over the old image. Measured at 40%: +46
+  luminance on oak, +23 on pale stone. Off under reduced motion.
+
+## Checks
+
+| Check | Result |
+| --- | --- |
+| Working field pill + 45% track in /dither-lab (headless, 1440x900) | Passed; dithered teal fill clipped by the percentage span, label readable |
+| Field loop while scrolled off screen | Passed; 0 frames, resumes on return (implementer measurement) |
+| Wordmark menu hover gradient after the Velaris change | Passed; VENDORS row renders the dithered gradient (headless) |
+| Print-in split, synthetic page | Passed; on-screen photos dissolve on the clock, below-fold photos sit on view timelines until scrolled |
+| Sweep at ~40% of its pass | Passed; band visible across the stage |
+| Reduced motion / potato for all three | Passed (probed headless) |
+| Console errors on /generator and /dither-lab | 0 |
+
+## Remaining known deviations
+
+- Not seen in a real render: the generator's working state and sweep were
+  verified with the same classes in /dither-lab only.
+- Review boards and archive were not measured live (no local data).
+- The reference tray prints in only where the pane scrolls (1280px+).

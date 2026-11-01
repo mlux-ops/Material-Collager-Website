@@ -14,6 +14,15 @@
  * instance shows a genuinely different pattern — the original always
  * rendered the same field. The shader accepts exactly FOUR colors
  * (u_colors[4]) plus a background (u_bg).
+ *
+ * Playback extensions (the generator's WorkingField): `paused` stops the
+ * loop and resumes from the same moment, `frozen` holds one static frame
+ * (reduced motion), `maxDpr` caps the backing-store scale. Time is a clock
+ * that starts at the first frame's rAF timestamp and only advances while
+ * playing, so an instance that is never paused animates exactly as the
+ * original absolute-timestamp version did. The canvas is created inside the
+ * effect so each mount owns its own context and can release it on unmount
+ * (a remounted element would otherwise inherit a lost context).
  */
 
 import { useEffect, useRef } from "react";
@@ -164,6 +173,12 @@ export interface VelarisProps {
     /** Also pixelate the gradient field itself to the cell grid. */
     pixelate?: boolean;
   };
+  /** Stop the loop on the current frame; resuming continues from there. */
+  paused?: boolean;
+  /** Render one static frame and never loop (reduced motion). */
+  frozen?: boolean;
+  /** Upper bound on devicePixelRatio for the backing store. Default 2. */
+  maxDpr?: number;
   height?: string;
   className?: string;
   children?: React.ReactNode;
@@ -187,23 +202,44 @@ const Velaris = ({
   grain = 0.3,
   seed = 0,
   dither,
+  paused = false,
+  frozen = false,
+  maxDpr = 2,
   height = "100vh",
   className,
   children,
 }: VelarisProps) => {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // Playback flags live in refs so toggling them never rebuilds the GL
+  // context; the main effect hands the loop a wake() to call on resume.
+  const pausedRef = useRef(paused);
+  const frozenRef = useRef(frozen);
+  const wakeRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
     const container = containerRef.current;
-    if (!canvas || !container) return;
+    if (!container) return;
+
+    const canvas = document.createElement("canvas");
+    Object.assign(canvas.style, {
+      pointerEvents: "none",
+      position: "absolute",
+      inset: "0",
+      height: "100%",
+      width: "100%",
+    });
+    // insertBefore, not prepend(): @cloudflare/workers-types overloads
+    // prepend() with HTMLRewriter's signature and rejects a DOM node.
+    container.insertBefore(canvas, container.firstChild);
 
     // alpha: false — the rectangle is fully opaque, never blended with
     // whatever sits behind the canvas (owner: no transparency on the
     // gradient background).
     const gl = canvas.getContext("webgl", { alpha: false });
-    if (!gl) return;
+    if (!gl) {
+      canvas.remove();
+      return;
+    }
 
     const createShader = (type: number, src: string) => {
       const s = gl.createShader(type)!;
@@ -246,48 +282,92 @@ const Velaris = ({
       dpix: gl.getUniformLocation(program, "u_dpix"),
     };
 
+    // The shader declares exactly vec3 u_colors[4]; a shorter palette is
+    // padded by repeating its last color (an unset slot would read black).
+    const four = colors.slice(0, 4);
+    while (four.length < 4) four.push(four[four.length - 1] ?? bg);
+    const flatColors = new Float32Array(four.flatMap(hexToRgb));
+    const bgRgb = hexToRgb(bg);
+
     // The dither cell prop is in CSS px; the shader works in device px, so
     // the current backing-store scale converts it (tracked by resize).
-    let dpr = Math.min(window.devicePixelRatio, 2);
-    const resize = () => {
-      dpr = Math.min(window.devicePixelRatio, 2);
-      canvas.width = container.clientWidth * dpr;
-      canvas.height = container.clientHeight * dpr;
-      gl.viewport(0, 0, canvas.width, canvas.height);
-    };
+    let dpr = Math.min(window.devicePixelRatio, maxDpr);
+    let raf = 0;
+    let clock: number | null = null; // ms of playback so far
+    let last: number | null = null; // previous played frame's timestamp
+    let drawn = false;
 
-    const ro = new ResizeObserver(resize);
-    ro.observe(container);
-
-    let raf: number;
-    const render = (t: number) => {
+    const draw = (ms: number) => {
       gl.uniform2f(locs.res, canvas.width, canvas.height);
-      gl.uniform1f(locs.time, t * 0.001 * speed);
+      gl.uniform1f(locs.time, ms * 0.001 * speed);
       gl.uniform1f(locs.grain, grain);
       gl.uniform1f(locs.seed, seed);
       gl.uniform1f(locs.dcell, dither?.cell ? dither.cell * dpr : 0);
       gl.uniform1f(locs.dlevels, dither?.levels ?? 2);
       gl.uniform1f(locs.dbw, dither?.bw ? 1 : 0);
       gl.uniform1f(locs.dpix, dither?.pixelate ? 1 : 0);
-      gl.uniform3f(locs.bg, ...hexToRgb(bg));
-
-      // The shader declares exactly vec3 u_colors[4]; a shorter palette is
-      // padded by repeating its last color (an unset slot would read black).
-      const four = colors.slice(0, 4);
-      while (four.length < 4) four.push(four[four.length - 1] ?? bg);
-      const flat = new Float32Array(four.flatMap(hexToRgb));
-      gl.uniform3fv(locs.colors, flat);
-
+      gl.uniform3f(locs.bg, ...bgRgb);
+      gl.uniform3fv(locs.colors, flatColors);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-      raf = requestAnimationFrame(render);
+      drawn = true;
     };
 
-    raf = requestAnimationFrame(render);
+    const frame = (t: number) => {
+      raf = 0;
+      if (frozenRef.current) {
+        draw(0);
+        return;
+      }
+      if (clock === null) clock = t;
+      else if (last !== null) clock += t - last;
+      if (pausedRef.current) {
+        // Hold: stop scheduling. Paint once if nothing is on the canvas yet
+        // so a field mounted while paused is never a black rectangle.
+        last = null;
+        if (!drawn) draw(clock);
+        return;
+      }
+      last = t;
+      draw(clock);
+      raf = requestAnimationFrame(frame);
+    };
+
+    const wake = () => {
+      if (raf === 0) raf = requestAnimationFrame(frame);
+    };
+    wakeRef.current = wake;
+
+    const resize = () => {
+      dpr = Math.min(window.devicePixelRatio, maxDpr);
+      canvas.width = container.clientWidth * dpr;
+      canvas.height = container.clientHeight * dpr;
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      // Resizing clears the drawing buffer. A running loop repaints on its
+      // next frame; a held (frozen or paused) field would sit blank, so
+      // repaint it here.
+      if (raf === 0 && drawn) draw(frozenRef.current ? 0 : clock ?? 0);
+    };
+
+    const ro = new ResizeObserver(resize);
+    ro.observe(container);
+
+    wake();
     return () => {
       ro.disconnect();
-      cancelAnimationFrame(raf);
+      if (raf !== 0) cancelAnimationFrame(raf);
+      wakeRef.current = null;
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+      canvas.remove();
     };
-  }, [bg, colors, speed, grain, seed, dither]);
+  }, [bg, colors, speed, grain, seed, dither, maxDpr]);
+
+  // Mirror the playback flags for the long-lived loop, then nudge it: a
+  // resumed or unfrozen field needs a frame scheduled again.
+  useEffect(() => {
+    pausedRef.current = paused;
+    frozenRef.current = frozen;
+    wakeRef.current?.();
+  }, [paused, frozen]);
 
   return (
     <div
@@ -295,10 +375,6 @@ const Velaris = ({
       style={{ height, position: "relative", width: "100%", overflow: "hidden" }}
       className={className}
     >
-      <canvas
-        ref={canvasRef}
-        style={{ pointerEvents: "none", position: "absolute", inset: 0, height: "100%", width: "100%" }}
-      />
       {children != null && (
         <div style={{ position: "relative", zIndex: 10, height: "100%", width: "100%" }}>{children}</div>
       )}

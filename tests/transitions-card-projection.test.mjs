@@ -73,3 +73,47 @@ test("degenerate inputs return empty", () => {
   assert.deepEqual(projectCardRects(0, 0, W, H, false, []), []);
   assert.deepEqual(projectCardRects(16, 0, 0, 0, false, aspects), []);
 });
+
+test("projectCardRect at hover 0 is exactly the matching projectCardRects entry", async () => {
+  const { projectCardRect } = await import("../app/components/scene-wheel-v2/project-card-rects.ts");
+  for (const [w, h, mobile] of [[W, H, false], [390, 844, true]]) {
+    const field = projectCardRects(16, 0.37, w, h, mobile, aspects);
+    const single = [];
+    for (let index = 0; index < 16; index += 1) {
+      const card = projectCardRect({ index, count: 16, progress: 0.37, hover: 0, aspect: aspects[index] }, w, h, mobile);
+      if (card) single.push(card);
+    }
+    assert.equal(single.length, field.length);
+    single.forEach((card, i) => {
+      assert.equal(card.transform, field[i].transform);
+      assert.equal(card.width, field[i].width);
+      assert.equal(card.height, field[i].height);
+      assert.deepEqual(card, field[i]);
+    });
+  }
+});
+
+test("hover displaces the card the way SceneCard does: right and slightly larger", async () => {
+  const { projectCardRect } = await import("../app/components/scene-wheel-v2/project-card-rects.ts");
+  const rest = projectCardRect({ index: 1, count: 16, progress: 0, hover: 0, aspect: 4 / 3 }, W, H, false);
+  const hovered = projectCardRect({ index: 1, count: 16, progress: 0, hover: 1, aspect: 4 / 3 }, W, H, false);
+  assert.ok(rest && hovered);
+  assert.ok(hovered.corners.tl.x > rest.corners.tl.x, "hovered card should sit right of its rest pose");
+  // +0.2 toward the camera and a 1.2% grow: larger, but only modestly.
+  assert.ok(hovered.width > rest.width && hovered.height > rest.height);
+  assert.ok(hovered.width < rest.width * 1.25, `grew too much: ${rest.width} -> ${hovered.width}`);
+  assert.notEqual(hovered.transform, rest.transform);
+});
+
+test("projectCardRect returns null for an invisible slot", async () => {
+  const { projectCardRect } = await import("../app/components/scene-wheel-v2/project-card-rects.ts");
+  const nulls = [];
+  for (let index = 0; index < 16; index += 1) {
+    if (projectCardRect({ index, count: 16, progress: 0, hover: 0, aspect: 4 / 3 }, W, H, false) === null) {
+      nulls.push(index);
+    }
+  }
+  assert.ok(nulls.length > 0, "a 16-card rail should have at least one hidden slot");
+  assert.equal(projectCardRect({ index: 0, count: 0, progress: 0, hover: 0, aspect: 4 / 3 }, W, H, false), null);
+  assert.equal(projectCardRect({ index: 0, count: 16, progress: 0, hover: 0, aspect: 4 / 3 }, 0, 0, false), null);
+});

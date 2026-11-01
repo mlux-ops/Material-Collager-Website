@@ -18,7 +18,7 @@
  * agree by construction (docs/autoboard-shared-core.md).
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RouteReady } from "../RouteReady";
 import { SiteNavigation } from "../SiteNavigation";
 import { SlotPhotos, type ProjectPhoto } from "./SlotPhotos";
@@ -27,6 +27,8 @@ import { BoardDrawer } from "./BoardDrawer";
 import { AddRowDialog } from "./AddRowDialog";
 import { RowTools, type Pin } from "./RowTools";
 import styles from "./review-boards.module.css";
+import { usePrintInLater } from "@/app/hooks/usePrintInLater";
+import { printInClass } from "@/app/lib/print-in";
 
 type Facet = { value: string; rowCount: number };
 type SheetFacets = { unitTypes: Facet[]; rooms: (Facet & { unitTypes: string[] })[] };
@@ -1002,6 +1004,13 @@ function BuiltBoards({
   onRemoveBoard: (boardId: string) => Promise<void>;
 }) {
   const [openBoardId, setOpenBoardId] = useState<string | null>(null);
+  // Mosaic photos on screen when the grid first appears dissolve on load;
+  // the rest print in with scroll (effects.css, mc-print-later).
+  const gridRef = useRef<HTMLDivElement>(null);
+  const printLater = usePrintInLater(
+    gridRef,
+    (built?.boards ?? []).map((board) => `${board.id}:${board.items.length}`).join("|"),
+  );
 
   if (!built || !built.boards.length) {
     return (
@@ -1016,7 +1025,7 @@ function BuiltBoards({
 
   return (
     <>
-      <div className={styles.builtBoardGrid}>
+      <div ref={gridRef} className={styles.builtBoardGrid}>
         {built.boards.map((board) => {
           const images = board.items.map((item) => item.images[0]).filter(Boolean).slice(0, 6);
           return (
@@ -1030,7 +1039,14 @@ function BuiltBoards({
                 {images.length ? (
                   images.map((src, index) => (
                     // eslint-disable-next-line @next/next/no-img-element -- see SlotPhotos
-                    <img key={`${board.id}-${index}`} src={src} alt="" loading="lazy" />
+                    <img
+                      key={`${board.id}-${index}`}
+                      className={`mc-print-in ${printInClass(printLater, `${board.id}-${index}`)}`}
+                      data-print-id={`${board.id}-${index}`}
+                      src={src}
+                      alt=""
+                      loading="lazy"
+                    />
                   ))
                 ) : (
                   <span className={styles.previewEmpty}>No photos yet</span>

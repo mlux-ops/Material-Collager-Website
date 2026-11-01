@@ -15,6 +15,8 @@
 
 import { useCallback, useRef, useState } from "react";
 import styles from "./review-boards.module.css";
+import { usePrintInLater } from "@/app/hooks/usePrintInLater";
+import { printInClass } from "@/app/lib/print-in";
 
 export type ProjectPhoto = {
   id: string;
@@ -146,9 +148,13 @@ export function SlotPhotos({ projectId, rowId, itemName, reference, photos, onCh
 
   const live = photos.filter((photo) => photo.status !== "rejected");
   const rejected = photos.filter((photo) => photo.status === "rejected");
+  // Thumbnails on screen when they first appear dissolve on load; the rest
+  // print in with scroll (effects.css, mc-print-later).
+  const photosRef = useRef<HTMLDivElement>(null);
+  const printLater = usePrintInLater(photosRef, live.map((photo) => photo.id).join("|"));
 
   return (
-    <div className={styles.photos}>
+    <div ref={photosRef} className={styles.photos}>
       {live.length ? (
         <ul className={styles.photoGrid}>
           {live.map((photo) => (
@@ -164,7 +170,13 @@ export function SlotPhotos({ projectId, rowId, itemName, reference, photos, onCh
                 {/* eslint-disable-next-line @next/next/no-img-element -- R2-backed
                     reference photography of unknown size; the optimizer adds a
                     round trip per thumbnail for no benefit at this scale. */}
-                <img className={styles.photoImage} src={photo.imageUrl} alt="" loading="lazy" />
+                <img
+                  className={`${styles.photoImage} mc-print-in ${printInClass(printLater, photo.id)}`}
+                  data-print-id={photo.id}
+                  src={photo.imageUrl}
+                  alt=""
+                  loading="lazy"
+                />
                 <span className={styles.photoMeta}>
                   {photo.width}×{photo.height}
                   {photo.lowResolution ? <span className={styles.photoWarn}> low-res</span> : null}

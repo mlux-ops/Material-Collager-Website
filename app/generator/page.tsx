@@ -5,6 +5,9 @@ import Link from "next/link";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { DropdownSelect } from "../components/DropdownSelect";
 import { DitherReveal } from "../components/DitherReveal";
+import { WorkingField } from "../components/WorkingField";
+import { usePrintInLater } from "../hooks/usePrintInLater";
+import { printInClass } from "@/app/lib/print-in";
 import { SiteNavigation } from "../components/SiteNavigation";
 import { RouteReady } from "../components/RouteReady";
 import {
@@ -527,6 +530,29 @@ export default function Home() {
   // The render API returns one finished image with no progress stream, so the
   // dither holds while working and then resolves once, driven from here.
   const [revealProgress, setRevealProgress] = useState(1);
+  // Presentation only: which result's reveal has finished, for the one-shot
+  // completion sweep (.result-stage.is-lifted). No render path touches this.
+  // - Cleared on the rising edge of isWorking (adjusting state during render,
+  //   not in an effect), so a working cycle that ends WITHOUT a new result --
+  //   cancel, failure, economy queue -- can't re-add the class over the old
+  //   image when isWorking drops.
+  // - sweptResultRef makes it once per result: that old image re-reveals and
+  //   settles again after such a cycle, and must not sweep a second time.
+  const [liftedFor, setLiftedFor] = useState<string | null>(null);
+  const [liftWasWorking, setLiftWasWorking] = useState(isWorking);
+  if (isWorking !== liftWasWorking) {
+    setLiftWasWorking(isWorking);
+    if (isWorking) setLiftedFor(null);
+  }
+  const sweptResultRef = useRef<string | null>(null);
+  // Presentation only: reference thumbnails on screen when they first appear
+  // dissolve on load; the rest print in as their strip scrolls into view
+  // (effects.css, mc-print-later / .mc-print-scope).
+  const itemsListRef = useRef<HTMLDivElement | null>(null);
+  const referencePrintLater = usePrintInLater(
+    itemsListRef,
+    items.map((item) => item.references.map((reference) => reference.uiKey).join(",")).join("|"),
+  );
 
   const [workingStage, setWorkingStage] = useState("");
   const [overallProgress, setOverallProgress] = useState(0);
@@ -1794,7 +1820,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="items-list">
+          <div ref={itemsListRef} className="items-list">
             {items.map((item, index) => (
               <article className="material-item" key={item.uiKey}>
                 <div className="item-row-head">
@@ -1817,13 +1843,18 @@ export default function Home() {
                 </div>
 
                 {item.references.length > 0 && (
-                  <div className="reference-strip">
+                  <div className="reference-strip mc-print-scope">
                     {item.references.map((reference, referenceIndex) => {
                       const progress = referenceProgress[reference.uiKey];
                       return (
                         <figure className="reference-tile" key={reference.uiKey}>
                           <div className="reference-image-wrap">
-                            <img src={reference.preview} alt={`${item.id || item.role} reference ${referenceIndex + 1}`} />
+                            <img
+                              className={`mc-print-in ${printInClass(referencePrintLater, reference.uiKey)}`}
+                              data-print-id={reference.uiKey}
+                              src={reference.preview}
+                              alt={`${item.id || item.role} reference ${referenceIndex + 1}`}
+                            />
                             {referenceIndex === 0 && <span className="primary-badge">Primary</span>}
                             {isWorking && progress !== undefined && progress < 1 && (
                               <span className="reference-progress" style={{ height: `${Math.round(progress * 100)}%` }} />
@@ -1984,12 +2015,13 @@ export default function Home() {
                 <h2>Collage and review</h2>
               </div>
               <span className={isWorking ? "status-pill working" : result ? "status-pill ready" : "status-pill"}>
+                {isWorking && <WorkingField variant="pill" />}
                 {isWorking ? "Working" : result ? "Complete" : "Ready"}
               </span>
             </div>
 
             <div
-              className={`result-stage ${result ? "has-result" : ""}`}
+              className={`result-stage ${result ? "has-result" : ""}${result && !isWorking && liftedFor === result.dataUrl ? " is-lifted" : ""}`}
               style={result ? { aspectRatio: `${previewWidth} / ${previewHeight}` } : undefined}
             >
               {isWorking ? (
@@ -2007,6 +2039,11 @@ export default function Home() {
                   src={result.dataUrl}
                   alt="Generated material collage"
                   progress={revealProgress}
+                  onSettled={() => {
+                    if (sweptResultRef.current === result.dataUrl) return;
+                    sweptResultRef.current = result.dataUrl;
+                    setLiftedFor(result.dataUrl);
+                  }}
                 />
               ) : (
                 <img src="/sample-collage.png" alt="Sample material collage" />
@@ -2019,7 +2056,11 @@ export default function Home() {
                   <span>{workingStage}</span>
                   <strong>{overallProgress > 0 && overallProgress < 100 ? `${overallProgress}%` : ""}</strong>
                 </div>
-                <div className="progress-track"><span style={{ width: `${overallProgress}%` }} /></div>
+                <div className="progress-track">
+                  <span style={{ width: `${overallProgress}%` }}>
+                    <WorkingField variant="track" />
+                  </span>
+                </div>
               </div>
             )}
 

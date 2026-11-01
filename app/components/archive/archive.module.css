@@ -56,7 +56,11 @@
 .plate {
   position: relative;
   width: 100%;
+  /* clip, not hidden: hidden makes the plate a scroll container, and the
+     photo's scroll-driven print-in (effects.css) would bind to it instead
+     of the page. Same painting; hidden stays as the old-engine fallback. */
   overflow: hidden;
+  overflow: clip;
   border: 1px solid rgb(0 0 0 / 12%);
   background: #fff;
 }

@@ -28,12 +28,25 @@ export type SceneWheelHoverState = {
   item: SceneLabCollageItem;
 } | null;
 
+/** Where the clicked card was drawn at the moment of the click — enough for
+ * projectCardRect to put a DOM proxy exactly over it (the viewer's morph). */
+export type SceneCardOrigin = {
+  index: number;
+  count: number;
+  /** The rendered (spring-smoothed) progress the card was drawn at. */
+  progress: number;
+  /** The card's eased hover value at click time (normally ~1). */
+  hover: number;
+  /** The clamped image aspect the card's geometry uses. */
+  aspect: number;
+};
+
 type Props = {
   count: number;
   index: number;
   item: SceneLabCollageItem;
   onHover: (state: SceneWheelHoverState) => void;
-  onOpen: (item: SceneLabCollageItem) => void;
+  onOpen: (item: SceneLabCollageItem, origin: SceneCardOrigin) => void;
   progress: MutableRefObject<number>;
   texture: Texture;
 };
@@ -162,7 +175,18 @@ export const SceneCard = memo(function SceneCard({ count, index, item, onHover, 
         renderOrder={2}
         onClick={(event) => {
           event.stopPropagation();
-          onOpen(item);
+          // Snapshot the pose the card is drawn at BEFORE relaxing it: the
+          // open morph starts from this hovered quad, and the card eases back
+          // to its rest pose beneath the viewer, where the close morph lands.
+          const origin: SceneCardOrigin = {
+            index,
+            count,
+            progress: progress.current,
+            hover: hoverValue.current,
+            aspect,
+          };
+          hoverTarget.current = 0;
+          onOpen(item, origin);
         }}
         onPointerEnter={(event) => {
           event.stopPropagation();

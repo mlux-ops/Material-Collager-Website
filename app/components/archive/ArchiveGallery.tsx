@@ -28,6 +28,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RouteReady } from "../RouteReady";
+import { usePrintInLater } from "@/app/hooks/usePrintInLater";
 import { SiteNavigation } from "../SiteNavigation";
 import { awaitTransitionSettled } from "@/app/lib/route-ready";
 import { motionReduced, potatoMode } from "@/app/lib/site-settings";
@@ -101,6 +102,11 @@ export function ArchiveGallery() {
     return buckets;
   }, [items, columnCount]);
 
+  // Plates on screen when they first appear keep the load-time dissolve;
+  // the rest print in with scroll (effects.css, mc-print-later).
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const printLater = usePrintInLater(gridRef, (items ?? []).map((item) => item.id).join("|"));
+
   return (
     <main className={styles.page}>
       <RouteReady path="/archive" />
@@ -114,14 +120,14 @@ export function ArchiveGallery() {
       ) : items && items.length === 0 ? (
         <p className={styles.notice}>Nothing in the library yet — generated collages land here.</p>
       ) : (
-        <div className={styles.grid} style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}>
+        <div ref={gridRef} className={styles.grid} style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}>
           {columns.map((column, index) => (
             <div className={styles.column} key={index}>
               {column.map((item, row) => (
                 // The first row of every column loads eagerly: those are
                 // on screen immediately, and waiting for the lazy scheduler
                 // there is a visible delay on arrival.
-                <ArchivePlate key={item.id} item={item} eager={row === 0} />
+                <ArchivePlate key={item.id} item={item} eager={row === 0} printLater={printLater.has(item.id)} />
               ))}
             </div>
           ))}
@@ -131,7 +137,7 @@ export function ArchiveGallery() {
   );
 }
 
-function ArchivePlate({ item, eager }: { item: ArchiveItem; eager?: boolean }) {
+function ArchivePlate({ item, eager, printLater }: { item: ArchiveItem; eager?: boolean; printLater?: boolean }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const [inView, setInView] = useState(false);
@@ -191,7 +197,7 @@ function ArchivePlate({ item, eager }: { item: ArchiveItem; eager?: boolean }) {
           ratio and nothing is ever cropped — the API's orientation guess
           can't be right for a workbench-saved render, and cropping the
           owner's collages to fit a guess is not acceptable. */}
-      <div ref={ref} className={styles.plate} style={loaded ? undefined : { aspectRatio: String(ratio) }}>
+      <div ref={ref} className={styles.plate} data-print-id={item.id} style={loaded ? undefined : { aspectRatio: String(ratio) }}>
         {/* An un-arrived photo says so. Before this, a plate whose image was
             still in flight (or lazily not yet requested) was an empty white
             frame — indistinguishable from a collage that had gone missing. */}
@@ -210,6 +216,7 @@ function ArchivePlate({ item, eager }: { item: ArchiveItem; eager?: boolean }) {
             revealed ? styles.imageIn : "",
             // Global class, not a module one — see archive.module.css.
             revealed && !plain ? "archive-image-dither" : "",
+            revealed && !plain && printLater ? "mc-print-later" : "",
           ].filter(Boolean).join(" ")}
           onLoad={(event) => {
             const image = event.currentTarget;

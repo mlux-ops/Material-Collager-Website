@@ -271,8 +271,14 @@ html[data-nav-direction="back"]::view-transition-new(root) {
    sample while a transition is running — it blurs the animating snapshots
    beneath the overlay, smearing the bar for the wipe's duration (worst over
    the workbench's dark toolbar). Freeze the frost during transitions:
-   opaque paper, no filter; the frost resumes the moment the overlay lifts. */
-html:active-view-transition .site-navigation {
+   opaque paper, no filter; the frost resumes the moment the overlay lifts.
+   Not during the Library viewer's card morph (html[data-wheel-viewer], set
+   before the transition starts and cleared when it settles): the root is
+   held there, so nothing moves under the bar but the flying card, which
+   should blur as it passes - and switching the filter back on over the
+   WebGL canvas the instant the morph ends re-surfaces the whole deck for a
+   frame, a visible flicker. */
+html:active-view-transition:not([data-wheel-viewer]) .site-navigation {
   backdrop-filter: none;
   background: var(--mono-off-white, #fafafa);
 }
@@ -323,6 +329,163 @@ html:active-view-transition .site-navigation {
   .site-navigation {
     view-transition-name: none;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   Library viewer: the card morph.
+   Clicking a wheel card morphs the card itself into the viewer's image, and
+   closing morphs the image back into its card - a shared-element view
+   transition, not a page wipe. The card side is a DOM proxy SceneWheelV2
+   lays exactly over the 3D card (project-card-rects.ts), present only while
+   that side is being captured, so each name is carried by one element at a
+   time. Only the card flies: the viewer's frost and panel animate LIVE with
+   their own module keyframes, and the page itself is never captured.
+   Paired with app/components/scene-wheel-v2/SceneWheelV2.tsx and
+   app/lib/wheel-viewer-morph.ts.
+   The names live here, not in the scene's CSS module, for the same reason
+   the archive's dissolve keyframes do: Modules rewrite identifiers.
+   Selected two ways, like the nav wipe: transition types where the engine
+   has them, and the html[data-wheel-viewer] attribute SceneWheelV2 mirrors
+   (set before the transition starts, cleared when it settles). Both sit
+   inside a forgiving :is() - in a plain selector list, an engine that cannot
+   parse :active-view-transition-type() drops the whole rule, fallback
+   included.
+--------------------------------------------------------------------------- */
+.mc-wheel-card,
+.mc-wheel-viewer-image {
+  view-transition-name: wheel-card;
+}
+
+/* The root IS captured during a morph - on purpose, and measured. An
+   uncaptured root (View Transitions Level 2) was tried to spare the sticky
+   WebGL deck a snapshot teardown; in Chrome it left the live page's new
+   fixed-layer content - the frost, the caption, the close button, even the
+   nav bar's text - unpainted until the transition ended, so they all popped
+   in at once as the card landed (headless screencast, 2026-11-01). With the
+   root captured, the live new root image renders the frost's fade and the
+   caption's fade frame by frame, and a scrolled close showed no end-of-
+   transition jump. The flash to white seen earlier was the close proxy
+   (paper-backed .thumbCard) painting opaque for the one frame between the
+   overlay lifting and `finished`; the proxy now fades itself out
+   (mc-wheel-card-landing) so that frame is transparent. Do not reinstate
+   `view-transition-name: none` on html[data-wheel-viewer]; a test guards it.
+   The NAV, though, stays out of the capture during a morph: named, it rides
+   its own group above the root image, crisp while the frost fades in under
+   it, and only drops under the live frost when the overlay lifts - a pop in
+   the bar at both ends. Unnamed, it is part of the root image and the frost
+   fades over it frame by frame (same screencast). */
+html[data-wheel-viewer] .site-navigation {
+  view-transition-name: none;
+}
+
+/* The page under the morph does not change, so both root snapshots hold for the morph's length
+   instead of wiping. `animation: none` would drop the outgoing one (see the
+   root rule above), and there is no wipe edge to draw a rule along. The
+   close runs on the shorter out duration, like the frost lifting. */
+html:is(:active-view-transition-type(wheel-viewer-open), [data-wheel-viewer="open"])::view-transition-old(root),
+html:is(:active-view-transition-type(wheel-viewer-open), [data-wheel-viewer="open"])::view-transition-new(root) {
+  animation: mc-hold var(--wheel-morph-dur, 460ms) linear both;
+  filter: none;
+}
+
+html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-old(root),
+html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-new(root) {
+  animation: mc-hold var(--wheel-morph-out-dur, 340ms) linear both;
+  filter: none;
+}
+
+html:is(:active-view-transition-type(wheel-viewer-open), [data-wheel-viewer="open"])::view-transition-group(root) {
+  animation-duration: var(--wheel-morph-dur, 460ms);
+}
+
+html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-group(root) {
+  animation-duration: var(--wheel-morph-out-dur, 340ms);
+}
+
+/* The card's flight: geometry from the projected card quad to the viewer's
+   image (and back), on the viewer's own slide timing. On open the old/new
+   image pair keeps the default crossfade, timed to match. */
+::view-transition-group(wheel-card),
+::view-transition-old(wheel-card),
+::view-transition-new(wheel-card) {
+  animation-duration: var(--wheel-morph-dur, 460ms);
+  animation-timing-function: var(--wheel-morph-ease, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+/* Closing: the flying card hands over to the real 3D card BEFORE the
+   flight ends. The group flies above the live page, so a card that stayed
+   opaque to the end would sit over the nearer cards in the deck, then lose
+   to them the moment the overlay lifts. The old (viewer) image departs
+   early; the new image is the live proxy, held at full strength here
+   because the proxy fades ITSELF out (mc-wheel-card-landing, below), and
+   the live canvas - correct occlusion included - shows through where the
+   card lands. */
+@keyframes mc-wheel-depart {
+  0% {
+    opacity: 1;
+  }
+  40% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-group(wheel-card) {
+  animation-duration: var(--wheel-morph-out-dur, 340ms);
+}
+
+html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-old(wheel-card) {
+  animation: mc-wheel-depart var(--wheel-morph-out-dur, 340ms) var(--wheel-morph-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
+}
+
+html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-new(wheel-card) {
+  animation: mc-hold var(--wheel-morph-out-dur, 340ms) linear both;
+}
+
+/* The close proxy's own fade. Chromium resolves `finished` AFTER the frame
+   that removes the overlay, so nothing visible may depend on that callback:
+   by the time the overlay lifts the proxy is already transparent, whatever
+   the promise's timing. SceneWheelV2 adds this class to the close proxy
+   only - the open proxy stays opaque and leaves in the update anyway. */
+@keyframes mc-wheel-proxy-landing {
+  0% {
+    opacity: 1;
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.mc-wheel-card-landing {
+  animation: mc-wheel-proxy-landing var(--wheel-morph-out-dur, 340ms) var(--wheel-morph-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
+}
+
+/* SceneWheelV2 never starts the morph under reduced motion (motionReduced());
+   this is belt and braces in case one is ever in flight when it flips. The
+   type-scoped snapshots carry the same prefix as their rules above, or those
+   (more specific) would keep their durations. */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(wheel-card),
+  ::view-transition-old(wheel-card),
+  ::view-transition-new(wheel-card),
+  html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-group(wheel-card),
+  html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-old(wheel-card),
+  html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-new(wheel-card),
+  .mc-wheel-card-landing {
+    animation-duration: 0s;
+  }
+}
+
+html[data-reduce-motion="1"]::view-transition-group(wheel-card),
+html[data-reduce-motion="1"]::view-transition-old(wheel-card),
+html[data-reduce-motion="1"]::view-transition-new(wheel-card),
+html[data-reduce-motion="1"] .mc-wheel-card-landing {
+  animation-duration: 0s;
 }
 
 /* ---------------------------------------------------------------------------
@@ -669,6 +832,56 @@ html[data-reduce-motion="1"] .nav-pill {
   animation: mc-bayer-dissolve 620ms steps(17, end) both;
 }
 
+/* Print-in split. Where view timelines exist, a photo that was OFF screen
+   when its gallery first showed it (usePrintInLater adds .mc-print-later;
+   the decision is app/lib/print-in.ts) has the same dissolve bound to
+   scroll instead of the clock: it prints over the first 60% of its entry
+   into its scroller, where it is actually seen. A photo that was ON screen
+   would already be past that range and never print, so it keeps the
+   time-based load dissolve (620ms, as the archive always had).
+   Without view() support nothing here applies: the archive keeps its
+   load-time dissolve above and the .mc-print-in surfaces (review boards,
+   the generator tray) get no animation, exactly as before this split.
+   The rules sit behind both reduced-motion sources and potato mode, so
+   those states never see a mask at all.
+
+   view() binds to the NEAREST scroll container, and overflow: hidden makes
+   one, so clipping ancestors use overflow: clip (archive .plate, the board
+   mosaic). Where a horizontal scroller sits between the photo and the page
+   (the generator's reference strip), the row declares a named timeline,
+   .mc-print-scope, and its photos follow that instead. A missed case
+   degrades to "no effect", never to an invisible photo: a subject that
+   fills a non-scrolling scroller reads as fully entered.
+
+   The `animation` shorthand resets animation-timeline, so the timeline and
+   range always come after it. 6px tile = 1.5px dots everywhere: the
+   smallest thumbnails here are 96-128px, 16+ tiles across, which reads as
+   the same dot as the archive rather than a finer one. */
+@supports (animation-timeline: view()) {
+  .mc-print-scope {
+    view-timeline: --mc-print-row block;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    html:not([data-reduce-motion="1"]):not([data-potato="1"]) .mc-print-in {
+      mask-size: 6px 6px;
+      mask-repeat: repeat;
+      animation: mc-bayer-dissolve 620ms steps(17, end) both;
+    }
+
+    html:not([data-reduce-motion="1"]):not([data-potato="1"]) .archive-image-dither.mc-print-later,
+    html:not([data-reduce-motion="1"]):not([data-potato="1"]) .mc-print-in.mc-print-later {
+      animation: mc-bayer-dissolve linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 60%;
+    }
+
+    html:not([data-reduce-motion="1"]):not([data-potato="1"]) .mc-print-scope .mc-print-in.mc-print-later {
+      animation-timeline: --mc-print-row;
+    }
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .archive-image-dither {
     animation: none;
@@ -679,4 +892,125 @@ html[data-reduce-motion="1"] .nav-pill {
 html[data-reduce-motion="1"] .archive-image-dither {
   animation: none;
   mask-image: none;
+}
+
+/* ---------------------------------------------------------------------
+ * Working field (app/components/WorkingField.tsx): a slow dithered teal
+ * Velaris field marks a render in flight. Teal here is state, not chrome.
+ * The field is opaque WebGL; the CSS background under it is the ground
+ * before the first frame and if WebGL is unavailable. Under potato mode
+ * the component renders nothing and these :has() rules fall away, leaving
+ * the existing flat fill and pill exactly as they were.
+ * ------------------------------------------------------------------- */
+.working-field {
+  display: block;
+  pointer-events: none;
+  position: absolute;
+}
+
+/* Track: the determinate span keeps its width: n% and clips the field.
+   The field itself is sized to the WHOLE track (100cqw), never the span,
+   so progress ticks never resize the canvas (a resize clears it and
+   re-derives the noise from the new aspect). It is also far taller than
+   the 5px bar -- 4:1, centred -- because the shader's vignette is
+   aspect-scaled and would fade a 64:1 field to its background. */
+.progress-track:has(.working-field) {
+  container-type: inline-size;
+}
+
+.progress-track span:has(> .working-field) {
+  background: var(--accent);
+  overflow: hidden;
+  position: relative;
+}
+
+.working-field-track {
+  background: var(--accent);
+  height: 25cqw;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 100cqw;
+}
+
+/* Pill: the label stays a bare text node; isolation puts the field
+   (z-index -1) behind it without touching the markup's text. */
+.status-pill.working:has(> .working-field),
+.generator-shell .status-pill.working:has(> .working-field) {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+  color: #ffffff;
+  isolation: isolate;
+  overflow: hidden;
+  position: relative;
+}
+
+.working-field-pill {
+  background: color-mix(in srgb, var(--accent-dark) 50%, #000000);
+  inset: 0;
+  z-index: -1;
+}
+
+/* ---------------------------------------------------------------------
+ * Completion sweep: once a finished render's dither reveal settles (the
+ * page adds .is-lifted via DitherReveal's onSettled), one soft near-white
+ * band crosses the image on a 20deg diagonal -- a sheet catching light as
+ * it lifts off the plotter. One pass over --sweep-dur on --sweep-ease
+ * (motion-tokens.css), never repeated; the class drops on the next render
+ * start so the next result can play it again.
+ *
+ * The band is its own box: 22% of the stage wide, skewed 20deg, with soft
+ * edges in its gradient. Overlay blending lifts dark wood and light stone
+ * alike, where a plain white wash vanished on the pale materials. Its
+ * travel, in its own widths, is -250% to 580%: the stage is ~455% of the
+ * band, and the extra clears the skewed corners even on a portrait (2:3)
+ * board, so the band enters and leaves fully off the image and the
+ * symmetric ease spends its time on the crossing.
+ *
+ * ::before, positioned with z-index auto, paints above the static image
+ * but BEFORE any positioned child of the stage, so controls placed in the
+ * stage always sit over it. Overlay only, fill-mode none: the image's own
+ * pixels are never touched and the band rests offscreen when idle.
+ * ------------------------------------------------------------------- */
+@keyframes mc-sheet-lift {
+  from {
+    transform: translateX(-250%) skewX(-20deg);
+  }
+
+  to {
+    transform: translateX(580%) skewX(-20deg);
+  }
+}
+
+.result-stage.has-result.is-lifted::before {
+  background: linear-gradient(
+    90deg,
+    rgb(255 255 255 / 0) 0%,
+    rgb(255 255 255 / 0.22) 25%,
+    rgb(255 255 255 / 0.55) 50%,
+    rgb(255 255 255 / 0.22) 75%,
+    rgb(255 255 255 / 0) 100%
+  );
+  bottom: 0;
+  content: "";
+  left: 0;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  transform: translateX(-250%) skewX(-20deg);
+  width: 22%;
+  animation: mc-sheet-lift var(--sweep-dur, 900ms) var(--sweep-ease, ease-in-out) 1 none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .result-stage.has-result.is-lifted::before {
+    animation: none;
+    content: none;
+  }
+}
+
+html[data-reduce-motion="1"] .result-stage.has-result.is-lifted::before {
+  animation: none;
+  content: none;
 }

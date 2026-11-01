@@ -2,15 +2,97 @@
 
 /**
  * /dither-lab — isolated verification harness for DitherReveal, CountUp,
- * the grain overlay, and the hover-focus card grid. Not linked from any
- * nav; visited directly for screenshotting.
+ * the grain overlay, the hover-focus card grid, and the generator's working
+ * field and completion sweep. Not linked from any nav; visited directly for
+ * screenshotting.
  */
 
 import { useEffect, useRef, useState } from "react";
 import DitherReveal from "../components/DitherReveal";
 import CountUp from "../components/CountUp";
+import WorkingField from "../components/WorkingField";
 
 const IMG = "/sample-collage.png";
+
+const LAB_BUTTON = {
+  border: "1px solid var(--ink, #000000)",
+  borderRadius: 0,
+  padding: "8px 12px",
+  cursor: "pointer",
+} as const;
+
+function labButton(active: boolean) {
+  return {
+    ...LAB_BUTTON,
+    background: active ? "var(--ink, #000000)" : "var(--background, #eceeea)",
+    color: active ? "var(--background, #eceeea)" : "var(--ink, #000000)",
+  };
+}
+
+/**
+ * The generator's working state, isolated: a 320px progress track and the
+ * status pill, wrapped in .generator-shell so the live overrides apply
+ * (its root sizing is neutralised inline). Toggle simulates a render
+ * starting and finishing -- the fields mount and unmount with it.
+ */
+function WorkingFieldDemo() {
+  const [working, setWorking] = useState(true);
+  const [percent, setPercent] = useState(45);
+
+  return (
+    <section style={{ marginBottom: "48px" }}>
+      <p style={{ fontSize: "8.4px", color: "var(--muted, #68706b)", marginBottom: "8px", textTransform: "uppercase" }}>
+        working field — progress fill and status pill while a render is in flight
+      </p>
+      <div
+        style={{
+          display: "flex",
+          gap: "10px",
+          flexWrap: "wrap",
+          marginBottom: "16px",
+          fontSize: "10.5px",
+          fontWeight: 500,
+          letterSpacing: "0.1575px",
+          textTransform: "uppercase",
+        }}
+      >
+        <button data-testid="working-toggle" onClick={() => setWorking((w) => !w)} style={labButton(working)}>
+          {working ? "working: on" : "working: off"}
+        </button>
+        {[2, 45, 80, 100].map((p) => (
+          <button key={p} data-testid={`working-progress-${p}`} onClick={() => setPercent(p)} style={labButton(percent === p)}>
+            {p}%
+          </button>
+        ))}
+      </div>
+      <div
+        className="generator-shell"
+        data-testid="working-field-demo"
+        style={{ height: "auto", minHeight: 0, overflow: "visible", padding: 0, background: "transparent" }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "16px", marginBottom: "14px" }}>
+          <span className={working ? "status-pill working" : "status-pill ready"}>
+            {working && <WorkingField variant="pill" />}
+            {working ? "Working" : "Complete"}
+          </span>
+        </div>
+        <div className="work-progress" style={{ width: "320px" }}>
+          <div>
+            <span>{working ? "Rendering collage" : "Done"}</span>
+            <strong>{working && percent < 100 ? `${percent}%` : ""}</strong>
+          </div>
+          {working && (
+            <div className="progress-track">
+              <span style={{ width: `${percent}%` }}>
+                <WorkingField variant="track" />
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function FpsMeter({ running }: { running: boolean }) {
   const [fps, setFps] = useState<number | null>(null);
@@ -39,6 +121,48 @@ function FpsMeter({ running }: { running: boolean }) {
   }, [running]);
 
   return <span data-testid="fps-readout">{fps === null ? "measuring…" : `${fps} fps`}</span>;
+}
+
+/**
+ * The generator's completion sweep on the sample collage. The stage carries
+ * the same classes as a settled render (.result-stage.has-result.is-lifted);
+ * replay remounts it so the one-shot animation starts again.
+ */
+function CompletionSweepDemo() {
+  const [run, setRun] = useState(0);
+
+  return (
+    <section style={{ marginBottom: "48px" }}>
+      <p style={{ fontSize: "8.4px", color: "var(--muted, #68706b)", marginBottom: "8px", textTransform: "uppercase" }}>
+        completion sweep — one diagonal pass after a finished render settles
+      </p>
+      <div
+        style={{
+          display: "flex",
+          gap: "10px",
+          marginBottom: "16px",
+          fontSize: "10.5px",
+          fontWeight: 500,
+          letterSpacing: "0.1575px",
+          textTransform: "uppercase",
+        }}
+      >
+        <button data-testid="sweep-replay" onClick={() => setRun((n) => n + 1)} style={labButton(false)}>
+          replay sweep
+        </button>
+      </div>
+      <div
+        className="generator-shell"
+        data-testid="completion-sweep-demo"
+        style={{ height: "auto", minHeight: 0, overflow: "visible", padding: 0, background: "transparent", maxWidth: "480px" }}
+      >
+        <div key={run} className="result-stage has-result is-lifted" style={{ aspectRatio: "1536 / 1024" }}>
+          {/* eslint-disable-next-line @next/next/no-img-element -- mirrors the settled DitherReveal <img> */}
+          <img className="dither-stage" src={IMG} alt="Sample material collage" />
+        </div>
+      </div>
+    </section>
+  );
 }
 
 export default function DitherLabPage() {
@@ -216,6 +340,10 @@ export default function DitherLabPage() {
           />
         </div>
       </section>
+
+      <WorkingFieldDemo />
+
+      <CompletionSweepDemo />
 
       {/* Count-up demo */}
       <section style={{ marginBottom: "48px" }}>

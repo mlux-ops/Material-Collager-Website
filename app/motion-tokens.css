@@ -71,4 +71,18 @@
      signal ready late (route-ready budget is 900ms). */
   --wipe-dur: 700ms;
   --wipe-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Completion sweep (effects.css .result-stage.is-lifted) — semantic
+     tunables. Deliberately NOT the wipe's front-loaded ease: the band has
+     to be seen crossing the image, so it travels symmetrically and slower
+     than the page wipe. */
+  --sweep-dur: 900ms;
+  --sweep-ease: ease-in-out;
+
+  /* Library viewer card morph (effects.css) — semantic tunables. Matched to
+     the viewer's own motion in scene-wheel-v2.module.css: the card flies on
+     the panel's 460ms slide-in, and the frost lifts on its 340ms frost-out. */
+  --wheel-morph-dur: 460ms;
+  --wheel-morph-out-dur: 340ms;
+  --wheel-morph-ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
