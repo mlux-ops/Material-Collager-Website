@@ -491,7 +491,10 @@
 }
 
 /* First-load curtain: a plain white screen whose only content is the percent
-   counter, covering the rail (and its chrome) until the cards can fade in. */
+   counter, covering the rail (and its chrome) until the cards are ready.
+   Its exit is the global .mc-veil-dissolve in app/effects.css (a Bayer
+   dissolve run in reverse), added by SceneWheelV2 at 100%; it has to be a
+   global class because CSS Modules would rename the shared keyframes. */
 .loadingVeil {
   position: fixed;
   inset: 0;
@@ -509,8 +512,10 @@
   letter-spacing: 0.1em;
 }
 
-/* Everything the visitor sees starts transparent and is faded in together
-   once the counter reaches 100%, cards first and chrome just behind them. */
+/* Everything the visitor sees starts transparent under the veil. At 100%
+   the cards snap opaque beneath it — the veil's dissolve is their reveal,
+   so there is nothing for them to fade from — and the chrome fades in just
+   behind them, landing as the last cells of the veil go. */
 .page .canvas,
 .page .chrome,
 .page .caption,
@@ -520,7 +525,6 @@
 
 .pageRevealed .canvas {
   opacity: 1;
-  transition: opacity var(--duration-very-slow) ease-out;
 }
 
 .pageRevealed .chrome,
@@ -531,7 +535,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pageRevealed .canvas,
   .pageRevealed .chrome,
   .pageRevealed .caption,
   .pageRevealed .scrollCue {

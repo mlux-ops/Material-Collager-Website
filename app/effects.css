@@ -832,6 +832,25 @@ html[data-reduce-motion="1"] .nav-pill {
   animation: mc-bayer-dissolve 620ms steps(17, end) both;
 }
 
+/* Library first-arrival veil exit. SceneWheelV2 adds this class to its
+   .loadingVeil once the counter reads 100%: the same 4x4 tile swaps run in
+   reverse, so the white sheet and its counter leave cell by cell and the
+   cards beneath print through, instead of the opacity fade the veil used to
+   get. Global for the same reason as .archive-image-dither: inside the
+   scene module, CSS Modules would rewrite `mc-bayer-dissolve` to a scoped
+   name nothing defines. The component unmounts the veil on animationend
+   (with a timer behind it), so a browser that ignores mask-image still
+   loses the veil on the same clock. Reduced motion never adds the class
+   (motionReduced() exits the veil at once); the rules below back that up so
+   neither reduced-motion source ever sees a mask. 6px tile = the archive's
+   1.5px dot. */
+.mc-veil-dissolve {
+  mask-size: 6px 6px;
+  mask-repeat: repeat;
+  animation: mc-bayer-dissolve var(--veil-dissolve-dur, 620ms) steps(17, end) reverse both;
+  pointer-events: none;
+}
+
 /* Print-in split. Where view timelines exist, a photo that was OFF screen
    when its gallery first showed it (usePrintInLater adds .mc-print-later;
    the decision is app/lib/print-in.ts) has the same dissolve bound to
@@ -883,13 +902,15 @@ html[data-reduce-motion="1"] .nav-pill {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .archive-image-dither {
+  .archive-image-dither,
+  .mc-veil-dissolve {
     animation: none;
     mask-image: none;
   }
 }
 
-html[data-reduce-motion="1"] .archive-image-dither {
+html[data-reduce-motion="1"] .archive-image-dither,
+html[data-reduce-motion="1"] .mc-veil-dissolve {
   animation: none;
   mask-image: none;
 }

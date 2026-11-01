@@ -85,4 +85,10 @@
   --wheel-morph-dur: 460ms;
   --wheel-morph-out-dur: 340ms;
   --wheel-morph-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Library first-arrival veil exit (effects.css .mc-veil-dissolve) —
+     semantic tunable. The archive's load dissolve prints in over 620ms;
+     the veil leaves on the same clock so the sheet goes at the speed every
+     other dither on the site arrives. */
+  --veil-dissolve-dur: 620ms;
 }

@@ -52,6 +52,11 @@ const PRELOAD_TIMEOUT_MS = 12000;
 // this request settles, so without one a hung /api/library held the loading
 // veil at 0% forever.
 const LIBRARY_FETCH_TIMEOUT_MS = 8000;
+// The veil leaves through effects.css's .mc-veil-dissolve and unmounts on
+// its animationend. This timer stands behind that event: an animation that
+// never ends (a browser that ignores the class, a lost event) must not
+// leave a white sheet over the cards. Well past --veil-dissolve-dur (620ms).
+const VEIL_EXIT_TIMEOUT_MS = 1200;
 // The open morph's old snapshot must show the card image, not an empty box:
 // a freshly mounted <img> is not guaranteed decoded by the next frame. The
 // card's bytes are already cached (it is a live texture), so this is short —
@@ -89,6 +94,10 @@ export default function SceneWheelV2() {
   // choppy interruption mid-wipe — start revealed instead. Module scope, so
   // it resets on a full page load but survives route changes.
   const [revealed, setRevealed] = useState(() => hasRevealedThisSession);
+  // The veil stays mounted past `revealed` while it dissolves (the global
+  // .mc-veil-dissolve class in effects.css); this flips when that animation
+  // ends, or at once under reduced motion. Re-entries start with it gone.
+  const [veilGone, setVeilGone] = useState(() => hasRevealedThisSession);
   // On SPA re-entry the wipe animates over this page LIVE, so mounting the
   // three.js canvas (GL context + texture upload for every card at once)
   // mid-wipe steals main-thread frames and the wipe stutters. Hold the scene
@@ -501,7 +510,7 @@ export default function SceneWheelV2() {
   }, [catalog, libraryState]);
 
   // Ease the shown number toward the measured target, then hand over to the
-  // fade once it actually reads 100%. The text is written imperatively so a
+  // veil's dissolve once it actually reads 100%. The text is written imperatively so a
   // 60fps counter never re-renders the canvas tree underneath the veil.
   useEffect(() => {
     if (revealed) return;
@@ -519,6 +528,10 @@ export default function SceneWheelV2() {
         if (countRef.current) countRef.current.textContent = "100%";
         hasRevealedThisSession = true;
         setRevealed(true);
+        // Reduced motion gets the plain instant exit; the CSS also strips
+        // the dissolve under both reduced-motion sources, so nothing here
+        // depends on an animationend that would never fire.
+        if (motionReduced()) setVeilGone(true);
         return;
       }
       if (countRef.current) countRef.current.textContent = `${Math.round(shown)}%`;
@@ -529,15 +542,23 @@ export default function SceneWheelV2() {
     return () => window.cancelAnimationFrame(frame);
   }, [revealed]);
 
-  // The rail is 900vh tall; keep it unscrollable until the cards are visible.
+  // Belt behind the veil's animationend: see VEIL_EXIT_TIMEOUT_MS.
   useEffect(() => {
-    if (revealed) return;
+    if (!revealed || veilGone) return;
+    const timer = window.setTimeout(() => setVeilGone(true), VEIL_EXIT_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [revealed, veilGone]);
+
+  // The rail is 900vh tall; keep it unscrollable until the veil has left and
+  // the cards are actually visible.
+  useEffect(() => {
+    if (veilGone) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [revealed]);
+  }, [veilGone]);
 
   return (
     <main className={`${styles.page} ${revealed ? styles.pageRevealed : ""}`} aria-busy={!revealed}>
@@ -547,8 +568,17 @@ export default function SceneWheelV2() {
           mounts through R3F's rAF-scheduled loop, which is suspended during a
           ViewTransition update callback (research.md T016). */}
       <RouteReady path="/" />
-      {revealed ? null : (
-        <div className={styles.loadingVeil} role="status" aria-label="Loading library">
+      {veilGone ? null : (
+        <div
+          className={`${styles.loadingVeil} ${revealed ? "mc-veil-dissolve" : ""}`}
+          role="status"
+          aria-label="Loading library"
+          onAnimationEnd={(event) => {
+            // Only the veil's own dissolve; nothing inside it animates, but
+            // a bubbled child event must never unmount the sheet early.
+            if (event.target === event.currentTarget) setVeilGone(true);
+          }}
+        >
           <p ref={countRef} className={styles.loadingCount}>0%</p>
         </div>
       )}
