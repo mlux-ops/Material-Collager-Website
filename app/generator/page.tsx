@@ -6,6 +6,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { DropdownSelect } from "../components/DropdownSelect";
 import { DitherReveal } from "../components/DitherReveal";
 import { WorkingField } from "../components/WorkingField";
+import { ReferenceLoupe } from "../components/ReferenceLoupe";
 import { usePrintInLater } from "../hooks/usePrintInLater";
 import { printInClass } from "@/app/lib/print-in";
 import { SiteNavigation } from "../components/SiteNavigation";
@@ -2003,6 +2004,7 @@ export default function Home() {
               </article>
             ))}
           </div>
+          <ReferenceLoupe scopeRef={itemsListRef} />
 
           </div>
         </section>

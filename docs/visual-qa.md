@@ -852,3 +852,42 @@ Three additive effects on the existing dither / plotter / mono vocabulary:
   verified with the same classes in /dither-lab only.
 - Review boards and archive were not measured live (no local data).
 - The reference tray prints in only where the pane scrolls (1280px+).
+
+# Visual QA - Reference tray hover loupe
+
+Date: 2026-11-01
+Status: **PASSED - LOCAL ONLY** (not deployed; headless Chrome over CDP
+against `npm run dev`, real `Input.dispatchMouseEvent` mouse events, one
+wood-grain PNG uploaded into the first tray item)
+
+## Scope
+
+`ReferenceLoupe` (app/components/ReferenceLoupe.tsx): one 148px square box
+for the whole tray, portalled to `<body>`, moved by `translate3d` from a
+single requestAnimationFrame per pointer move (no React render per move).
+It magnifies 2.5x from the thumbnail's own loaded object URL as a CSS
+background. Edge: 1px `rgba(0,0,0,.2)`; glass: a top-lit inset highlight.
+Pure maths in `app/lib/loupe.ts` (16 tests in `tests/loupe.test.mjs`).
+No tray behaviour changed: upload, replace, remove and make-primary are untouched.
+
+## Checks
+
+| Check | Result |
+| --- | --- |
+| Hover thumbnail centre (1440x900) | Passed; box 18px right/below the pointer, crop centred on the pointer |
+| Fade-in on `--duration-quick` / `--ease-smooth-out` | Passed; opacity 0.95 at 60ms, 1 at 460ms |
+| Crop follows the pointer (move within the image) | Passed; background position and box move together |
+| Pointer over pillarbox padding (portrait image) | Passed; hidden |
+| Pointer leaves the thumbnail | Passed; hidden (opacity 0, visibility hidden) |
+| Scroll while hovering | Passed; hidden |
+| Bottom edge (360x590 viewport, pointer 35px from bottom) | Passed; flipped above the pointer, inside the viewport |
+| Right-edge flip | Covered by unit tests only (the tray could not be pushed near the right edge at a usable width) |
+| Reduced motion (site setting) | Passed; mode `instant`, transition `none` |
+| Potato mode | Passed; no loupe element rendered |
+| Coarse pointer + touch emulation | Passed; no loupe element rendered |
+| Console errors on /generator | 0 in every pass |
+
+## Remaining known deviations
+
+- Not checked in the desktop app's browser pane or on a real touch device.
+- Only one thumbnail size (the 1440px layout) was looked at by eye.
