@@ -51,3 +51,15 @@ test("the nav frost freeze stands down during a wheel morph", async () => {
     "an unscoped nav freeze rule is still present",
   );
 });
+
+test("a morph captures neither the root nor the nav", async () => {
+  // A captured root (the sticky WebGL deck) flashed paper for a frame when
+  // torn down after scrolling; a captured nav lost its frost. Both stay live.
+  const { readFile } = await import("node:fs/promises");
+  const css = await readFile(new URL("../app/effects.css", import.meta.url), "utf8");
+  assert.match(css, /html\[data-wheel-viewer\]\s*\{\s*view-transition-name:\s*none;\s*\}/);
+  assert.match(
+    css,
+    /html\[data-wheel-viewer\]\s+\.site-navigation\s*\{\s*view-transition-name:\s*none;\s*\}/,
+  );
+});

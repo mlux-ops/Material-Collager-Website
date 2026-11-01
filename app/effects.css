@@ -338,45 +338,42 @@ html:active-view-transition:not([data-wheel-viewer]) .site-navigation {
    transition, not a page wipe. The card side is a DOM proxy SceneWheelV2
    lays exactly over the 3D card (project-card-rects.ts), present only while
    that side is being captured, so each name is carried by one element at a
-   time. Paired with app/components/scene-wheel-v2/SceneWheelV2.tsx and
+   time. Only the card flies: the viewer's frost and panel animate LIVE with
+   their own module keyframes, and the page itself is never captured.
+   Paired with app/components/scene-wheel-v2/SceneWheelV2.tsx and
    app/lib/wheel-viewer-morph.ts.
    The names live here, not in the scene's CSS module, for the same reason
    the archive's dissolve keyframes do: Modules rewrite identifiers.
    Selected two ways, like the nav wipe: transition types where the engine
    has them, and the html[data-wheel-viewer] attribute SceneWheelV2 mirrors
-   for engines with the API but not types. Both sit inside a forgiving :is()
-   - in a plain selector list, an engine that cannot parse
-   :active-view-transition-type() drops the whole rule, fallback included.
+   (set before the transition starts, cleared when it settles). Both sit
+   inside a forgiving :is() - in a plain selector list, an engine that cannot
+   parse :active-view-transition-type() drops the whole rule, fallback
+   included.
 --------------------------------------------------------------------------- */
-@keyframes mc-fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes mc-fade-out {
-  from {
-    opacity: 1;
-  }
-  to {
-    opacity: 0;
-  }
-}
-
 .mc-wheel-card,
 .mc-wheel-viewer-image {
   view-transition-name: wheel-card;
 }
 
-.mc-wheel-viewer {
-  view-transition-name: wheel-viewer;
+/* Nothing but the card is captured during a morph. The deck lives in a
+   sticky box inside the 900vh rail: once scrolled, its layout and
+   composited positions differ, and the frame where the engine tears down a
+   root snapshot and re-presents the live sticky/WebGL layer showed page
+   paper for a frame - a flash to white at the end of the close. An
+   uncaptured root (View Transitions Level 2) leaves the live page showing
+   through, so there is no snapshot to tear down. The nav is kept out too: a
+   captured bar loses its frost and re-surfaces the deck when it lands. */
+html[data-wheel-viewer] {
+  view-transition-name: none;
 }
 
-/* The page under the morph does not change - only the named card, image and
-   viewer leave it - so both root snapshots hold for the morph's length
+html[data-wheel-viewer] .site-navigation {
+  view-transition-name: none;
+}
+
+/* Fallback for engines that still capture the root: the page under the
+   morph does not change, so both root snapshots hold for the morph's length
    instead of wiping. `animation: none` would drop the outgoing one (see the
    root rule above), and there is no wipe edge to draw a rule along. The
    close runs on the shorter out duration, like the frost lifting. */
@@ -401,8 +398,8 @@ html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="cl
 }
 
 /* The card's flight: geometry from the projected card quad to the viewer's
-   image (and back), on the viewer's own slide timing. The old/new image
-   pair keeps the default crossfade, timed to match. */
+   image (and back), on the viewer's own slide timing. On open the old/new
+   image pair keeps the default crossfade, timed to match. */
 ::view-transition-group(wheel-card),
 ::view-transition-old(wheel-card),
 ::view-transition-new(wheel-card) {
@@ -410,53 +407,20 @@ html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="cl
   animation-timing-function: var(--wheel-morph-ease, cubic-bezier(0.22, 1, 0.36, 1));
 }
 
-/* Groups stack in capture order, and a name that exists only in the new
-   state is appended on top - so on open the viewer (new-only) would paint
-   over the card flying into it, and the image would pop through at the end.
-   Keep the card above. */
-::view-transition-group(wheel-card) {
-  z-index: 1;
-}
-
-/* The frosted viewer around the image fades in on open and out on close -
-   the image itself is lifted out of it into wheel-card above. */
-html:is(:active-view-transition-type(wheel-viewer-open), [data-wheel-viewer="open"])::view-transition-new(wheel-viewer) {
-  animation: mc-fade-in var(--wheel-morph-dur, 460ms) var(--wheel-morph-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
-}
-
-html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-old(wheel-viewer) {
-  animation: mc-fade-out var(--wheel-morph-out-dur, 340ms) var(--wheel-morph-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
-}
-
 /* Closing: the flying card hands over to the real 3D card BEFORE the
-   flight ends. The group still flies above the whole page snapshot, so a
-   card that stayed opaque to the end would sit over the nearer cards in the
-   deck, then lose to them the moment the overlay lifts. Instead the image
-   fades out over the final stretch and the live canvas - correct occlusion
-   included - shows through where the card lands. The old (viewer) image
-   departs early and the new (card proxy) image carries the middle of the
-   flight. The open keeps the default crossfade. */
+   flight ends. The group flies above the live page, so a card that stayed
+   opaque to the end would sit over the nearer cards in the deck, then lose
+   to them the moment the overlay lifts. The old (viewer) image departs
+   early; the new image is the live proxy, held at full strength here
+   because the proxy fades ITSELF out (mc-wheel-card-landing, below), and
+   the live canvas - correct occlusion included - shows through where the
+   card lands. */
 @keyframes mc-wheel-depart {
   0% {
     opacity: 1;
   }
   40% {
     opacity: 0;
-  }
-  100% {
-    opacity: 0;
-  }
-}
-
-@keyframes mc-wheel-land {
-  0% {
-    opacity: 0;
-  }
-  30% {
-    opacity: 1;
-  }
-  60% {
-    opacity: 1;
   }
   100% {
     opacity: 0;
@@ -472,7 +436,28 @@ html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="cl
 }
 
 html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-new(wheel-card) {
-  animation: mc-wheel-land var(--wheel-morph-out-dur, 340ms) var(--wheel-morph-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
+  animation: mc-hold var(--wheel-morph-out-dur, 340ms) linear both;
+}
+
+/* The close proxy's own fade. Chromium resolves `finished` AFTER the frame
+   that removes the overlay, so nothing visible may depend on that callback:
+   by the time the overlay lifts the proxy is already transparent, whatever
+   the promise's timing. SceneWheelV2 adds this class to the close proxy
+   only - the open proxy stays opaque and leaves in the update anyway. */
+@keyframes mc-wheel-proxy-landing {
+  0% {
+    opacity: 1;
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.mc-wheel-card-landing {
+  animation: mc-wheel-proxy-landing var(--wheel-morph-out-dur, 340ms) var(--wheel-morph-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
 }
 
 /* SceneWheelV2 never starts the morph under reduced motion (motionReduced());
@@ -486,9 +471,7 @@ html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="cl
   html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-group(wheel-card),
   html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-old(wheel-card),
   html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-new(wheel-card),
-  ::view-transition-group(wheel-viewer),
-  html:is(:active-view-transition-type(wheel-viewer-open, wheel-viewer-close), [data-wheel-viewer])::view-transition-old(wheel-viewer),
-  html:is(:active-view-transition-type(wheel-viewer-open, wheel-viewer-close), [data-wheel-viewer])::view-transition-new(wheel-viewer) {
+  .mc-wheel-card-landing {
     animation-duration: 0s;
   }
 }
@@ -496,9 +479,7 @@ html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="cl
 html[data-reduce-motion="1"]::view-transition-group(wheel-card),
 html[data-reduce-motion="1"]::view-transition-old(wheel-card),
 html[data-reduce-motion="1"]::view-transition-new(wheel-card),
-html[data-reduce-motion="1"]::view-transition-group(wheel-viewer),
-html[data-reduce-motion="1"]::view-transition-old(wheel-viewer),
-html[data-reduce-motion="1"]::view-transition-new(wheel-viewer) {
+html[data-reduce-motion="1"] .mc-wheel-card-landing {
   animation-duration: 0s;
 }
 

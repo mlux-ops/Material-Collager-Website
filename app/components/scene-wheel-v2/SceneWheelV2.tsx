@@ -71,7 +71,11 @@ function decodeImage(url: string): Promise<void> {
 /** A card placement plus where the sticky box (the projection's frame) sat
  * in the viewport, so the proxy can live in the fixed morph layer. */
 type ProjectedCard = { placed: PlacedCard; offsetX: number; offsetY: number };
-type ViewerMorph = ProjectedCard & { item: SceneLabCollageItem };
+type ViewerMorph = ProjectedCard & {
+  item: SceneLabCollageItem;
+  /** Close direction: the proxy fades itself out (mc-wheel-card-landing). */
+  landing?: boolean;
+};
 
 export default function SceneWheelV2() {
   const trackRef = useRef<HTMLElement>(null);
@@ -149,6 +153,10 @@ export default function SceneWheelV2() {
   // html[data-wheel-viewer]: that attribute is removed when the transition
   // finishes, and a rule gated on it would restart the panel's slide then.
   const [viewerMorphed, setViewerMorphed] = useState(false);
+  // During a close morph the viewer stays mounted while its frost lifts,
+  // but its image has handed the shared name to the card proxy and must
+  // not show (the card is flying out of it).
+  const [viewerImageHidden, setViewerImageHidden] = useState(false);
   const selectedItemRef = useRef<SceneLabCollageItem | null>(null);
   useEffect(() => {
     selectedItemRef.current = selectedItem;
@@ -199,11 +207,12 @@ export default function SceneWheelV2() {
       morphInFlight.current = false;
       if (root.dataset.wheelViewer === direction) delete root.dataset.wheelViewer;
       // The close morph leaves its proxy over the card it landed on (the 3D
-      // card underneath is at the same rest pose). finished resolves after
-      // the transition's last frame, and the state update below lands a
-      // frame or two later; meanwhile the live proxy, stacked over the whole
-      // canvas by z-index, would paint over the nearer cards in the deck.
-      // Hide it synchronously first. Runs on rejection (skipped) as well.
+      // card underneath is at the same rest pose). Chromium resolves
+      // finished AFTER the frame that removes the overlay, and the state
+      // update below lands later still, so nothing visible may depend on
+      // this callback: the proxy has already faded itself out
+      // (mc-wheel-card-landing). Hiding it here, synchronously, and then
+      // dropping it are belt and braces. Runs on rejection (skipped) too.
       if (direction === "close") {
         if (proxyRef.current) proxyRef.current.style.visibility = "hidden";
         setMorph(null);
@@ -214,10 +223,20 @@ export default function SceneWheelV2() {
 
   // Two-phase close so the panel can slide back out and the frost can lift
   // before the viewer unmounts. That is the path without the View
-  // Transitions API (or when the card cannot be placed); with it, the image
-  // morphs back into its card instead; reduced motion closes immediately.
+  // Transitions API (or when the card cannot be placed). With it, the image
+  // morphs back into its card while the viewer stays mounted for the same
+  // 350ms and its frost lifts live; reduced motion closes immediately.
   const [viewerClosing, setViewerClosing] = useState(false);
   const closeTimer = useRef<number | null>(null);
+  const unmountViewerLater = useCallback(() => {
+    closeTimer.current = window.setTimeout(() => {
+      closeTimer.current = null;
+      setViewerClosing(false);
+      setSelectedItem(null);
+      setViewerMorphed(false);
+      setViewerImageHidden(false);
+    }, 350);
+  }, []);
   const requestCloseViewer = useCallback(() => {
     if (closeTimer.current !== null) return; // already leaving
     if (morphInFlight.current) return; // a morph is still landing
@@ -242,20 +261,19 @@ export default function SceneWheelV2() {
       && projected
     ) {
       runMorph("close", () => {
-        setSelectedItem(null);
-        setViewerMorphed(false);
-        setMorph({ item, ...projected });
+        // One commit: the viewer starts leaving (frost-out; a morphed
+        // panel holds still), its image hands the shared name to the proxy
+        // and hides, and the proxy mounts on the card's rest pose.
+        setViewerClosing(true);
+        setViewerImageHidden(true);
+        setMorph({ item, ...projected, landing: true });
+        unmountViewerLater();
       });
       return;
     }
     setViewerClosing(true);
-    closeTimer.current = window.setTimeout(() => {
-      closeTimer.current = null;
-      setViewerClosing(false);
-      setSelectedItem(null);
-      setViewerMorphed(false);
-    }, 350);
-  }, [projectOrigin, runMorph, targetProgress]);
+    unmountViewerLater();
+  }, [projectOrigin, runMorph, targetProgress, unmountViewerLater]);
   useEffect(() => () => {
     if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
   }, []);
@@ -624,7 +642,7 @@ export default function SceneWheelV2() {
         {morph ? (
           <div
             ref={proxyRef}
-            className={`${styles.thumbCard} mc-wheel-card`}
+            className={`${styles.thumbCard} mc-wheel-card${morph.landing ? " mc-wheel-card-landing" : ""}`}
             style={{
               // .thumbCard pins 0/0 inside the sticky box; here the box's
               // viewport offset stands in for it.
@@ -654,7 +672,6 @@ export default function SceneWheelV2() {
         <div
           className={[
             styles.viewerBackdrop,
-            "mc-wheel-viewer",
             viewerMorphed ? styles.viewerStatic : "",
             viewerClosing ? styles.viewerLeaving : "",
           ].filter(Boolean).join(" ")}
@@ -680,7 +697,12 @@ export default function SceneWheelV2() {
             </button>
             <figure className={styles.viewerFigure}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img className="mc-wheel-viewer-image" src={selectedItem.url} alt={selectedItem.title} />
+              <img
+                className={viewerImageHidden ? undefined : "mc-wheel-viewer-image"}
+                src={selectedItem.url}
+                alt={selectedItem.title}
+                style={viewerImageHidden ? { visibility: "hidden" } : undefined}
+              />
               <figcaption id="scene-wheel-viewer-title">{selectedItem.title}</figcaption>
             </figure>
           </section>
