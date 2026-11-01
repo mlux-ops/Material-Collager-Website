@@ -372,18 +372,26 @@ html:active-view-transition .site-navigation {
 /* The page under the morph does not change - only the named card, image and
    viewer leave it - so both root snapshots hold for the morph's length
    instead of wiping. `animation: none` would drop the outgoing one (see the
-   root rule above), and there is no wipe edge to draw a rule along. */
+   root rule above), and there is no wipe edge to draw a rule along. The
+   close runs on the shorter out duration, like the frost lifting. */
 html:is(:active-view-transition-type(wheel-viewer-open), [data-wheel-viewer="open"])::view-transition-old(root),
-html:is(:active-view-transition-type(wheel-viewer-open), [data-wheel-viewer="open"])::view-transition-new(root),
-html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-old(root),
-html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-new(root) {
+html:is(:active-view-transition-type(wheel-viewer-open), [data-wheel-viewer="open"])::view-transition-new(root) {
   animation: mc-hold var(--wheel-morph-dur, 460ms) linear both;
   filter: none;
 }
 
-html:is(:active-view-transition-type(wheel-viewer-open), [data-wheel-viewer="open"])::view-transition-group(root),
-html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-group(root) {
+html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-old(root),
+html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-new(root) {
+  animation: mc-hold var(--wheel-morph-out-dur, 340ms) linear both;
+  filter: none;
+}
+
+html:is(:active-view-transition-type(wheel-viewer-open), [data-wheel-viewer="open"])::view-transition-group(root) {
   animation-duration: var(--wheel-morph-dur, 460ms);
+}
+
+html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-group(root) {
+  animation-duration: var(--wheel-morph-out-dur, 340ms);
 }
 
 /* The card's flight: geometry from the projected card quad to the viewer's
@@ -414,14 +422,64 @@ html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="cl
   animation: mc-fade-out var(--wheel-morph-out-dur, 340ms) var(--wheel-morph-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
 }
 
+/* Closing: the flying card hands over to the real 3D card BEFORE the
+   flight ends. The group still flies above the whole page snapshot, so a
+   card that stayed opaque to the end would sit over the nearer cards in the
+   deck, then lose to them the moment the overlay lifts. Instead the image
+   fades out over the final stretch and the live canvas - correct occlusion
+   included - shows through where the card lands. The old (viewer) image
+   departs early and the new (card proxy) image carries the middle of the
+   flight. The open keeps the default crossfade. */
+@keyframes mc-wheel-depart {
+  0% {
+    opacity: 1;
+  }
+  40% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes mc-wheel-land {
+  0% {
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-group(wheel-card) {
+  animation-duration: var(--wheel-morph-out-dur, 340ms);
+}
+
+html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-old(wheel-card) {
+  animation: mc-wheel-depart var(--wheel-morph-out-dur, 340ms) var(--wheel-morph-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
+}
+
+html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-new(wheel-card) {
+  animation: mc-wheel-land var(--wheel-morph-out-dur, 340ms) var(--wheel-morph-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
+}
+
 /* SceneWheelV2 never starts the morph under reduced motion (motionReduced());
    this is belt and braces in case one is ever in flight when it flips. The
-   wheel-viewer snapshots carry the same type prefix as their fade rules
-   above, or those (more specific) would keep their durations. */
+   type-scoped snapshots carry the same prefix as their rules above, or those
+   (more specific) would keep their durations. */
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(wheel-card),
   ::view-transition-old(wheel-card),
   ::view-transition-new(wheel-card),
+  html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-group(wheel-card),
+  html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-old(wheel-card),
+  html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-new(wheel-card),
   ::view-transition-group(wheel-viewer),
   html:is(:active-view-transition-type(wheel-viewer-open, wheel-viewer-close), [data-wheel-viewer])::view-transition-old(wheel-viewer),
   html:is(:active-view-transition-type(wheel-viewer-open, wheel-viewer-close), [data-wheel-viewer])::view-transition-new(wheel-viewer) {

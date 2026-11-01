@@ -159,6 +159,7 @@ export default function SceneWheelV2() {
   // so it and the viewer image never carry the shared name at the same time.
   // Names and timing live in app/effects.css ("Library viewer: card morph").
   const [morph, setMorph] = useState<ViewerMorph | null>(null);
+  const proxyRef = useRef<HTMLDivElement>(null);
   // A morph in flight owns the viewer: further open/close requests are
   // ignored until its transition settles.
   const morphInFlight = useRef(false);
@@ -191,9 +192,16 @@ export default function SceneWheelV2() {
     const settle = () => {
       morphInFlight.current = false;
       if (root.dataset.wheelViewer === direction) delete root.dataset.wheelViewer;
-      // The close morph leaves its proxy over the card it landed on; the 3D
-      // card underneath is at the same rest pose, so dropping it is seamless.
-      if (direction === "close") setMorph(null);
+      // The close morph leaves its proxy over the card it landed on (the 3D
+      // card underneath is at the same rest pose). finished resolves after
+      // the transition's last frame, and the state update below lands a
+      // frame or two later; meanwhile the live proxy, stacked over the whole
+      // canvas by z-index, would paint over the nearer cards in the deck.
+      // Hide it synchronously first. Runs on rejection (skipped) as well.
+      if (direction === "close") {
+        if (proxyRef.current) proxyRef.current.style.visibility = "hidden";
+        setMorph(null);
+      }
     };
     vt.finished.then(settle, settle);
   }, []);
@@ -576,6 +584,7 @@ export default function SceneWheelV2() {
             ) : null}
             {morph ? (
               <div
+                ref={proxyRef}
                 className={`${styles.thumbCard} mc-wheel-card`}
                 aria-hidden="true"
                 style={{
