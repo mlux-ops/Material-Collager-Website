@@ -36,3 +36,18 @@ test("transition types match the names effects.css selects on", async () => {
     assert.ok(css.includes(`:active-view-transition-type(${type})`), `effects.css has no rule for ${type}`);
   }
 });
+
+test("the nav frost freeze stands down during a wheel morph", async () => {
+  // Re-enabling the bar's backdrop-filter over the WebGL canvas as a morph
+  // ends re-surfaced the whole deck for a frame; the freeze is for the wipe.
+  const { readFile } = await import("node:fs/promises");
+  const css = await readFile(new URL("../app/effects.css", import.meta.url), "utf8");
+  assert.ok(
+    css.includes("html:active-view-transition:not([data-wheel-viewer]) .site-navigation"),
+    "nav freeze rule must exclude html[data-wheel-viewer]",
+  );
+  assert.ok(
+    !/html:active-view-transition\s+\.site-navigation/.test(css),
+    "an unscoped nav freeze rule is still present",
+  );
+});

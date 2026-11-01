@@ -64,6 +64,18 @@
   }
 }
 
+/* Holds the viewer's card-morph proxy (SceneWheelV2), outside .canvas on
+   purpose: mounting and dropping the proxy next to the WebGL canvas, at the
+   very instant the view transition ends, churned the canvas container's
+   layers for a frame. Fixed over the viewport, above the rail's content and
+   below the viewer (z 50) and the nav (z 100); never takes input. */
+.morphLayer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
 /* .chrome no longer owns its own floating-card layout: the header markup is
    now the shared <SiteNavigation> component, which already renders the
    fixed, full-width `.site-navigation` bar from app/globals.css (the same

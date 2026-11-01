@@ -68,7 +68,10 @@ function decodeImage(url: string): Promise<void> {
   ]);
 }
 
-type ViewerMorph = { item: SceneLabCollageItem; placed: PlacedCard };
+/** A card placement plus where the sticky box (the projection's frame) sat
+ * in the viewport, so the proxy can live in the fixed morph layer. */
+type ProjectedCard = { placed: PlacedCard; offsetX: number; offsetY: number };
+type ViewerMorph = ProjectedCard & { item: SceneLabCollageItem };
 
 export default function SceneWheelV2() {
   const trackRef = useRef<HTMLElement>(null);
@@ -167,13 +170,16 @@ export default function SceneWheelV2() {
   const openOriginRef = useRef<SceneCardOrigin | null>(null);
 
   // Same box and framing query as the thumb row's compute(), so the proxy
-  // shares the placeholders' (and the canvas's) coordinate frame.
-  const projectOrigin = useCallback((origin: SceneCardOrigin): PlacedCard | null => {
+  // shares the placeholders' (and the canvas's) coordinate frame. The box's
+  // viewport offset comes along: the proxy sits in the fixed morph layer,
+  // not inside the sticky box the projection is relative to.
+  const projectOrigin = useCallback((origin: SceneCardOrigin): ProjectedCard | null => {
     const box = stickyRef.current?.getBoundingClientRect();
     const w = box?.width ?? window.innerWidth;
     const h = box?.height ?? window.innerHeight;
     const mobile = window.matchMedia(MOBILE_FRAMING_QUERY).matches;
-    return projectCardRect(origin, w, h, mobile);
+    const placed = projectCardRect(origin, w, h, mobile);
+    return placed ? { placed, offsetX: box?.left ?? 0, offsetY: box?.top ?? 0 } : null;
   }, []);
 
   // Runs one morph. The update callback flushes synchronously so the new
@@ -227,18 +233,18 @@ export default function SceneWheelV2() {
     // Land on the card's REST pose (SceneCard relaxed its hover on open) at
     // the progress it is drawn at now: scrolling is locked while the viewer
     // is open, so the canvas spring has settled on the current target.
-    const placed = hasAPI && item && origin
+    const projected = hasAPI && item && origin
       ? projectOrigin({ ...origin, progress: targetProgress.current, hover: 0 })
       : null;
     if (
-      shouldMorphViewer({ hasViewTransitionAPI: hasAPI, prefersReducedMotion: reduced, hasPlacement: placed !== null })
+      shouldMorphViewer({ hasViewTransitionAPI: hasAPI, prefersReducedMotion: reduced, hasPlacement: projected !== null })
       && item
-      && placed
+      && projected
     ) {
       runMorph("close", () => {
         setSelectedItem(null);
         setViewerMorphed(false);
-        setMorph({ item, placed });
+        setMorph({ item, ...projected });
       });
       return;
     }
@@ -284,10 +290,10 @@ export default function SceneWheelV2() {
     const reduced = motionReduced();
     // The open starts from the card exactly as drawn — hovered, at the
     // spring's rendered progress.
-    const placed = hasAPI && !reduced ? projectOrigin(origin) : null;
+    const projected = hasAPI && !reduced ? projectOrigin(origin) : null;
     if (
-      !shouldMorphViewer({ hasViewTransitionAPI: hasAPI, prefersReducedMotion: reduced, hasPlacement: placed !== null })
-      || !placed
+      !shouldMorphViewer({ hasViewTransitionAPI: hasAPI, prefersReducedMotion: reduced, hasPlacement: projected !== null })
+      || !projected
     ) {
       setSelectedItem(item);
       setViewerMorphed(false);
@@ -297,7 +303,7 @@ export default function SceneWheelV2() {
     void decodeImage(item.url).then(() => {
       // The proxy must be in the DOM for the old snapshot; the update then
       // swaps it for the viewer in one commit.
-      flushSync(() => setMorph({ item, placed }));
+      flushSync(() => setMorph({ item, ...projected }));
       runMorph("open", () => {
         setSelectedItem(item);
         setViewerMorphed(true);
@@ -582,30 +588,6 @@ export default function SceneWheelV2() {
                 })}
               </div>
             ) : null}
-            {morph ? (
-              <div
-                ref={proxyRef}
-                className={`${styles.thumbCard} mc-wheel-card`}
-                aria-hidden="true"
-                style={{
-                  width: `${morph.placed.width}px`,
-                  height: `${morph.placed.height}px`,
-                  opacity: morph.placed.opacity,
-                  zIndex: morph.placed.z,
-                  transform: morph.placed.transform,
-                  // Live during the close morph's settle; must not eat the
-                  // canvas's clicks or fire its pointer-leave.
-                  pointerEvents: "none",
-                }}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={morph.item.url}
-                  alt=""
-                  style={{ width: "100%", height: "100%", objectFit: "fill", display: "block" }}
-                />
-              </div>
-            ) : null}
           </div>
 
           <SiteNavigation active="library" className={styles.chrome} />
@@ -634,6 +616,39 @@ export default function SceneWheelV2() {
           </ol>
         </div>
       </section>
+
+      {/* The card-morph proxy's layer: always mounted, so a morph adds and
+          removes only the proxy here — never anything inside .canvas, whose
+          layers sit next to the WebGL canvas (see .morphLayer). */}
+      <div className={styles.morphLayer} aria-hidden="true">
+        {morph ? (
+          <div
+            ref={proxyRef}
+            className={`${styles.thumbCard} mc-wheel-card`}
+            style={{
+              // .thumbCard pins 0/0 inside the sticky box; here the box's
+              // viewport offset stands in for it.
+              left: `${morph.offsetX}px`,
+              top: `${morph.offsetY}px`,
+              width: `${morph.placed.width}px`,
+              height: `${morph.placed.height}px`,
+              opacity: morph.placed.opacity,
+              zIndex: morph.placed.z,
+              transform: morph.placed.transform,
+              // Live during the close morph's settle; must not eat the
+              // canvas's clicks or fire its pointer-leave.
+              pointerEvents: "none",
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={morph.item.url}
+              alt=""
+              style={{ width: "100%", height: "100%", objectFit: "fill", display: "block" }}
+            />
+          </div>
+        ) : null}
+      </div>
 
       {selectedItem ? (
         <div
