@@ -528,6 +528,21 @@ export default function Home() {
   // The render API returns one finished image with no progress stream, so the
   // dither holds while working and then resolves once, driven from here.
   const [revealProgress, setRevealProgress] = useState(1);
+  // Presentation only: which result's reveal has finished, for the one-shot
+  // completion sweep (.result-stage.is-lifted). No render path touches this.
+  // - Cleared on the rising edge of isWorking (adjusting state during render,
+  //   not in an effect), so a working cycle that ends WITHOUT a new result --
+  //   cancel, failure, economy queue -- can't re-add the class over the old
+  //   image when isWorking drops.
+  // - sweptResultRef makes it once per result: that old image re-reveals and
+  //   settles again after such a cycle, and must not sweep a second time.
+  const [liftedFor, setLiftedFor] = useState<string | null>(null);
+  const [liftWasWorking, setLiftWasWorking] = useState(isWorking);
+  if (isWorking !== liftWasWorking) {
+    setLiftWasWorking(isWorking);
+    if (isWorking) setLiftedFor(null);
+  }
+  const sweptResultRef = useRef<string | null>(null);
 
   const [workingStage, setWorkingStage] = useState("");
   const [overallProgress, setOverallProgress] = useState(0);
@@ -1991,7 +2006,7 @@ export default function Home() {
             </div>
 
             <div
-              className={`result-stage ${result ? "has-result" : ""}`}
+              className={`result-stage ${result ? "has-result" : ""}${result && !isWorking && liftedFor === result.dataUrl ? " is-lifted" : ""}`}
               style={result ? { aspectRatio: `${previewWidth} / ${previewHeight}` } : undefined}
             >
               {isWorking ? (
@@ -2009,6 +2024,11 @@ export default function Home() {
                   src={result.dataUrl}
                   alt="Generated material collage"
                   progress={revealProgress}
+                  onSettled={() => {
+                    if (sweptResultRef.current === result.dataUrl) return;
+                    sweptResultRef.current = result.dataUrl;
+                    setLiftedFor(result.dataUrl);
+                  }}
                 />
               ) : (
                 <img src="/sample-collage.png" alt="Sample material collage" />

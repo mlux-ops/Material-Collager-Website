@@ -46,6 +46,10 @@ export type DitherRevealProps = {
   height?: number;
   className?: string;
   style?: React.CSSProperties;
+  /** Called each time the reveal fully resolves and hands off to the plain
+   * <img> — the visual end of the reveal, which trails progress reaching 1
+   * by the easing tail. */
+  onSettled?: () => void;
 };
 
 type CellSample = {
@@ -134,6 +138,7 @@ export function DitherReveal({
   height,
   className,
   style,
+  onSettled,
 }: DitherRevealProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -220,6 +225,16 @@ export function DitherReveal({
   // touched here, so it's safe to compute during render.
   const forceUnsettled = progress !== undefined && progress < 1;
   const isSettled = settled && !forceUnsettled;
+
+  // Settle notification. The callback is mirrored into a ref (in an effect,
+  // never during render) so a caller's inline arrow doesn't re-fire it.
+  const onSettledRef = useRef(onSettled);
+  useEffect(() => {
+    onSettledRef.current = onSettled;
+  }, [onSettled]);
+  useEffect(() => {
+    if (isSettled) onSettledRef.current?.();
+  }, [isSettled]);
 
   // Main render loop: eases displayedRef toward targetRef, paints the canvas,
   // and (only once fully resolved and settled) swaps over to a plain <img>.

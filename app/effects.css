@@ -942,3 +942,59 @@ html[data-potato="1"] .mc-print-in {
   inset: 0;
   z-index: -1;
 }
+
+/* ---------------------------------------------------------------------
+ * Completion sweep: once a finished render's dither reveal settles (the
+ * page adds .is-lifted via DitherReveal's onSettled), one soft near-white
+ * band crosses the image on a ~20deg diagonal -- a sheet catching light as
+ * it lifts off the plotter. Runs once, never repeats; the class drops on
+ * the next render start so the next result can play it again.
+ *
+ * ::before, positioned with z-index auto, paints above the static image
+ * but BEFORE any positioned child of the stage, so controls placed in the
+ * stage always sit over it. It is an overlay only: the image's own pixels
+ * are never touched, and with fill-mode none the band rests offscreen
+ * (and transparent) before and after the pass.
+ * ------------------------------------------------------------------- */
+@keyframes mc-sheet-lift {
+  from {
+    opacity: 1;
+    transform: translateX(-100%);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(100%);
+  }
+}
+
+.result-stage.has-result.is-lifted::before {
+  /* 110deg = a band leaning 20deg off vertical. */
+  background: linear-gradient(
+    110deg,
+    rgb(255 255 255 / 0) 38%,
+    rgb(255 255 255 / 0.16) 46%,
+    rgb(255 255 255 / 0.34) 50%,
+    rgb(255 255 255 / 0.16) 54%,
+    rgb(255 255 255 / 0) 62%
+  );
+  content: "";
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  transform: translateX(-100%);
+  animation: mc-sheet-lift var(--wipe-dur, 700ms) var(--wipe-ease, cubic-bezier(0.22, 1, 0.36, 1)) 1 none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .result-stage.has-result.is-lifted::before {
+    animation: none;
+    content: none;
+  }
+}
+
+html[data-reduce-motion="1"] .result-stage.has-result.is-lifted::before {
+  animation: none;
+  content: none;
+}

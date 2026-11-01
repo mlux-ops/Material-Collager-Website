@@ -3,7 +3,8 @@
 /**
  * /dither-lab — isolated verification harness for DitherReveal, CountUp,
  * the grain overlay, the hover-focus card grid, and the generator's working
- * field. Not linked from any nav; visited directly for screenshotting.
+ * field and completion sweep. Not linked from any nav; visited directly for
+ * screenshotting.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -120,6 +121,48 @@ function FpsMeter({ running }: { running: boolean }) {
   }, [running]);
 
   return <span data-testid="fps-readout">{fps === null ? "measuring…" : `${fps} fps`}</span>;
+}
+
+/**
+ * The generator's completion sweep on the sample collage. The stage carries
+ * the same classes as a settled render (.result-stage.has-result.is-lifted);
+ * replay remounts it so the one-shot animation starts again.
+ */
+function CompletionSweepDemo() {
+  const [run, setRun] = useState(0);
+
+  return (
+    <section style={{ marginBottom: "48px" }}>
+      <p style={{ fontSize: "8.4px", color: "var(--muted, #68706b)", marginBottom: "8px", textTransform: "uppercase" }}>
+        completion sweep — one diagonal pass after a finished render settles
+      </p>
+      <div
+        style={{
+          display: "flex",
+          gap: "10px",
+          marginBottom: "16px",
+          fontSize: "10.5px",
+          fontWeight: 500,
+          letterSpacing: "0.1575px",
+          textTransform: "uppercase",
+        }}
+      >
+        <button data-testid="sweep-replay" onClick={() => setRun((n) => n + 1)} style={labButton(false)}>
+          replay sweep
+        </button>
+      </div>
+      <div
+        className="generator-shell"
+        data-testid="completion-sweep-demo"
+        style={{ height: "auto", minHeight: 0, overflow: "visible", padding: 0, background: "transparent", maxWidth: "480px" }}
+      >
+        <div key={run} className="result-stage has-result is-lifted" style={{ aspectRatio: "1536 / 1024" }}>
+          {/* eslint-disable-next-line @next/next/no-img-element -- mirrors the settled DitherReveal <img> */}
+          <img className="dither-stage" src={IMG} alt="Sample material collage" />
+        </div>
+      </div>
+    </section>
+  );
 }
 
 export default function DitherLabPage() {
@@ -299,6 +342,8 @@ export default function DitherLabPage() {
       </section>
 
       <WorkingFieldDemo />
+
+      <CompletionSweepDemo />
 
       {/* Count-up demo */}
       <section style={{ marginBottom: "48px" }}>
