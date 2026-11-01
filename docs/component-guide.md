@@ -22,6 +22,7 @@ Props: everything `next/link` accepts; `href` must be a string. Modified clicks 
 - `DitherReveal.tsx` — dithered image reveal treatment.
 - `CountUp.tsx` — numeric count-up display.
 - `DropdownSelect.tsx` — custom dropdown (custom controls are required where defaults fall short, but keyboard behavior and accessibility must be preserved — `AGENTS.md`).
+- `ReferenceLoupe.tsx` — mouse-only hover magnifier for the generator's reference-tray thumbnails; one box per tray, positioned per frame from `app/lib/loupe.ts` (tested in `tests/loupe.test.mjs`), styled by `.reference-loupe` in `effects.css`; off on touch and potato, instant under reduced motion.
 
 ## Workbench (`app/components/workbench/`)
 
