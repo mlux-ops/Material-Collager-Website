@@ -674,3 +674,23 @@ on.
   (not the OS preference), the viewer's module keyframes still run on a plain
   open; the OS media query is the only thing the module's reduced-motion block
   checks.
+
+## Close landing, round 2 (2026-11-01, user eyeball)
+
+Reported: the returning card moved back OVER the card in front of it in the
+deck, sat there for a moment, then the front card popped back in front.
+
+Cause: the `wheel-card` group paints above the whole root snapshot for the
+full close, so nearer cards cannot occlude it; then the live proxy (stacked
+over the canvas by z-index) painted for a frame or two until React dropped it.
+
+Fixed in e5905f7: the close direction fades the flying card out over the final
+stretch (`mc-wheel-depart` / `mc-wheel-land`, 340ms out duration) so the live
+canvas, correct occlusion included, shows through where the card lands; the
+proxy is hidden synchronously when the transition settles, before the state
+update removes it.
+
+Re-checked at 2138 x 1266 on a mid-deck card with a neighbour in front: the
+close transition lists exactly those keyframes on the `wheel-card` old/new
+images, and at 90% of the flight the deck already shows the card at rest with
+the front card in front of it. 0 console errors.
