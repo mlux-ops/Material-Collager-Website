@@ -832,14 +832,56 @@ html[data-reduce-motion="1"] .nav-pill {
   animation: mc-bayer-dissolve 620ms steps(17, end) both;
 }
 
+/* Scroll-driven print-in. Where view timelines exist, the same dissolve is
+   bound to scroll instead of the clock: each photo prints over the first
+   60% of its entry into its scroller, so it happens where it is seen (the
+   archive's load-time dissolve fires 1400px early, offscreen). Outside this
+   block the archive keeps its load-time dissolve above, and .mc-print-in
+   surfaces get no animation at all -- nothing is ever hidden by default.
+   A photo already on screen is past its range and simply shows.
+
+   view() binds to the NEAREST scroll container, and overflow: hidden makes
+   one, so clipping ancestors use overflow: clip (archive .plate, the board
+   mosaic). Where a horizontal scroller sits between the photo and the page
+   (the generator's reference strip), the row declares a named timeline,
+   .mc-print-scope, and its photos follow that instead. Either way a missed
+   case degrades to "no effect", never to an invisible photo: a subject
+   that fills a non-scrolling scroller reads as fully entered.
+
+   The `animation` shorthand resets animation-timeline, so the timeline and
+   range always come after it. 6px tile = 1.5px dots everywhere: the
+   smallest thumbnails here are 96-128px, 16+ tiles across, which reads as
+   the same dot as the archive rather than a finer one. */
+@supports (animation-timeline: view()) {
+  .archive-image-dither,
+  .mc-print-in {
+    mask-size: 6px 6px;
+    mask-repeat: repeat;
+    animation: mc-bayer-dissolve linear both;
+    animation-timeline: view();
+    animation-range: entry 0% entry 60%;
+  }
+
+  .mc-print-scope {
+    view-timeline: --mc-print-row block;
+  }
+
+  .mc-print-scope .mc-print-in {
+    animation-timeline: --mc-print-row;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .archive-image-dither {
+  .archive-image-dither,
+  .mc-print-in {
     animation: none;
     mask-image: none;
   }
 }
 
-html[data-reduce-motion="1"] .archive-image-dither {
+html[data-reduce-motion="1"] .archive-image-dither,
+html[data-reduce-motion="1"] .mc-print-in,
+html[data-potato="1"] .mc-print-in {
   animation: none;
   mask-image: none;
 }

@@ -1818,13 +1818,13 @@ export default function Home() {
                 </div>
 
                 {item.references.length > 0 && (
-                  <div className="reference-strip">
+                  <div className="reference-strip mc-print-scope">
                     {item.references.map((reference, referenceIndex) => {
                       const progress = referenceProgress[reference.uiKey];
                       return (
                         <figure className="reference-tile" key={reference.uiKey}>
                           <div className="reference-image-wrap">
-                            <img src={reference.preview} alt={`${item.id || item.role} reference ${referenceIndex + 1}`} />
+                            <img className="mc-print-in" src={reference.preview} alt={`${item.id || item.role} reference ${referenceIndex + 1}`} />
                             {referenceIndex === 0 && <span className="primary-badge">Primary</span>}
                             {isWorking && progress !== undefined && progress < 1 && (
                               <span className="reference-progress" style={{ height: `${Math.round(progress * 100)}%` }} />

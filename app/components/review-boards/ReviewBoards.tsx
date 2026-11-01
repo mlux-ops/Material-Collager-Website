@@ -1030,7 +1030,7 @@ function BuiltBoards({
                 {images.length ? (
                   images.map((src, index) => (
                     // eslint-disable-next-line @next/next/no-img-element -- see SlotPhotos
-                    <img key={`${board.id}-${index}`} src={src} alt="" loading="lazy" />
+                    <img key={`${board.id}-${index}`} className="mc-print-in" src={src} alt="" loading="lazy" />
                   ))
                 ) : (
                   <span className={styles.previewEmpty}>No photos yet</span>

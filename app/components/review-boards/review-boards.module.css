@@ -853,7 +853,10 @@
   grid-template-columns: 1fr;
   gap: 1px;
   aspect-ratio: 1;
+  /* clip, not hidden, so the photos' scroll-driven print-in (effects.css
+     .mc-print-in) binds to the page scroller, not this box. */
   overflow: hidden;
+  overflow: clip;
   background: var(--line);
 }
 

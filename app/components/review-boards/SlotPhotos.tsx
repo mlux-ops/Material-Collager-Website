@@ -164,7 +164,7 @@ export function SlotPhotos({ projectId, rowId, itemName, reference, photos, onCh
                 {/* eslint-disable-next-line @next/next/no-img-element -- R2-backed
                     reference photography of unknown size; the optimizer adds a
                     round trip per thumbnail for no benefit at this scale. */}
-                <img className={styles.photoImage} src={photo.imageUrl} alt="" loading="lazy" />
+                <img className={`${styles.photoImage} mc-print-in`} src={photo.imageUrl} alt="" loading="lazy" />
                 <span className={styles.photoMeta}>
                   {photo.width}×{photo.height}
                   {photo.lowResolution ? <span className={styles.photoWarn}> low-res</span> : null}
