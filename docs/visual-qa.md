@@ -745,3 +745,24 @@ transparent when the overlay lifts; nothing visible depends on `finished`.
 Not re-checked live: the pane's page sat under its loading veil at 0
 animation frames per second after the hot reload. The new rules are confirmed
 present in the page's stylesheets. The user's real-speed close is the check.
+
+## Viewer entrance after the capture redesign, rounds 5-6 (2026-11-01, user eyeball)
+
+Reported, in turn: the panel appeared with no transition; then the frosted
+area left of the panel popped in instantly.
+
+Panel (61a592e, 7f04483): sliding the panel moves the image, which is the
+card's landing spot, so the panel box stays still and its glass surface
+slides in and out on a `::before` sheet; the figure, caption and close button
+hold their place. No `isolation` on the panel: it would be a backdrop root and
+the sheet's blur would sample nothing.
+
+Frost (a592681): the frost was the image's ancestor, and an ancestor of a
+captured element has its opacity ramp ignored for the whole morph (the sheet,
+a sibling of the figure, animated fine inside the same element). The frost is
+now its own fixed sibling layer under the host, which paints and animates
+nothing itself; the caption, close button and (plain path only) the image
+fade themselves.
+
+Not re-checked live on my side (pane frozen); the user confirmed the panel
+sheet after 61a592e. The frost fade after a592681 is theirs to confirm.
