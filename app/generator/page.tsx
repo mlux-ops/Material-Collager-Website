@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { DropdownSelect } from "../components/DropdownSelect";
 import { DitherReveal } from "../components/DitherReveal";
+import { WorkingField } from "../components/WorkingField";
 import { SiteNavigation } from "../components/SiteNavigation";
 import { RouteReady } from "../components/RouteReady";
 import {
@@ -1984,6 +1985,7 @@ export default function Home() {
                 <h2>Collage and review</h2>
               </div>
               <span className={isWorking ? "status-pill working" : result ? "status-pill ready" : "status-pill"}>
+                {isWorking && <WorkingField variant="pill" />}
                 {isWorking ? "Working" : result ? "Complete" : "Ready"}
               </span>
             </div>
@@ -2019,7 +2021,11 @@ export default function Home() {
                   <span>{workingStage}</span>
                   <strong>{overallProgress > 0 && overallProgress < 100 ? `${overallProgress}%` : ""}</strong>
                 </div>
-                <div className="progress-track"><span style={{ width: `${overallProgress}%` }} /></div>
+                <div className="progress-track">
+                  <span style={{ width: `${overallProgress}%` }}>
+                    <WorkingField variant="track" />
+                  </span>
+                </div>
               </div>
             )}
 

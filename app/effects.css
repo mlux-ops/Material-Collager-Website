@@ -843,3 +843,60 @@ html[data-reduce-motion="1"] .archive-image-dither {
   animation: none;
   mask-image: none;
 }
+
+/* ---------------------------------------------------------------------
+ * Working field (app/components/WorkingField.tsx): a slow dithered teal
+ * Velaris field marks a render in flight. Teal here is state, not chrome.
+ * The field is opaque WebGL; the CSS background under it is the ground
+ * before the first frame and if WebGL is unavailable. Under potato mode
+ * the component renders nothing and these :has() rules fall away, leaving
+ * the existing flat fill and pill exactly as they were.
+ * ------------------------------------------------------------------- */
+.working-field {
+  display: block;
+  pointer-events: none;
+  position: absolute;
+}
+
+/* Track: the determinate span keeps its width: n% and clips the field.
+   The field itself is sized to the WHOLE track (100cqw), never the span,
+   so progress ticks never resize the canvas (a resize clears it and
+   re-derives the noise from the new aspect). It is also far taller than
+   the 5px bar -- 4:1, centred -- because the shader's vignette is
+   aspect-scaled and would fade a 64:1 field to its background. */
+.progress-track:has(.working-field) {
+  container-type: inline-size;
+}
+
+.progress-track span:has(> .working-field) {
+  background: var(--accent);
+  overflow: hidden;
+  position: relative;
+}
+
+.working-field-track {
+  background: var(--accent);
+  height: 25cqw;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 100cqw;
+}
+
+/* Pill: the label stays a bare text node; isolation puts the field
+   (z-index -1) behind it without touching the markup's text. */
+.status-pill.working:has(> .working-field),
+.generator-shell .status-pill.working:has(> .working-field) {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+  color: #ffffff;
+  isolation: isolate;
+  overflow: hidden;
+  position: relative;
+}
+
+.working-field-pill {
+  background: color-mix(in srgb, var(--accent-dark) 50%, #000000);
+  inset: 0;
+  z-index: -1;
+}

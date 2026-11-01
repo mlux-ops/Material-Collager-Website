@@ -2,15 +2,96 @@
 
 /**
  * /dither-lab — isolated verification harness for DitherReveal, CountUp,
- * the grain overlay, and the hover-focus card grid. Not linked from any
- * nav; visited directly for screenshotting.
+ * the grain overlay, the hover-focus card grid, and the generator's working
+ * field. Not linked from any nav; visited directly for screenshotting.
  */
 
 import { useEffect, useRef, useState } from "react";
 import DitherReveal from "../components/DitherReveal";
 import CountUp from "../components/CountUp";
+import WorkingField from "../components/WorkingField";
 
 const IMG = "/sample-collage.png";
+
+const LAB_BUTTON = {
+  border: "1px solid var(--ink, #000000)",
+  borderRadius: 0,
+  padding: "8px 12px",
+  cursor: "pointer",
+} as const;
+
+function labButton(active: boolean) {
+  return {
+    ...LAB_BUTTON,
+    background: active ? "var(--ink, #000000)" : "var(--background, #eceeea)",
+    color: active ? "var(--background, #eceeea)" : "var(--ink, #000000)",
+  };
+}
+
+/**
+ * The generator's working state, isolated: a 320px progress track and the
+ * status pill, wrapped in .generator-shell so the live overrides apply
+ * (its root sizing is neutralised inline). Toggle simulates a render
+ * starting and finishing -- the fields mount and unmount with it.
+ */
+function WorkingFieldDemo() {
+  const [working, setWorking] = useState(true);
+  const [percent, setPercent] = useState(45);
+
+  return (
+    <section style={{ marginBottom: "48px" }}>
+      <p style={{ fontSize: "8.4px", color: "var(--muted, #68706b)", marginBottom: "8px", textTransform: "uppercase" }}>
+        working field — progress fill and status pill while a render is in flight
+      </p>
+      <div
+        style={{
+          display: "flex",
+          gap: "10px",
+          flexWrap: "wrap",
+          marginBottom: "16px",
+          fontSize: "10.5px",
+          fontWeight: 500,
+          letterSpacing: "0.1575px",
+          textTransform: "uppercase",
+        }}
+      >
+        <button data-testid="working-toggle" onClick={() => setWorking((w) => !w)} style={labButton(working)}>
+          {working ? "working: on" : "working: off"}
+        </button>
+        {[2, 45, 80, 100].map((p) => (
+          <button key={p} data-testid={`working-progress-${p}`} onClick={() => setPercent(p)} style={labButton(percent === p)}>
+            {p}%
+          </button>
+        ))}
+      </div>
+      <div
+        className="generator-shell"
+        data-testid="working-field-demo"
+        style={{ height: "auto", minHeight: 0, overflow: "visible", padding: 0, background: "transparent" }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "16px", marginBottom: "14px" }}>
+          <span className={working ? "status-pill working" : "status-pill ready"}>
+            {working && <WorkingField variant="pill" />}
+            {working ? "Working" : "Complete"}
+          </span>
+        </div>
+        <div className="work-progress" style={{ width: "320px" }}>
+          <div>
+            <span>{working ? "Rendering collage" : "Done"}</span>
+            <strong>{working && percent < 100 ? `${percent}%` : ""}</strong>
+          </div>
+          {working && (
+            <div className="progress-track">
+              <span style={{ width: `${percent}%` }}>
+                <WorkingField variant="track" />
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function FpsMeter({ running }: { running: boolean }) {
   const [fps, setFps] = useState<number | null>(null);
@@ -216,6 +297,8 @@ export default function DitherLabPage() {
           />
         </div>
       </section>
+
+      <WorkingFieldDemo />
 
       {/* Count-up demo */}
       <section style={{ marginBottom: "48px" }}>
