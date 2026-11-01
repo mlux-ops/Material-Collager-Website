@@ -206,6 +206,19 @@
   animation: viewer-slide-in 460ms var(--ease-smooth-out) both;
 }
 
+/* A viewer opened by the card morph runs no keyframes of its own: the view
+   transition itself fades the frost in (mc-fade-in on wheel-viewer in
+   app/effects.css) and flies the card into the image. The panel's slide
+   would otherwise move the flight's target mid-morph (the card arced out
+   past the panel before settling), and its frost-in would double the fade.
+   Kept BEFORE .viewerLeaving on purpose: equal specificity, so a two-phase
+   close of a morphed viewer (placement failed on close) still animates out
+   by source order. */
+.viewerStatic,
+.viewerStatic .viewerPanel {
+  animation: none;
+}
+
 .viewerLeaving {
   animation: viewer-frost-out 340ms var(--ease-smooth-out) both;
 }
@@ -258,6 +271,8 @@
 @media (prefers-reduced-motion: reduce) {
   .viewerBackdrop,
   .viewerPanel,
+  .viewerStatic,
+  .viewerStatic .viewerPanel,
   .viewerLeaving,
   .viewerLeaving .viewerPanel {
     animation: none;

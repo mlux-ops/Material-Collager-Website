@@ -1,9 +1,9 @@
 /**
  * Screen-space projection of the scene wheel's card quads — the same curve
  * model and camera the three.js scene uses, run as plain math so the DOM
- * placeholder layer (dithered thumbnails in SceneWheelV2) can stand exactly
- * where each card will render. No GL, no renderer: three's vector/camera
- * classes only.
+ * placeholder layer (dithered thumbnails in SceneWheelV2) and the viewer's
+ * card-morph proxy can stand exactly where each card renders. No GL, no
+ * renderer: three's vector/camera classes only.
  *
  * Placement is a full projective map: a perspective camera imaging a planar
  * card is a homography, so mapping the element's rect onto the four
@@ -16,6 +16,7 @@ import { PerspectiveCamera, Vector3 } from "three";
 import {
   getSceneWheelPose,
   SCENE_WHEEL_CAMERA,
+  SCENE_WHEEL_HOVER_OFFSET,
   SCENE_WHEEL_MOBILE_CAMERA,
 } from "./curve-model.ts";
 
@@ -84,15 +85,24 @@ export function quadTransform(
   return `matrix3d(${m.map((v) => v.toPrecision(8)).join(", ")})`;
 }
 
-export function projectCardRects(
-  count: number,
-  progress: number,
-  viewportWidth: number,
-  viewportHeight: number,
-  mobileFraming: boolean,
-  aspects: number[],
-): PlacedCard[] {
-  if (count <= 0 || viewportWidth <= 0 || viewportHeight <= 0) return [];
+/** One card to project: its rail slot, the progress it is drawn at, and its
+ * hover displacement (0 = rest pose, 1 = fully hovered). */
+export type CardProjectionInput = {
+  index: number;
+  count: number;
+  /** The progress the scene actually renders at (the canvas's spring value). */
+  progress: number;
+  /** SceneCard's eased hover value, 0..1. */
+  hover: number;
+  /** Image aspect (width / height); clamped exactly as SceneCard clamps it. */
+  aspect: number;
+};
+
+type Projector = (v: Vector3) => Point;
+
+// One camera per projection pass: projectCardRects runs on every resize for
+// the whole field, so it builds this once and reuses it for every card.
+function makeProjector(viewportWidth: number, viewportHeight: number, mobileFraming: boolean): Projector {
   const spec = mobileFraming ? SCENE_WHEEL_MOBILE_CAMERA : SCENE_WHEEL_CAMERA;
   const camera = new PerspectiveCamera(spec.fov, viewportWidth / viewportHeight, spec.near, spec.far);
   camera.position.set(...spec.position);
@@ -103,42 +113,84 @@ export function projectCardRects(
   camera.lookAt(0, 0, 0);
   camera.updateMatrixWorld(true);
 
-  const toScreen = (v: Vector3): Point => {
+  return (v: Vector3): Point => {
     const ndc = v.clone().project(camera);
     return { x: ((ndc.x + 1) / 2) * viewportWidth, y: ((1 - ndc.y) / 2) * viewportHeight };
   };
+}
 
+function placeCard(input: CardProjectionInput, toScreen: Projector): PlacedCard | null {
+  const pose = getSceneWheelPose(input.index, input.count, input.progress);
+  if (pose.opacity <= 0.02) return null;
+  const aspect = Math.max(0.72, Math.min(1.65, Number.isFinite(input.aspect) ? input.aspect : 4 / 3));
+  // Hover displacement mirrors SceneCard's useFrame exactly: a world-space
+  // (unrotated) offset scaled by the eased hover value, plus a 1.2% grow.
+  // Pose position/quaternion come from shared scratch objects — clone before
+  // offsetting, and consume them fully before the next getSceneWheelPose call.
+  const position = pose.position.clone().addScaledVector(SCENE_WHEEL_HOVER_OFFSET, input.hover);
+  const quaternion = pose.quaternion.clone();
+  const scale = pose.scale * (1 + input.hover * 0.012);
+  const hw = ((CARD_HEIGHT * aspect - IMAGE_INSET) * scale) / 2;
+  const hh = ((CARD_HEIGHT - IMAGE_INSET) * scale) / 2;
+  const planeZ = IMAGE_PLANE_Z * scale;
+  const corner = (x: number, y: number) =>
+    toScreen(new Vector3(x, y, planeZ).applyQuaternion(quaternion).add(position));
+  const tl = corner(-hw, hh);
+  const tr = corner(hw, hh);
+  const br = corner(hw, -hh);
+  const bl = corner(-hw, -hh);
+  const width = Math.hypot(tr.x - tl.x, tr.y - tl.y);
+  const height = Math.hypot(bl.x - tl.x, bl.y - tl.y);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 2 || height < 2) return null;
+  const transform = quadTransform(tl, tr, br, bl, width, height);
+  if (!transform) return null;
+  return {
+    width,
+    height,
+    transform,
+    corners: { tl, tr, br, bl },
+    opacity: pose.opacity,
+    // Lower `relative` = nearer the viewer = stacked on top.
+    z: Math.max(1, Math.round(500 - pose.relative * 10)),
+    relative: pose.relative,
+  };
+}
+
+/**
+ * Projects ONE card, hover displacement included — the screen quad the scene
+ * draws that card at right now. Used by the viewer's card morph, which must
+ * start (or land) exactly on the 3D card. Null when the slot is invisible or
+ * the quad degenerates.
+ */
+export function projectCardRect(
+  input: CardProjectionInput,
+  viewportWidth: number,
+  viewportHeight: number,
+  mobileFraming: boolean,
+): PlacedCard | null {
+  if (input.count <= 0 || viewportWidth <= 0 || viewportHeight <= 0) return null;
+  return placeCard(input, makeProjector(viewportWidth, viewportHeight, mobileFraming));
+}
+
+/** Every visible card at rest (hover 0), in rail order. Same code path as
+ * projectCardRect. */
+export function projectCardRects(
+  count: number,
+  progress: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  mobileFraming: boolean,
+  aspects: number[],
+): PlacedCard[] {
+  if (count <= 0 || viewportWidth <= 0 || viewportHeight <= 0) return [];
+  const toScreen = makeProjector(viewportWidth, viewportHeight, mobileFraming);
   const out: PlacedCard[] = [];
   for (let index = 0; index < count; index += 1) {
-    const pose = getSceneWheelPose(index, count, progress);
-    if (pose.opacity <= 0.02) continue;
-    const aspect = Math.max(0.72, Math.min(1.65, aspects[index] ?? 4 / 3));
-    const hw = ((CARD_HEIGHT * aspect - IMAGE_INSET) * pose.scale) / 2;
-    const hh = ((CARD_HEIGHT - IMAGE_INSET) * pose.scale) / 2;
-    const planeZ = IMAGE_PLANE_Z * pose.scale;
-    // Pose position/quaternion come from shared scratch objects — consume
-    // them fully before the next getSceneWheelPose call.
-    const corner = (x: number, y: number) =>
-      toScreen(new Vector3(x, y, planeZ).applyQuaternion(pose.quaternion).add(pose.position));
-    const tl = corner(-hw, hh);
-    const tr = corner(hw, hh);
-    const br = corner(hw, -hh);
-    const bl = corner(-hw, -hh);
-    const width = Math.hypot(tr.x - tl.x, tr.y - tl.y);
-    const height = Math.hypot(bl.x - tl.x, bl.y - tl.y);
-    if (!Number.isFinite(width) || !Number.isFinite(height) || width < 2 || height < 2) continue;
-    const transform = quadTransform(tl, tr, br, bl, width, height);
-    if (!transform) continue;
-    out.push({
-      width,
-      height,
-      transform,
-      corners: { tl, tr, br, bl },
-      opacity: pose.opacity,
-      // Lower `relative` = nearer the viewer = stacked on top.
-      z: Math.max(1, Math.round(500 - pose.relative * 10)),
-      relative: pose.relative,
-    });
+    const card = placeCard(
+      { index, count, progress, hover: 0, aspect: aspects[index] ?? 4 / 3 },
+      toScreen,
+    );
+    if (card) out.push(card);
   }
   return out;
 }

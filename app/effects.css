@@ -326,6 +326,119 @@ html:active-view-transition .site-navigation {
 }
 
 /* ---------------------------------------------------------------------------
+   Library viewer: the card morph.
+   Clicking a wheel card morphs the card itself into the viewer's image, and
+   closing morphs the image back into its card - a shared-element view
+   transition, not a page wipe. The card side is a DOM proxy SceneWheelV2
+   lays exactly over the 3D card (project-card-rects.ts), present only while
+   that side is being captured, so each name is carried by one element at a
+   time. Paired with app/components/scene-wheel-v2/SceneWheelV2.tsx and
+   app/lib/wheel-viewer-morph.ts.
+   The names live here, not in the scene's CSS module, for the same reason
+   the archive's dissolve keyframes do: Modules rewrite identifiers.
+   Selected two ways, like the nav wipe: transition types where the engine
+   has them, and the html[data-wheel-viewer] attribute SceneWheelV2 mirrors
+   for engines with the API but not types. Both sit inside a forgiving :is()
+   - in a plain selector list, an engine that cannot parse
+   :active-view-transition-type() drops the whole rule, fallback included.
+--------------------------------------------------------------------------- */
+@keyframes mc-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes mc-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.mc-wheel-card,
+.mc-wheel-viewer-image {
+  view-transition-name: wheel-card;
+}
+
+.mc-wheel-viewer {
+  view-transition-name: wheel-viewer;
+}
+
+/* The page under the morph does not change - only the named card, image and
+   viewer leave it - so both root snapshots hold for the morph's length
+   instead of wiping. `animation: none` would drop the outgoing one (see the
+   root rule above), and there is no wipe edge to draw a rule along. */
+html:is(:active-view-transition-type(wheel-viewer-open), [data-wheel-viewer="open"])::view-transition-old(root),
+html:is(:active-view-transition-type(wheel-viewer-open), [data-wheel-viewer="open"])::view-transition-new(root),
+html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-old(root),
+html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-new(root) {
+  animation: mc-hold var(--wheel-morph-dur, 460ms) linear both;
+  filter: none;
+}
+
+html:is(:active-view-transition-type(wheel-viewer-open), [data-wheel-viewer="open"])::view-transition-group(root),
+html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-group(root) {
+  animation-duration: var(--wheel-morph-dur, 460ms);
+}
+
+/* The card's flight: geometry from the projected card quad to the viewer's
+   image (and back), on the viewer's own slide timing. The old/new image
+   pair keeps the default crossfade, timed to match. */
+::view-transition-group(wheel-card),
+::view-transition-old(wheel-card),
+::view-transition-new(wheel-card) {
+  animation-duration: var(--wheel-morph-dur, 460ms);
+  animation-timing-function: var(--wheel-morph-ease, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+/* Groups stack in capture order, and a name that exists only in the new
+   state is appended on top - so on open the viewer (new-only) would paint
+   over the card flying into it, and the image would pop through at the end.
+   Keep the card above. */
+::view-transition-group(wheel-card) {
+  z-index: 1;
+}
+
+/* The frosted viewer around the image fades in on open and out on close -
+   the image itself is lifted out of it into wheel-card above. */
+html:is(:active-view-transition-type(wheel-viewer-open), [data-wheel-viewer="open"])::view-transition-new(wheel-viewer) {
+  animation: mc-fade-in var(--wheel-morph-dur, 460ms) var(--wheel-morph-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
+}
+
+html:is(:active-view-transition-type(wheel-viewer-close), [data-wheel-viewer="close"])::view-transition-old(wheel-viewer) {
+  animation: mc-fade-out var(--wheel-morph-out-dur, 340ms) var(--wheel-morph-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
+}
+
+/* SceneWheelV2 never starts the morph under reduced motion (motionReduced());
+   this is belt and braces in case one is ever in flight when it flips. The
+   wheel-viewer snapshots carry the same type prefix as their fade rules
+   above, or those (more specific) would keep their durations. */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(wheel-card),
+  ::view-transition-old(wheel-card),
+  ::view-transition-new(wheel-card),
+  ::view-transition-group(wheel-viewer),
+  html:is(:active-view-transition-type(wheel-viewer-open, wheel-viewer-close), [data-wheel-viewer])::view-transition-old(wheel-viewer),
+  html:is(:active-view-transition-type(wheel-viewer-open, wheel-viewer-close), [data-wheel-viewer])::view-transition-new(wheel-viewer) {
+    animation-duration: 0s;
+  }
+}
+
+html[data-reduce-motion="1"]::view-transition-group(wheel-card),
+html[data-reduce-motion="1"]::view-transition-old(wheel-card),
+html[data-reduce-motion="1"]::view-transition-new(wheel-card),
+html[data-reduce-motion="1"]::view-transition-group(wheel-viewer),
+html[data-reduce-motion="1"]::view-transition-old(wheel-viewer),
+html[data-reduce-motion="1"]::view-transition-new(wheel-viewer) {
+  animation-duration: 0s;
+}
+
+/* ---------------------------------------------------------------------------
    Wordmark menu: a frosted pane that slides down from the top (the same
    motion family as the page wipe), rests against the bottom of the screen,
    and slides back up on close. Distinct enter/exit keyframe names — reusing

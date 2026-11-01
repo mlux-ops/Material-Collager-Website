@@ -615,3 +615,62 @@ before this pass, from the static trace.
   - At 390x844 the phone bubble renders at full height with its text (307x46.8 px).
 - The two known-gap dialogs from Task 3B.2 remain as recorded in the WP-3B entry
   above.
+
+# Visual QA - Library viewer card morph (shared-element view transition)
+
+Date: 2026-11-01
+Status: **PASSED - LOCAL ONLY** (not deployed; user approval pending)
+
+## Scope
+
+Clicking a wheel card on `/` morphs the card into the viewer's image through a
+same-document view transition (`wheel-card` / `wheel-viewer` names in
+`app/effects.css`, orchestration in `SceneWheelV2.tsx`), and closing morphs the
+image back onto the card's rest pose. The scene, the panel field, the nav and
+the reference scroll behaviour are untouched; only the viewer's open/close
+motion changed, and only when the View Transitions API is present and motion is
+on.
+
+## Environment
+
+- Local URL: `http://localhost:3000/` (`npm run dev` from the worktree)
+- Browser: in-app Chromium, `document.startViewTransition` with transition types
+- Viewports: 800 x 704 desktop (pane size), 375 x 812 mobile emulation
+- Method: `--wheel-morph-dur` / `--wheel-morph-out-dur` overridden to 3000ms,
+  the `::view-transition-*` animations paused with the Web Animations API and
+  stepped to fixed times, screenshots at each step; state read from the DOM
+  (`html[data-wheel-viewer]`, `.mc-wheel-card`, `.mc-wheel-viewer`).
+
+## Checks
+
+| Check | Result |
+| --- | --- |
+| Open morph, desktop: card flies straight from its projected quad to the viewer image | Passed after fix (see below); at 15% the card is already on its line to the image, no arc |
+| Panel keyframes during a morphed open | Passed; `document.getAnimations()` lists no `viewer-slide-in` / `viewer-frost-in`, backdrop carries `viewerStatic` |
+| Close morph, desktop: image flies back and lands on the 3D card's rest pose | Passed; proxy removed on `finished`, no double image, frost lifts via `mc-fade-out` |
+| Open + close, 375 x 812 | Passed; full-width panel, same flight, scroll lock and `inert` released after close |
+| Reduced motion (site setting `reduceMotion`) | Passed; `startViewTransition` never called, viewer opens and closes instantly, no proxy mounted |
+| `html[data-wheel-viewer]` cleared after every transition | Passed |
+| Console errors across all runs | Passed; 0 errors |
+
+## Discrepancies fixed
+
+- **Card arced out past the panel on open.** The viewer panel's own
+  `viewer-slide-in` kept running inside the live new capture, so the
+  `wheel-card` group's target started off-screen right. Fixed by `viewerStatic`
+  (`scene-wheel-v2.module.css`): a viewer opened by a morph runs no keyframes
+  of its own; the view transition fades the frost and flies the card.
+
+## Remaining known deviations
+
+- The source 3D card stays drawn in the rail while its copy flies (by design;
+  the proxy covers it at the start and the frost covers it after).
+- Mid-flight frames of the `matrix3d` interpolation show a slight skew as the
+  perspective quad flattens; it reads as the card turning to face the viewer.
+- Browser back/forward and the nav wipe are unchanged; the names are unscoped
+  but no page wipe can start while the viewer is open (the nav is inside the
+  inert track).
+- Pre-existing, not touched here: with the site's `reduceMotion` setting on
+  (not the OS preference), the viewer's module keyframes still run on a plain
+  open; the OS media query is the only thing the module's reduced-motion block
+  checks.

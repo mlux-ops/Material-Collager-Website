@@ -4,13 +4,14 @@ import { Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject }
 import { Canvas, useFrame, useLoader } from "@react-three/fiber";
 import { NoToneMapping, SRGBColorSpace, TextureLoader } from "three";
 import type { SceneLabCollageItem } from "@/app/lib/scene-lab-assets";
-import { SceneCard, type SceneWheelHoverState } from "./SceneCard";
+import { SceneCard } from "./SceneCard";
+import type { SceneCardOrigin, SceneWheelHoverState } from "./SceneCard";
 import { SCENE_WHEEL_CAMERA, SCENE_WHEEL_MOBILE_CAMERA } from "./curve-model";
 
 type Props = {
   items: readonly SceneLabCollageItem[];
   onHover: (state: SceneWheelHoverState) => void;
-  onOpen: (item: SceneLabCollageItem) => void;
+  onOpen: (item: SceneLabCollageItem, origin: SceneCardOrigin) => void;
   targetProgress: MutableRefObject<number>;
   /** Fires once, on the scene's first rendered frame — the moment the canvas
    * actually has pixels, so placeholders above it can stand down. */

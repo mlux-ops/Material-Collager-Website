@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   adaptCompletedCollages,
   normalizeLibraryCollageRecords,
@@ -9,7 +10,7 @@ import {
   type LibraryCollageRecord,
   type SceneLabCollageItem,
 } from "@/app/lib/scene-lab-assets";
-import type { SceneWheelHoverState } from "./SceneCard";
+import type { SceneCardOrigin, SceneWheelHoverState } from "./SceneCard";
 import { useNativeScrollProgress } from "./useNativeScrollProgress";
 import { SiteNavigation } from "../SiteNavigation";
 import { RouteReady } from "../RouteReady";
@@ -23,7 +24,17 @@ import {
   storedThumbsMatch,
   MAX_THUMBS,
 } from "@/app/lib/library-thumbs.ts";
-import { projectCardRects, MOBILE_FRAMING_QUERY, type PlacedCard } from "./project-card-rects";
+import {
+  shouldMorphViewer,
+  WHEEL_VIEWER_CLOSE_TYPE,
+  WHEEL_VIEWER_OPEN_TYPE,
+} from "@/app/lib/wheel-viewer-morph.ts";
+import {
+  projectCardRect,
+  projectCardRects,
+  MOBILE_FRAMING_QUERY,
+  type PlacedCard,
+} from "./project-card-rects";
 import styles from "./scene-wheel-v2.module.css";
 
 const SceneWheelCanvas = dynamic(() => import("./SceneWheelCanvas"), { ssr: false });
@@ -41,6 +52,23 @@ const PRELOAD_TIMEOUT_MS = 12000;
 // this request settles, so without one a hung /api/library held the loading
 // veil at 0% forever.
 const LIBRARY_FETCH_TIMEOUT_MS = 8000;
+// The open morph's old snapshot must show the card image, not an empty box:
+// a freshly mounted <img> is not guaranteed decoded by the next frame. The
+// card's bytes are already cached (it is a live texture), so this is short —
+// and bounded, so a slow decode only costs the morph a blank first frame.
+const PROXY_DECODE_BUDGET_MS = 150;
+
+function decodeImage(url: string): Promise<void> {
+  const probe = new Image();
+  probe.decoding = "async";
+  probe.src = url;
+  return Promise.race([
+    probe.decode().catch(() => undefined),
+    new Promise<void>((resolve) => window.setTimeout(resolve, PROXY_DECODE_BUDGET_MS)),
+  ]);
+}
+
+type ViewerMorph = { item: SceneLabCollageItem; placed: PlacedCard };
 
 export default function SceneWheelV2() {
   const trackRef = useRef<HTMLElement>(null);
@@ -113,14 +141,97 @@ export default function SceneWheelV2() {
   const loadTargetRef = useRef(0);
   const [hoveredItem, setHoveredItem] = useState<SceneLabCollageItem | null>(null);
   const [selectedItem, setSelectedItem] = useState<SceneLabCollageItem | null>(null);
+  // Whether the CURRENT viewer was opened by the card morph. Set in the same
+  // commit as the item, cleared with it. Deliberately not derived from
+  // html[data-wheel-viewer]: that attribute is removed when the transition
+  // finishes, and a rule gated on it would restart the panel's slide then.
+  const [viewerMorphed, setViewerMorphed] = useState(false);
+  const selectedItemRef = useRef<SceneLabCollageItem | null>(null);
+  useEffect(() => {
+    selectedItemRef.current = selectedItem;
+  }, [selectedItem]);
+
+  // Card morph: with the View Transitions API (and motion on), the clicked
+  // card morphs into the viewer's image and back into the card on close — a
+  // shared-element transition between a DOM proxy laid exactly over the 3D
+  // card (projectCardRect, same math as the scene) and the viewer's <img>.
+  // The proxy exists only while the card side of a morph is being captured,
+  // so it and the viewer image never carry the shared name at the same time.
+  // Names and timing live in app/effects.css ("Library viewer: card morph").
+  const [morph, setMorph] = useState<ViewerMorph | null>(null);
+  // A morph in flight owns the viewer: further open/close requests are
+  // ignored until its transition settles.
+  const morphInFlight = useRef(false);
+  // Where the open card was drawn; the close morph lands on its rest pose.
+  const openOriginRef = useRef<SceneCardOrigin | null>(null);
+
+  // Same box and framing query as the thumb row's compute(), so the proxy
+  // shares the placeholders' (and the canvas's) coordinate frame.
+  const projectOrigin = useCallback((origin: SceneCardOrigin): PlacedCard | null => {
+    const box = stickyRef.current?.getBoundingClientRect();
+    const w = box?.width ?? window.innerWidth;
+    const h = box?.height ?? window.innerHeight;
+    const mobile = window.matchMedia(MOBILE_FRAMING_QUERY).matches;
+    return projectCardRect(origin, w, h, mobile);
+  }, []);
+
+  // Runs one morph. The update callback flushes synchronously so the new
+  // snapshot sees the committed DOM. Direction is exposed both as a
+  // transition type and as html[data-wheel-viewer] (engines with the API but
+  // not types), mirroring TransitionLink. finished REJECTS when a transition
+  // is skipped, so clean up on both settlements (never .finally).
+  const runMorph = useCallback((direction: "open" | "close", update: () => void) => {
+    morphInFlight.current = true;
+    const root = document.documentElement;
+    root.dataset.wheelViewer = direction;
+    const vt = document.startViewTransition(() => {
+      flushSync(update);
+    });
+    vt.types?.add(direction === "open" ? WHEEL_VIEWER_OPEN_TYPE : WHEEL_VIEWER_CLOSE_TYPE);
+    const settle = () => {
+      morphInFlight.current = false;
+      if (root.dataset.wheelViewer === direction) delete root.dataset.wheelViewer;
+      // The close morph leaves its proxy over the card it landed on; the 3D
+      // card underneath is at the same rest pose, so dropping it is seamless.
+      if (direction === "close") setMorph(null);
+    };
+    vt.finished.then(settle, settle);
+  }, []);
+
   // Two-phase close so the panel can slide back out and the frost can lift
-  // before the viewer unmounts (reduced motion closes immediately).
+  // before the viewer unmounts. That is the path without the View
+  // Transitions API (or when the card cannot be placed); with it, the image
+  // morphs back into its card instead; reduced motion closes immediately.
   const [viewerClosing, setViewerClosing] = useState(false);
   const closeTimer = useRef<number | null>(null);
   const requestCloseViewer = useCallback(() => {
     if (closeTimer.current !== null) return; // already leaving
-    if (motionReduced()) {
+    if (morphInFlight.current) return; // a morph is still landing
+    const reduced = motionReduced();
+    if (reduced) {
       setSelectedItem(null);
+      setViewerMorphed(false);
+      return;
+    }
+    const hasAPI = typeof document.startViewTransition === "function";
+    const item = selectedItemRef.current;
+    const origin = openOriginRef.current;
+    // Land on the card's REST pose (SceneCard relaxed its hover on open) at
+    // the progress it is drawn at now: scrolling is locked while the viewer
+    // is open, so the canvas spring has settled on the current target.
+    const placed = hasAPI && item && origin
+      ? projectOrigin({ ...origin, progress: targetProgress.current, hover: 0 })
+      : null;
+    if (
+      shouldMorphViewer({ hasViewTransitionAPI: hasAPI, prefersReducedMotion: reduced, hasPlacement: placed !== null })
+      && item
+      && placed
+    ) {
+      runMorph("close", () => {
+        setSelectedItem(null);
+        setViewerMorphed(false);
+        setMorph({ item, placed });
+      });
       return;
     }
     setViewerClosing(true);
@@ -128,8 +239,9 @@ export default function SceneWheelV2() {
       closeTimer.current = null;
       setViewerClosing(false);
       setSelectedItem(null);
+      setViewerMorphed(false);
     }, 350);
-  }, []);
+  }, [projectOrigin, runMorph, targetProgress]);
   useEffect(() => () => {
     if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
   }, []);
@@ -156,10 +268,35 @@ export default function SceneWheelV2() {
     });
   }, [positionCursorLabel]);
 
-  const handleOpen = useCallback((item: SceneLabCollageItem) => {
+  const handleOpen = useCallback((item: SceneLabCollageItem, origin: SceneCardOrigin) => {
+    if (morphInFlight.current) return;
     setHoveredItem(null);
-    setSelectedItem(item);
-  }, []);
+    openOriginRef.current = origin;
+    const hasAPI = typeof document.startViewTransition === "function";
+    const reduced = motionReduced();
+    // The open starts from the card exactly as drawn — hovered, at the
+    // spring's rendered progress.
+    const placed = hasAPI && !reduced ? projectOrigin(origin) : null;
+    if (
+      !shouldMorphViewer({ hasViewTransitionAPI: hasAPI, prefersReducedMotion: reduced, hasPlacement: placed !== null })
+      || !placed
+    ) {
+      setSelectedItem(item);
+      setViewerMorphed(false);
+      return;
+    }
+    morphInFlight.current = true;
+    void decodeImage(item.url).then(() => {
+      // The proxy must be in the DOM for the old snapshot; the update then
+      // swaps it for the viewer in one commit.
+      flushSync(() => setMorph({ item, placed }));
+      runMorph("open", () => {
+        setSelectedItem(item);
+        setViewerMorphed(true);
+        setMorph(null);
+      });
+    });
+  }, [projectOrigin, runMorph]);
 
   useLayoutEffect(() => {
     if (hoveredItem) positionCursorLabel();
@@ -437,6 +574,29 @@ export default function SceneWheelV2() {
                 })}
               </div>
             ) : null}
+            {morph ? (
+              <div
+                className={`${styles.thumbCard} mc-wheel-card`}
+                aria-hidden="true"
+                style={{
+                  width: `${morph.placed.width}px`,
+                  height: `${morph.placed.height}px`,
+                  opacity: morph.placed.opacity,
+                  zIndex: morph.placed.z,
+                  transform: morph.placed.transform,
+                  // Live during the close morph's settle; must not eat the
+                  // canvas's clicks or fire its pointer-leave.
+                  pointerEvents: "none",
+                }}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={morph.item.url}
+                  alt=""
+                  style={{ width: "100%", height: "100%", objectFit: "fill", display: "block" }}
+                />
+              </div>
+            ) : null}
           </div>
 
           <SiteNavigation active="library" className={styles.chrome} />
@@ -468,7 +628,12 @@ export default function SceneWheelV2() {
 
       {selectedItem ? (
         <div
-          className={viewerClosing ? `${styles.viewerBackdrop} ${styles.viewerLeaving}` : styles.viewerBackdrop}
+          className={[
+            styles.viewerBackdrop,
+            "mc-wheel-viewer",
+            viewerMorphed ? styles.viewerStatic : "",
+            viewerClosing ? styles.viewerLeaving : "",
+          ].filter(Boolean).join(" ")}
           role="presentation"
           onPointerDown={(event) => {
             if (event.target === event.currentTarget) requestCloseViewer();
@@ -491,7 +656,7 @@ export default function SceneWheelV2() {
             </button>
             <figure className={styles.viewerFigure}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={selectedItem.url} alt={selectedItem.title} />
+              <img className="mc-wheel-viewer-image" src={selectedItem.url} alt={selectedItem.title} />
               <figcaption id="scene-wheel-viewer-title">{selectedItem.title}</figcaption>
             </figure>
           </section>
