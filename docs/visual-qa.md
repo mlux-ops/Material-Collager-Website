@@ -719,3 +719,29 @@ outside `.canvas`, so a morph adds and removes nothing next to the canvas.
 Not re-checked live: the pane's page was fully throttled (0 animation frames
 per second) when the fix landed, so this round is verified against the
 measurement above, not by eye.
+
+## Flash to paper after scrolling, round 4 (2026-11-01, user eyeball)
+
+Reported: the first closes were perfect; after scrolling the rail, a tiny
+flash to white at the very end of the close.
+
+Why only when scrolled: the deck is a `position: sticky` box inside the 900vh
+track. At scroll 0 its layout and composited positions coincide; scrolled,
+they differ, and the frame in which Chrome tears down the root snapshot and
+re-presents the live sticky WebGL layer shows page background for one frame.
+Chromium also resolves `finished` after the frame that removes the overlay
+(blink-dev PSA, "View Transition finished promise timing change"), so any
+visible work in that callback lands a frame late.
+
+Fixed in 0fa50fc, structurally: during a morph the root is not captured
+(`html[data-wheel-viewer] { view-transition-name: none }`, CSS View
+Transitions Level 2; engines that still capture the root keep the held-root
+fallback rules), the nav is not captured either, and the viewer is no longer
+named - it animates live with its own frost keyframes and stays mounted while
+the card flies back. The only snapshot is the card. The close proxy fades
+itself out on its own element (`mc-wheel-card-landing`), so it is already
+transparent when the overlay lifts; nothing visible depends on `finished`.
+
+Not re-checked live: the pane's page sat under its loading veil at 0
+animation frames per second after the hot reload. The new rules are confirmed
+present in the page's stylesheets. The user's real-speed close is the check.
