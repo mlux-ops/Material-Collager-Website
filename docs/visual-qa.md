@@ -798,3 +798,57 @@ Fix: the root is captured again (rule removed, comment and guard test
 rewritten); `html[data-wheel-viewer] .site-navigation { view-transition-name:
 none }` stays. Re-recorded at scrollY 3000 and 0: open and close both fade
 gradually, nav included, with no jump at either end.
+
+# Visual QA - Working field, scroll print-in, completion sweep
+
+Date: 2026-11-01
+Status: **PASSED - LOCAL ONLY** (not deployed; checked through /dither-lab
+and headless Chrome, not through a paid render)
+
+## Scope
+
+Three additive effects on the existing dither / plotter / mono vocabulary:
+
+- **Working field** (603c4df): while a generator render is in flight, the
+  `.progress-track` fill and the `.status-pill.working` carry a seeded,
+  dithered Velaris field in teal-on-paper (`WorkingField`, palette pinned by
+  tests against the live `:root` tokens; white pill text holds 5.97:1).
+  Potato mode renders nothing (existing flat look); reduced motion freezes
+  one frame; the loop stops when the tab is hidden or the field is off
+  screen. Velaris gained `paused` / `frozen` / `maxDpr`; the wordmark menu's
+  hover gradient is unchanged (re-checked headless, generator page).
+- **Scroll print-in** (f4ac6e7, 2d13d3e): gallery photos below the fold
+  dissolve in on their own view timeline (`animation-timeline: view()`,
+  `entry 0%` to `entry 60%`, inside `@supports`); photos on screen at mount
+  keep the 620ms load dissolve (IntersectionObserver split, decided once per
+  photo, `usePrintInLater` / `partitionPrintIn`). Applied to the archive, the
+  review-board photo grid and built-board mosaic, and the generator reference
+  tray (a named `.mc-print-scope` row timeline; the pane scrolls only at
+  1280px and up). Plates moved from `overflow: hidden` to `clip` so the plate
+  is not the photo's scroller. 6px tile kept. Reduced motion and potato:
+  no animation, no mask.
+- **Completion sweep** (ba9548b, 5c5fe9b): after a render's reveal settles
+  (`DitherReveal` `onSettled`), one 22%-wide skewed band of light crosses
+  the output on `--sweep-dur` 900ms `--sweep-ease` ease-in-out, blended
+  `overlay`, once per result, cleared on the next render start so a cancel
+  or failure never replays it over the old image. Measured at 40%: +46
+  luminance on oak, +23 on pale stone. Off under reduced motion.
+
+## Checks
+
+| Check | Result |
+| --- | --- |
+| Working field pill + 45% track in /dither-lab (headless, 1440x900) | Passed; dithered teal fill clipped by the percentage span, label readable |
+| Field loop while scrolled off screen | Passed; 0 frames, resumes on return (implementer measurement) |
+| Wordmark menu hover gradient after the Velaris change | Passed; VENDORS row renders the dithered gradient (headless) |
+| Print-in split, synthetic page | Passed; on-screen photos dissolve on the clock, below-fold photos sit on view timelines until scrolled |
+| Sweep at ~40% of its pass | Passed; band visible across the stage |
+| Reduced motion / potato for all three | Passed (probed headless) |
+| Console errors on /generator and /dither-lab | 0 |
+
+## Remaining known deviations
+
+- Not seen in a real render: the generator's working state and sweep were
+  verified with the same classes in /dither-lab only.
+- Review boards and archive were not measured live (no local data).
+- The reference tray prints in only where the pane scrolls (1280px+).
