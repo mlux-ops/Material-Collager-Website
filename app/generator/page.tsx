@@ -6,6 +6,8 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { DropdownSelect } from "../components/DropdownSelect";
 import { DitherReveal } from "../components/DitherReveal";
 import { WorkingField } from "../components/WorkingField";
+import { usePrintInLater } from "../hooks/usePrintInLater";
+import { printInClass } from "@/app/lib/print-in";
 import { SiteNavigation } from "../components/SiteNavigation";
 import { RouteReady } from "../components/RouteReady";
 import {
@@ -543,6 +545,14 @@ export default function Home() {
     if (isWorking) setLiftedFor(null);
   }
   const sweptResultRef = useRef<string | null>(null);
+  // Presentation only: reference thumbnails on screen when they first appear
+  // dissolve on load; the rest print in as their strip scrolls into view
+  // (effects.css, mc-print-later / .mc-print-scope).
+  const itemsListRef = useRef<HTMLDivElement | null>(null);
+  const referencePrintLater = usePrintInLater(
+    itemsListRef,
+    items.map((item) => item.references.map((reference) => reference.uiKey).join(",")).join("|"),
+  );
 
   const [workingStage, setWorkingStage] = useState("");
   const [overallProgress, setOverallProgress] = useState(0);
@@ -1810,7 +1820,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="items-list">
+          <div ref={itemsListRef} className="items-list">
             {items.map((item, index) => (
               <article className="material-item" key={item.uiKey}>
                 <div className="item-row-head">
@@ -1839,7 +1849,12 @@ export default function Home() {
                       return (
                         <figure className="reference-tile" key={reference.uiKey}>
                           <div className="reference-image-wrap">
-                            <img className="mc-print-in" src={reference.preview} alt={`${item.id || item.role} reference ${referenceIndex + 1}`} />
+                            <img
+                              className={`mc-print-in ${printInClass(referencePrintLater, reference.uiKey)}`}
+                              data-print-id={reference.uiKey}
+                              src={reference.preview}
+                              alt={`${item.id || item.role} reference ${referenceIndex + 1}`}
+                            />
                             {referenceIndex === 0 && <span className="primary-badge">Primary</span>}
                             {isWorking && progress !== undefined && progress < 1 && (
                               <span className="reference-progress" style={{ height: `${Math.round(progress * 100)}%` }} />
