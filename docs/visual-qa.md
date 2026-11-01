@@ -694,3 +694,28 @@ Re-checked at 2138 x 1266 on a mid-deck card with a neighbour in front: the
 close transition lists exactly those keyframes on the `wheel-card` old/new
 images, and at 90% of the flight the deck already shows the card at rest with
 the front card in front of it. 0 console errors.
+
+## End-of-close deck flicker, round 3 (2026-11-01, user eyeball)
+
+Reported: the close landing is right, but as the transition ends the whole
+deck flickers once.
+
+Measured (MutationObserver plus 4ms polling of canvas size, sticky box, body
+overflow and the nav's computed styles across a close): nothing resizes the
+canvas. At `finished`, three things changed: `data-wheel-viewer` was removed,
+the proxy was hidden then removed from inside `.canvas`, and 16ms later the
+nav bar's computed `backdrop-filter` went `none` to `blur(24px)` with its
+background returning from opaque to 86% - the page-wipe freeze rule
+(`html:active-view-transition .site-navigation`) letting go. Re-enabling a
+backdrop filter on a full-width fixed bar over the live WebGL canvas
+re-surfaces everything under it for a frame.
+
+Fixed in 422eb09: the freeze rule is now
+`html:active-view-transition:not([data-wheel-viewer]) .site-navigation`, so a
+morph never touches the bar (the root is held, so only the flying card passes
+under it); and the proxy lives in an always-mounted fixed `.morphLayer`
+outside `.canvas`, so a morph adds and removes nothing next to the canvas.
+
+Not re-checked live: the pane's page was fully throttled (0 animation frames
+per second) when the fix landed, so this round is verified against the
+measurement above, not by eye.
