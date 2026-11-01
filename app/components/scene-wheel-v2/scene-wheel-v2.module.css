@@ -204,26 +204,52 @@
   animation: viewer-frost-in 460ms var(--ease-smooth-out) both;
 }
 
+/* The panel's glass surface is declared once, as properties, so a morphed
+   viewer can paint the same sheet on a pseudo-element (.viewerStatic below). */
 .viewerPanel {
+  --panel-bg: rgb(255 255 255 / 33%);
+  --panel-blur: blur(40px) saturate(1.05);
+  --panel-edge: 1px solid rgb(0 0 0 / 16%);
+  --panel-shadow: -34px 0 90px rgb(0 0 0 / 10%);
   position: relative;
   display: grid;
   place-items: center;
   width: 50vw;
   padding: clamp(28px, 5vw, 72px);
   padding-left: clamp(56px, 7vw, 96px);
-  background: rgb(255 255 255 / 33%);
-  backdrop-filter: blur(40px) saturate(1.05);
-  border-left: 1px solid rgb(0 0 0 / 16%);
-  box-shadow: -34px 0 90px rgb(0 0 0 / 10%);
+  background: var(--panel-bg);
+  backdrop-filter: var(--panel-blur);
+  border-left: var(--panel-edge);
+  box-shadow: var(--panel-shadow);
   animation: viewer-slide-in 460ms var(--ease-smooth-out) both;
 }
 
-/* A viewer opened by the card morph keeps its live frost (viewer-frost-in
-   above) but not the panel's slide: the view transition flies the card into
-   the image (app/effects.css), and a sliding panel would move the flight's
-   target mid-morph - the card arced out past the panel before settling. */
+/* A viewer opened by the card morph slides its SURFACE, not the panel: the
+   view transition flies the card into the image (app/effects.css), and a
+   sliding panel would move the image - the flight's target - mid-morph (the
+   card arced out past the panel before settling). So the panel box stays
+   transparent and still, and the same glass sheet slides in from the right
+   on a pseudo-element behind the content. The figure, caption and close
+   button hold their place and arrive on the backdrop's live frost-in. */
 .viewerStatic .viewerPanel {
+  background: transparent;
+  backdrop-filter: none;
+  border-left: 0;
+  box-shadow: none;
   animation: none;
+  isolation: isolate;
+}
+
+.viewerStatic .viewerPanel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--panel-bg);
+  backdrop-filter: var(--panel-blur);
+  border-left: var(--panel-edge);
+  box-shadow: var(--panel-shadow);
+  animation: viewer-slide-in 460ms var(--ease-smooth-out) both;
 }
 
 .viewerLeaving {
@@ -234,11 +260,15 @@
   animation: viewer-slide-out 340ms var(--ease-smooth-out) both;
 }
 
-/* Closing a morphed viewer: the frost lifts live (.viewerLeaving) while the
-   card flies back, but the panel holds still, for the same reason it does
-   not slide in. (0,3,0) beats the slide-out above. */
+/* Closing a morphed viewer: the panel box holds still while the card flies
+   back out of it - (0,3,0) beats the slide-out above - and only its surface
+   slides away; the backdrop's frost-out (.viewerLeaving) fades the content. */
 .viewerStatic.viewerLeaving .viewerPanel {
   animation: none;
+}
+
+.viewerStatic.viewerLeaving .viewerPanel::before {
+  animation: viewer-slide-out 340ms var(--ease-smooth-out) both;
 }
 
 .viewerFigure {
@@ -286,9 +316,11 @@
   .viewerBackdrop,
   .viewerPanel,
   .viewerStatic .viewerPanel,
+  .viewerStatic .viewerPanel::before,
   .viewerLeaving,
   .viewerLeaving .viewerPanel,
-  .viewerStatic.viewerLeaving .viewerPanel {
+  .viewerStatic.viewerLeaving .viewerPanel,
+  .viewerStatic.viewerLeaving .viewerPanel::before {
     animation: none;
   }
 }
@@ -356,8 +388,10 @@
   }
 
   .viewerPanel {
+    /* Through the property, so a morphed viewer's sliding surface drops
+       the edge too. */
+    --panel-edge: 0;
     width: 100%;
-    border-left: 0;
     padding: 18px;
     padding-left: 52px;
   }
