@@ -19,6 +19,7 @@ import { useShallow } from "zustand/react/shallow";
 import { readApiResponse } from "@/app/lib/api-client";
 import { classifySize } from "@/app/lib/image-model-limits";
 import { optimizeReferencesForTransport } from "@/app/lib/image-transport";
+import type { AllowedImageModel } from "@/app/lib/sunburst";
 import { ensureThumbnail, getBlob, getBlobUrl, putBlob } from "../blob-cache";
 import { confirmHighCost, formatOutputUsd } from "../cost";
 import { cancelExecution, estimateStaleCost, retryFrom, runNodes } from "../executor";
@@ -1004,8 +1005,11 @@ export async function blobFromImageValue(value: NodeOutputValue): Promise<File> 
 // DOM-touching generation executor composing generation.ts's pure core:
 // gathers cached input files, posts the request, and caches the returned
 // images as object URLs.
-export async function executeGeneration(ctx: ExecuteContext, options: { requireBaseImage: boolean }): Promise<void> {
-  const payload = buildGenerationPayload(ctx.params, ctx.inputs("prompt"));
+export async function executeGeneration(
+  ctx: ExecuteContext,
+  options: { requireBaseImage: boolean; model?: AllowedImageModel },
+): Promise<void> {
+  const payload = buildGenerationPayload(ctx.params, ctx.inputs("prompt"), options.model);
 
   const form = new FormData();
   const files: File[] = [];

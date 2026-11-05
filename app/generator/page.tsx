@@ -57,17 +57,10 @@ import {
   optimizeReferencesForTransport,
 } from "@/app/lib/image-transport";
 
-type ReferenceUploadCache = {
-  fileId: string;
-  credentialFingerprint: string;
-  fileFingerprint: string;
-};
-
 type UiReference = {
   uiKey: string;
   file: File;
   preview: string;
-  remote?: ReferenceUploadCache;
   primary?: boolean;
   sourceUrl?: string;
   sourceLabel?: string;
@@ -94,7 +87,7 @@ type ReferenceCandidate = {
   reason: string;
 };
 
-type UiItem = Omit<CollageItemInput, "imageKeys" | "imageNames" | "imageFileIds"> & {
+type UiItem = Omit<CollageItemInput, "imageKeys" | "imageNames"> & {
   uiKey: string;
   references: UiReference[];
   analysis?: ReferenceAnalysis;
@@ -122,7 +115,7 @@ type StoredDraft = Omit<SavedDraft, "items" | "layoutMaster"> & {
   layoutMaster?: { uiKey: string; name: string; fileKey: string };
 };
 
-type DraftItem = Omit<CollageItemInput, "imageKeys" | "imageNames" | "imageFileIds"> & {
+type DraftItem = Omit<CollageItemInput, "imageKeys" | "imageNames"> & {
   uiKey?: string;
   references?: DraftReference[];
   files?: File[];
@@ -174,7 +167,7 @@ type GenerateResponse = {
 
 type GenerationJob = {
   id: string;
-  mode: "economy" | "immediate";
+  mode: string;
   status: string;
   filename: string;
   format: string;
@@ -236,24 +229,21 @@ type GenerationDiagnostics = {
   }>;
 };
 
-const REFERENCE_CHUNK_BYTES = 4 * 1024 * 1024;
 const DRAFT_DB_NAME = "material-collager-drafts";
 const DRAFT_STORE_NAME = "drafts";
 const CURRENT_DRAFT_KEY = "current";
 const BLOB_KEY_PREFIX = "blob:";
 const blobKey = (fileKey: string) => `${BLOB_KEY_PREFIX}${fileKey}`;
-const TERMINAL_JOB_STATUSES = new Set(["completed", "failed", "expired", "cancelled"]);
 
 function createUiKey() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
 }
 
-function createReference(file: File, remote?: ReferenceUploadCache, metadata?: Partial<UiReference>): UiReference {
+function createReference(file: File, metadata?: Partial<UiReference>): UiReference {
   return {
     uiKey: createUiKey(),
     file,
     preview: URL.createObjectURL(file),
-    remote,
     primary: false,
     provenance: "upload",
     ...metadata,
@@ -438,70 +428,6 @@ function presetItems(type: CollageType): UiItem[] {
   }));
 }
 
-async function credentialFingerprint(apiKey: string) {
-  const trimmed = apiKey.trim();
-  if (!trimmed) return "server-key";
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(trimmed));
-  return Array.from(new Uint8Array(digest).slice(0, 12), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-async function uploadReferenceFile(
-  file: File,
-  apiKey: string,
-  signal: AbortSignal,
-  onProgress: (progress: number) => void,
-) {
-  const started = await fetch("/api/references/start", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    signal,
-    body: JSON.stringify({
-      apiKey,
-      filename: file.name,
-      bytes: file.size,
-      mimeType: file.type,
-    }),
-  }).then((response) => readApiResponse<{ ok: boolean; error?: string; uploadId: string }>(response));
-
-  const chunks = Array.from({ length: Math.ceil(file.size / REFERENCE_CHUNK_BYTES) }, (_, index) => ({
-    index,
-    start: index * REFERENCE_CHUNK_BYTES,
-    end: Math.min(file.size, (index + 1) * REFERENCE_CHUNK_BYTES),
-  }));
-  const partIds = new Array<string>(chunks.length);
-  let uploadedBytes = 0;
-
-  for (let batchStart = 0; batchStart < chunks.length; batchStart += 2) {
-    const batch = chunks.slice(batchStart, batchStart + 2);
-    await Promise.all(
-      batch.map(async (chunk) => {
-        const data = file.slice(chunk.start, chunk.end, "application/octet-stream");
-        const form = new FormData();
-        form.append("apiKey", apiKey);
-        form.append("uploadId", started.uploadId);
-        form.append("data", data, `${file.name}.part-${chunk.index + 1}`);
-        const part = await fetch("/api/references/part", {
-          method: "POST",
-          body: form,
-          signal,
-        }).then((response) => readApiResponse<{ ok: boolean; error?: string; partId: string }>(response));
-        partIds[chunk.index] = part.partId;
-        uploadedBytes += chunk.end - chunk.start;
-        onProgress(Math.min(0.98, uploadedBytes / file.size));
-      }),
-    );
-  }
-
-  const completed = await fetch("/api/references/complete", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    signal,
-    body: JSON.stringify({ apiKey, uploadId: started.uploadId, partIds }),
-  }).then((response) => readApiResponse<{ ok: boolean; error?: string; fileId: string }>(response));
-  onProgress(1);
-  return completed.fileId;
-}
-
 export default function Home() {
   const [collageType, setCollageType] = useState<CollageType>("bathroom_fixture_collage");
   const [orientation, setOrientation] = useState<Orientation>("default");
@@ -535,7 +461,7 @@ export default function Home() {
   // completion sweep (.result-stage.is-lifted). No render path touches this.
   // - Cleared on the rising edge of isWorking (adjusting state during render,
   //   not in an effect), so a working cycle that ends WITHOUT a new result --
-  //   cancel, failure, economy queue -- can't re-add the class over the old
+  //   cancel or failure -- can't re-add the class over the old
   //   image when isWorking drops.
   // - sweptResultRef makes it once per result: that old image re-reveals and
   //   settles again after such a cycle, and must not sweep a second time.
@@ -557,7 +483,6 @@ export default function Home() {
 
   const [workingStage, setWorkingStage] = useState("");
   const [overallProgress, setOverallProgress] = useState(0);
-  const [referenceProgress, setReferenceProgress] = useState<Record<string, number>>({});
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [result, setResult] = useState<ResultState | null>(null);
   const resultUrlRef = useRef<string | null>(null);
@@ -584,7 +509,6 @@ export default function Home() {
   // can't overwrite the fields of whatever is primary now.
   const analyzeTokens = useRef<Map<string, number>>(new Map());
   const analysisCache = useRef<Map<string, ReferenceAnalysis>>(new Map());
-  const jobsRef = useRef<GenerationJob[]>([]);
 
   const totalReferences = useMemo(
     () => items.reduce((total, item) => total + item.references.length, 0),
@@ -627,21 +551,9 @@ export default function Home() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    // Every job is written terminal by the request that rendered it, so one
+    // load (plus the refresh after each render) keeps History current.
     void refreshJobs();
-    // Only poll while a queued job is still running and the tab is visible;
-    // otherwise the endpoint is hit every 30s forever for no reason.
-    const hasPending = () => jobsRef.current.some((job) => !TERMINAL_JOB_STATUSES.has(job.status));
-    const interval = window.setInterval(() => {
-      if (document.visibilityState !== "hidden" && hasPending()) void refreshJobs();
-    }, 30000);
-    const onVisibility = () => {
-      if (document.visibilityState === "visible" && hasPending()) void refreshJobs();
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      window.clearInterval(interval);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
   }, []);
 
   useEffect(() => () => {
@@ -829,7 +741,7 @@ export default function Home() {
       const file = new File([blob], `${slugify(candidate.title)}.${extension}`, { type: blob.type, lastModified: Date.now() });
       setItems((current) => current.map((item) => item.uiKey === itemKey ? {
         ...item,
-        references: [...item.references, createReference(file, undefined, {
+        references: [...item.references, createReference(file, {
           sourceUrl: candidate.pageUrl,
           sourceLabel: candidate.sourceLabel,
           provenance: "investigation",
@@ -890,7 +802,7 @@ export default function Home() {
         item.uiKey === itemKey
           ? {
               ...item,
-              references: [...item.references, ...files.map((file, index) => createReference(file, undefined, {
+              references: [...item.references, ...files.map((file, index) => createReference(file, {
                 primary: isPrimaryUpload && index === 0,
               }))],
             }
@@ -912,7 +824,7 @@ export default function Home() {
     const existing = item?.references.find((reference) => reference.uiKey === referenceKey);
     if (!existing) return;
     URL.revokeObjectURL(existing.preview);
-    const replacement = createReference(file, undefined, { primary: existing.primary, provenance: "upload" });
+    const replacement = createReference(file, { primary: existing.primary, provenance: "upload" });
     setItems((current) => current.map((candidate) => candidate.uiKey === itemKey ? {
       ...candidate,
       references: candidate.references.map((reference) => reference.uiKey === referenceKey ? replacement : reference),
@@ -938,11 +850,6 @@ export default function Home() {
         };
       }),
     );
-    setReferenceProgress((current) => {
-      const next = { ...current };
-      delete next[referenceKey];
-      return next;
-    });
     if (nextPrimary) void analyzePrimaryReference(itemKey, nextPrimary.file);
   }
 
@@ -965,21 +872,6 @@ export default function Home() {
       }),
     );
     if (selectedFile) void analyzePrimaryReference(itemKey, selectedFile);
-  }
-
-  function updateReferenceRemote(itemKey: string, referenceKey: string, remote: ReferenceUploadCache) {
-    setItems((current) =>
-      current.map((item) =>
-        item.uiKey === itemKey
-          ? {
-              ...item,
-              references: item.references.map((reference) =>
-                reference.uiKey === referenceKey ? { ...reference, remote } : reference,
-              ),
-            }
-          : item,
-      ),
-    );
   }
 
   function makeDraft(): SavedDraft {
@@ -1013,7 +905,6 @@ export default function Home() {
         references: item.references.map((reference) => ({
           uiKey: reference.uiKey,
           file: reference.file,
-          remote: reference.remote,
           primary: reference.primary,
           sourceUrl: reference.sourceUrl,
           sourceLabel: reference.sourceLabel,
@@ -1106,10 +997,7 @@ export default function Home() {
     }
   }
 
-  function makePayload(
-    includeApiKey: boolean,
-    fileIdsByReference?: Map<string, string>,
-  ): CollageRequestInput {
+  function makePayload(includeApiKey: boolean): CollageRequestInput {
     return {
       collageType,
       orientation,
@@ -1137,18 +1025,14 @@ export default function Home() {
         notes: item.notes,
         required: item.required,
         imageNames: item.references.map((reference) => reference.file.name),
-        imageFileIds: fileIdsByReference
-          ? item.references.map((reference) => fileIdsByReference.get(reference.uiKey) || "").filter(Boolean)
-          : undefined,
       })),
     };
   }
 
   async function refreshJobs() {
     try {
-      const response = await fetch("/api/economy", { cache: "no-store" })
+      const response = await fetch("/api/jobs", { cache: "no-store" })
         .then((value) => readApiResponse<{ ok: boolean; error?: string; jobs: GenerationJob[] }>(value));
-      jobsRef.current = response.jobs;
       setJobs(response.jobs);
     } catch {
       // History remains optional in local development before storage bindings exist.
@@ -1173,42 +1057,7 @@ export default function Home() {
     }
   }
 
-  async function ensureFullQualityReferenceIds(controller: AbortController) {
-    const fingerprint = await credentialFingerprint(apiKey);
-    const fileIds = new Map<string, string>();
-    const references = items.flatMap((item) => item.references.map((reference) => ({ itemKey: item.uiKey, reference })));
-    let complete = 0;
-    const markComplete = () => {
-      complete += 1;
-      setWorkingStage(`Uploading full-quality references ${complete}/${references.length}`);
-      setOverallProgress(Math.round((complete / Math.max(references.length + 1, 1)) * 100));
-    };
-    const uploadOne = async (entry: (typeof references)[number]) => {
-      const cached = entry.reference.remote;
-      if (cached?.credentialFingerprint === fingerprint && cached.fileFingerprint === fileFingerprint(entry.reference.file)) {
-        fileIds.set(entry.reference.uiKey, cached.fileId);
-      } else {
-        const fileId = await uploadReferenceFile(entry.reference.file, apiKey, controller.signal, (progress) => {
-          setReferenceProgress((current) => ({ ...current, [entry.reference.uiKey]: progress }));
-        });
-        const remote = { fileId, credentialFingerprint: fingerprint, fileFingerprint: fileFingerprint(entry.reference.file) };
-        updateReferenceRemote(entry.itemKey, entry.reference.uiKey, remote);
-        fileIds.set(entry.reference.uiKey, fileId);
-      }
-      markComplete();
-    };
-    // Upload a few references at a time instead of strictly one-by-one; each
-    // upload is itself several chunked round trips, so serial finalization of a
-    // full board adds minutes on a slow uplink.
-    const queue = [...references];
-    const workers = Array.from({ length: Math.min(3, queue.length) }, async () => {
-      for (let entry = queue.shift(); entry; entry = queue.shift()) await uploadOne(entry);
-    });
-    await Promise.all(workers);
-    return fileIds;
-  }
-
-  async function finalizeDraft(mode: "immediate" | "economy") {
+  async function finalizeDraft() {
     if (!result) return;
     if (totalReferences > 15) {
       setPanelText("Final rendering can use the approved draft plus up to 15 product references. Remove one supporting view and retry.");
@@ -1218,49 +1067,10 @@ export default function Home() {
     abortRef.current = controller;
     setIsWorking(true);
     setOverallProgress(0);
-    setReferenceProgress({});
     let transportFilesForReport: File[] | undefined;
-    // Only true once the Economy POST is actually about to go out, not
-    // during the uploads that precede it — a Cancel before that point is
-    // certain to have reached nothing.
-    let economySubmissionDispatched = false;
     const finalQuality: Quality = quality === "xhigh" || quality === "max" ? quality : "high";
     try {
       const layoutFile = await dataUrlFile(result.dataUrl, "approved-draft.png");
-
-      if (mode === "economy") {
-        // Economy uses the OpenAI Batch API, whose inputs can only be referenced
-        // by uploaded file ID, so it still depends on the Uploads API.
-        const fileIds = await ensureFullQualityReferenceIds(controller);
-        setWorkingStage("Uploading approved composition");
-        const layoutFileId = await uploadReferenceFile(layoutFile, apiKey, controller.signal, (progress) => {
-          setOverallProgress(Math.round(90 + progress * 10));
-        });
-        const economyPayload: CollageRequestInput = {
-          ...makePayload(false, fileIds),
-          orientation: finalFormat,
-          quality: finalQuality,
-          outputResolution: "final",
-          layoutReference: true,
-          // Image 1 here is the approved draft, never the board's uploaded
-          // layout master — pin the mode so makePayload's value cannot leak in.
-          layoutReferenceMode: "approved-draft",
-          layoutReferenceFileId: layoutFileId,
-          renderKind: "final",
-        };
-        validateCollageRequest(economyPayload);
-        setWorkingStage("Sending final render to Economy");
-        economySubmissionDispatched = true;
-        const queued = await fetch("/api/economy", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
-          body: JSON.stringify({ payload: economyPayload }),
-        }).then((value) => readApiResponse<{ ok: boolean; error?: string; jobId: string; status: string; estimatedUsd: number | null }>(value));
-        setPanelText(`Final render queued in Economy (${queued.status || "pending"}). Generation cost will be shown after completion when usage is available. It will remain in History for 6 months.`);
-        await refreshJobs();
-        return;
-      }
 
       // Immediate Final sends the approved draft plus the product references
       // directly as multipart, exactly like the Studio render, so it never
@@ -1273,7 +1083,8 @@ export default function Home() {
         quality: finalQuality,
         outputResolution: "final",
         layoutReference: true,
-        // As in the economy branch: Image 1 is the approved draft here.
+        // Image 1 is the approved draft here, never the board's uploaded
+        // layout master — pin the mode so makePayload's value cannot leak in.
         layoutReferenceMode: "approved-draft",
         renderKind: "final",
       };
@@ -1299,12 +1110,11 @@ export default function Home() {
       // contract (it returns its smallest attempt if it cannot reach the
       // target), both mean the assembled body can in principle still exceed
       // the ceiling. Measure it rather than assume: a checked failure naming
-      // the real number and the Economy alternative beats the host's opaque
-      // 413, which is what sent this bug to the wrong stage in the first place.
+      // the real number beats the host's opaque 413, which is what sent this bug to the wrong stage in the first place.
       const bodyBytes = layoutTransport.size + transportFiles.reduce((sum, file) => sum + file.size, 0);
       if (bodyBytes > FINAL_REQUEST_BODY_BUDGET) {
         throw new Error(
-          `The final render payload is ${formatBytes(bodyBytes)} after optimization, over the ${formatBytes(FINAL_REQUEST_BODY_BUDGET)} this host accepts in one request. Remove a supporting view, or use the Economy final render, which uploads each reference separately at full quality.`,
+          `The final render payload is ${formatBytes(bodyBytes)} after optimization, over the ${formatBytes(FINAL_REQUEST_BODY_BUDGET)} this host accepts in one request. Remove a supporting view and retry.`,
         );
       }
       setWorkingStage("Rendering final at maximum quality");
@@ -1336,7 +1146,7 @@ export default function Home() {
       const compressed = compressedReferenceCount(productFiles, transportFiles);
       const referenceNote = compressed === 0
         ? "Full-quality product references were used."
-        : `${compressed} of ${productFiles.length} product references were compressed to fit this request's size limit, so their finest detail and any transparency may be reduced. The Economy final render uploads each reference at full quality.`;
+        : `${compressed} of ${productFiles.length} product references were compressed to fit this request's size limit, so their finest detail and any transparency may be reduced.`;
       setPanelText([
         `Final ${finalFormat} render complete${response.notice ? "" : ` at ${finalSizeLabel}`}. ${referenceNote}`,
         costMessage,
@@ -1345,24 +1155,7 @@ export default function Home() {
       await refreshJobs();
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        // Economy's paid submission may have already reached the server (and
-        // OpenAI) once the POST was actually dispatched — unlike the
-        // immediate path, "your draft and references are unchanged" would be
-        // a guess, not a fact, from that point on. Before dispatch (still
-        // uploading references), nothing has reached the server yet, so the
-        // plain message still holds.
-        setPanelText(
-          mode === "economy" && economySubmissionDispatched
-            ? "Final rendering cancelled. A batch may still have been created — check History before resubmitting."
-            : "Final rendering cancelled. Your draft and references are unchanged.",
-        );
-        // A batch that reached the server before the abort landed still
-        // needs its row shown in History right away, not after the next
-        // poll — a resubmit from someone who sees nothing new would buy a
-        // second batch. Refreshing costs nothing when there is none. Not
-        // awaited: the UI unlocks (finally, below) as soon as the panel text
-        // is set, instead of staying locked until History reloads.
-        if (mode === "economy") void refreshJobs();
+        setPanelText("Final rendering cancelled. Your draft and references are unchanged.");
       } else {
         // Surface the failed request's diagnostics so Troubleshooting shows the
         // failing stage instead of stale data from the previous draft render.
@@ -1404,12 +1197,6 @@ export default function Home() {
           });
         }
         setPanelText(`Final rendering failed: ${error instanceof Error ? error.message : "Unknown error."}`);
-        // A failed Economy submit can still leave a history row behind (see
-        // POST /api/economy) — with its own guidance on what to check before
-        // resubmitting. Show it immediately rather than after the next poll.
-        // Not awaited: same reason as the abort branch above — the UI
-        // shouldn't stay locked until History reloads.
-        if (mode === "economy") void refreshJobs();
       }
     } finally {
       setIsWorking(false);
@@ -1534,7 +1321,7 @@ export default function Home() {
       // actually composed in, so finalizing a portrait draft doesn't silently
       // re-crop it to landscape.
       if (renderPreset === "draft") setFinalFormat(resolvedOrientation(payload));
-      setPanelText(`${renderPreset === "draft" ? "Draft ready. Review the composition, then choose an immediate or Economy final render below." : response.summary || "Collage generated."}${response.notice ? `\n\n${response.notice}` : ""}`);
+      setPanelText(`${renderPreset === "draft" ? "Draft ready. Review the composition, then render the final below." : response.summary || "Collage generated."}${response.notice ? `\n\n${response.notice}` : ""}`);
       setDiagnostics(response.diagnostics ?? null);
       await saveDraft(false);
     } catch (error) {
@@ -1846,7 +1633,6 @@ export default function Home() {
                 {item.references.length > 0 && (
                   <div className="reference-strip mc-print-scope">
                     {item.references.map((reference, referenceIndex) => {
-                      const progress = referenceProgress[reference.uiKey];
                       return (
                         <figure className="reference-tile" key={reference.uiKey}>
                           <div className="reference-image-wrap">
@@ -1857,9 +1643,6 @@ export default function Home() {
                               alt={`${item.id || item.role} reference ${referenceIndex + 1}`}
                             />
                             {referenceIndex === 0 && <span className="primary-badge">Primary</span>}
-                            {isWorking && progress !== undefined && progress < 1 && (
-                              <span className="reference-progress" style={{ height: `${Math.round(progress * 100)}%` }} />
-                            )}
                           </div>
                           <figcaption>
                             <span title={reference.file.name}>{reference.file.name}</span>
@@ -2115,13 +1898,9 @@ export default function Home() {
                   })}
                 </div>
                 <div className="final-actions">
-                  <button type="button" className="final-now-button" onClick={() => void finalizeDraft("immediate")} disabled={isWorking} title="Starts the selected-quality final render immediately; usage-based cost is shown after completion.">
+                  <button type="button" className="final-now-button" onClick={() => void finalizeDraft()} disabled={isWorking} title="Starts the selected-quality final render immediately; usage-based cost is shown after completion.">
                     Final Render Now
                     <small>Usage-based cost shown after completion + references</small>
-                  </button>
-                  <button type="button" className="economy-button" onClick={() => void finalizeDraft("economy")} disabled={isWorking} title="Queues the same selected-quality final request for up to 24 hours; usage-based cost is shown after completion.">
-                    Economy Final
-                    <small>Usage-based cost shown after completion + references / up to 24h</small>
                   </button>
                 </div>
               </section>
@@ -2165,25 +1944,23 @@ export default function Home() {
             )}
 
             {jobs.length > 0 && (
-              <details className="generation-history" open={jobs.some((job) => !["completed", "failed", "expired", "cancelled"].includes(job.status))}>
+              <details className="generation-history">
                 <summary>Final render history</summary>
                 <div className="history-list">
                   {jobs.map((job) => (
                     <article key={job.id}>
                       <div>
-                        <strong>{job.mode === "economy" ? "Economy final" : "Final render"}</strong>
+                        <strong>Final render</strong>
                         <span>{job.format} / {new Date(job.createdAt).toLocaleString()}</span>
                       </div>
                       <span className={`job-status ${job.status}`}>{job.status.replaceAll("_", " ")}</span>
                       {job.status === "completed" && (
-                        <a href={`/api/economy/output/${job.id}`} download={job.filename}>Open {(job.outputFormat || "png").toUpperCase()}</a>
+                        <a href={`/api/jobs/${job.id}/output`} download={job.filename}>Open {(job.outputFormat || "png").toUpperCase()}</a>
                       )}
                       <small>
                         {typeof job.costUsd === "number" && Number.isFinite(job.costUsd)
                           ? `Cost $${job.costUsd.toFixed(4)} from completed usage`
-                          : TERMINAL_JOB_STATUSES.has(job.status)
-                            ? "Generation cost unavailable"
-                            : "Generation cost available after completion"}
+                          : "Generation cost unavailable"}
                         {job.model ? ` · ${job.model}` : ""}
                         {job.quality ? ` · ${job.quality}` : ""}
                         {job.background ? ` · ${job.background}` : ""}

@@ -1,8 +1,18 @@
 # OpenAI image prompting — GPT Image 2.5
 
+**[repo] 2026-11-04:** GPT Image 2.6 is current and is what this app runs:
+`gpt-image-2.6-sunburst` everywhere (Economy mode, and with it Flare, was
+removed: Flare costs the same as Sunburst and Batch supports neither).
+Per OpenAI's model pages, 2.6 takes the same parameters as 2.5 below (same
+qualities, size rules and transparent-background support, same per-token
+prices), has no dated snapshot, does not support Batch, and adds one optional
+`complexity` parameter (`low`/`medium`/`high`, default `high`) that this app
+does not send. `input_fidelity` is undocumented for 2.6 and stays unsent. The
+prompting guidance below was captured from the 2.5 tab and still applies.
+
 Distilled from <https://developers.openai.com/api/docs/guides/image-prompting>
 (GPT Image 2.5 tab), captured 2026-09-16. This is the upstream guide for the
-model family this app runs on — `gpt-image-2.5-sunburst`. Re-check the source
+model family this app ran on until 2.6 — `gpt-image-2.5-sunburst`. Re-check the source
 before relying on any number here; OpenAI revises this page.
 
 Sections below marked **[repo]** are notes about Material Collager, not upstream
@@ -26,8 +36,9 @@ inputs and switch only if quality stays acceptable and latency improves.
 
 > "Confirm current pricing rather than assuming the faster model costs less."
 
-**[repo]** We run Sunburst everywhere (`SUNBURST_MODEL`, `app/lib/sunburst.ts`).
-Flare is untested here. The draft stage is the plausible candidate — drafts are
+**[repo]** We run Sunburst everywhere (`SUNBURST_MODEL`, now
+`gpt-image-2.6-sunburst`, `app/lib/sunburst.ts`); no path runs Flare. The
+draft stage would be the plausible candidate — drafts are
 throwaway `quality: "low"` renders whose only job is composition review — but
 per this repo's own measurements, cost is dominated by reference-image *input*
 tokens, not output, so a faster model may not be a cheaper one. Treat any Flare

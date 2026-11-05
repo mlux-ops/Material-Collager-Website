@@ -118,7 +118,7 @@ export const promptBuilderManifest: NodeManifest = {
   spec: {
     kind: "promptBuilder",
     title: "Prompt Builder",
-    description: "Compose a GPT Image 2.5 prompt: generate, edit, or refine.",
+    description: "Compose a GPT Image 2.6 prompt: generate, edit, or refine.",
     inputs: [
       { id: "extra", kind: "text", label: "Extra direction" },
       { id: "references", kind: "image", label: "References", multi: true, acceptedKinds: ["image", "references"] },

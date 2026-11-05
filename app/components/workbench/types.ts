@@ -31,7 +31,8 @@ export type NodeKind =
   | "crop"
   | "patch"
   | "exportDownload"
-  | "viewImage";
+  | "viewImage"
+  | "test";
 
 export type NodeStatus = "idle" | "running" | "done" | "error" | "stale" | "needs-selection";
 
@@ -210,16 +211,17 @@ export type WorkbenchParams = {
   // box, kept for import compatibility and pre-shapes graphs (which carry
   // only the rectangle). maskCacheKey caches the rendered PNG mask blob
   // (persisted via persistBlobKeys); its key embeds a shape-content hash so
-  // mask edits change the memoization signature. engine picks the backend:
-  // gpt-image-2 (guidance mask, paid), Workers AI SD 1.5 inpainting
-  // (pixel-exact mask, free tier), or FLUX.1 Fill [pro] (pixel-exact mask,
-  // ~$0.05/image via the BFL API).
+  // mask edits change the memoization signature. Masked Edit always runs
+  // Sunburst (gpt-image-2.6-sunburst, guidance mask, paid). `engine`,
+  // `fluxGuidance` and `fluxSeed` are RETIRED: typed only so params saved when
+  // the node also offered Workers AI SD 1.5 inpainting and FLUX.1 Fill [pro]
+  // still load (see RETIRED_MASKED_EDIT_ENGINES); nothing calls those engines.
   engine?: "gpt-image" | "workers-ai" | "flux-fill";
-  // FLUX Fill tuning (flux-fill engine only). fluxGuidance is BFL's
+  // Retired FLUX Fill tuning, kept for old saved params. fluxGuidance is BFL's
   // prompt-adherence dial: high values render the prompt literally, which for
   // a material/texture fill makes the model invent an assertive object rather
   // than blending into its surroundings. We default below BFL's own 60 --
-  // see FLUX_FILL_GUIDANCE_DEFAULT. fluxSeed left undefined = random per run.
+  // the retired FLUX_FILL_GUIDANCE_DEFAULT. fluxSeed undefined meant random.
   fluxGuidance?: number;
   fluxSeed?: number;
   referenceInstruction?: string;

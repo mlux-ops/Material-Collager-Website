@@ -21,6 +21,7 @@ import {
 // answer index.ts derives, without ever importing a .tsx module.
 const DOM_WRAPPED_KINDS = new Set([
   "imageGenerate",
+  "test",
   "imageEdit",
   "saveToLibrary",
   "referenceAnalyzer",

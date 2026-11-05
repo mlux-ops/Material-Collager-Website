@@ -10,6 +10,7 @@ import {
   SUNBURST_BACKGROUNDS,
   SUNBURST_MODEL,
   SUNBURST_QUALITIES,
+  type AllowedImageModel,
   type SunburstBackground,
   type SunburstQuality,
 } from "../../../lib/sunburst.ts";
@@ -72,7 +73,7 @@ export type GenerationPayload = {
   size: string;
   quality: SunburstQuality;
   n: number;
-  model: typeof SUNBURST_MODEL;
+  model: AllowedImageModel;
   background: SunburstBackground;
   outputFormat: (typeof GENERATION_FORMATS)[number];
 };
@@ -82,8 +83,14 @@ export function promptTextsFrom(values: NodeOutputValue[]): string[] {
 }
 
 // Pure request-building core: validates the prompt inputs and shapes the
-// /api/workbench/edit payload from the node's (effective) params.
-export function buildGenerationPayload(params: WorkbenchParams, promptValues: NodeOutputValue[]): GenerationPayload {
+// /api/workbench/edit payload from the node's (effective) params. The model is
+// chosen by the node KIND (the caller), never read from params, so only the
+// Test node can ask for TEST_MODEL_2_5.
+export function buildGenerationPayload(
+  params: WorkbenchParams,
+  promptValues: NodeOutputValue[],
+  model: AllowedImageModel = SUNBURST_MODEL,
+): GenerationPayload {
   const promptParts = promptTextsFrom(promptValues);
   if (!promptParts.length) throw new Error("Connect a prompt (Text or Prompt Builder) first.");
   const background = params.background || "opaque";
@@ -96,7 +103,7 @@ export function buildGenerationPayload(params: WorkbenchParams, promptValues: No
     size: params.size || "1536x1024",
     quality: (params.quality || "medium") as SunburstQuality,
     n: params.candidates || 1,
-    model: SUNBURST_MODEL,
+    model,
     background,
     outputFormat,
   };
@@ -190,7 +197,7 @@ export function estimateSunburstCost({ params }: CostEstimateInput): number | nu
 }
 
 // Draft mode's cheaper variant (AC22/issue-3): lowest quality tier AND the
-// smallest valid gpt-image-2 size at the CURRENT size's aspect ratio (not
+// smallest valid Sunburst size at the CURRENT size's aspect ratio (not
 // just quality, which left large sizes -- including 2K+ Upscaler targets --
 // unchanged). The same effective params (this function's output) drive
 // execution, the memoization signature, and both cost displays, since

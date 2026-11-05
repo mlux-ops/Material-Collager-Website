@@ -25,6 +25,7 @@ import { Component as ReferencesComponent } from "./references";
 import { Component as RelightComponent, execute as relightExecute } from "./relight";
 import { Component as ResizeComponent, execute as resizeExecute } from "./resize";
 import { Component as SaveToLibraryComponent, execute as saveToLibraryExecute } from "./saveToLibrary";
+import { Component as TestComponent, execute as testExecute } from "./test";
 import { Component as TextComponent } from "./text";
 import { Component as UpscalerComponent, execute as upscalerExecute } from "./upscaler";
 import { Component as VariationsComponent, execute as variationsExecute } from "./variations";
@@ -35,6 +36,7 @@ export const NODE_TYPES = {
   text: TextComponent,
   promptBuilder: PromptBuilderComponent,
   imageGenerate: ImageGenerateComponent,
+  test: TestComponent,
   imageEdit: ImageEditComponent,
   compare: CompareComponent,
   saveToLibrary: SaveToLibraryComponent,
@@ -64,6 +66,7 @@ export const NODE_TYPES = {
 // composes its manifest's pure request/response core.
 const DOM_EXECUTES: Partial<Record<NodeKind, NodeExecute>> = {
   imageGenerate: imageGenerateExecute,
+  test: testExecute,
   imageEdit: imageEditExecute,
   saveToLibrary: saveToLibraryExecute,
   referenceAnalyzer: referenceAnalyzerExecute,

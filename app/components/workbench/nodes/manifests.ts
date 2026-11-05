@@ -36,6 +36,7 @@ import { referencesManifest } from "./references.manifest.ts";
 import { relightManifest } from "./relight.manifest.ts";
 import { resizeManifest } from "./resize.manifest.ts";
 import { saveToLibraryManifest } from "./saveToLibrary.manifest.ts";
+import { testManifest } from "./test.manifest.ts";
 import { textManifest } from "./text.manifest.ts";
 import { upscalerManifest } from "./upscaler.manifest.ts";
 import { variationsManifest } from "./variations.manifest.ts";
@@ -47,6 +48,7 @@ export const MANIFESTS: Record<NodeKind, NodeManifest> = {
   text: textManifest,
   promptBuilder: promptBuilderManifest,
   imageGenerate: imageGenerateManifest,
+  test: testManifest,
   imageEdit: imageEditManifest,
   compare: compareManifest,
   saveToLibrary: saveToLibraryManifest,

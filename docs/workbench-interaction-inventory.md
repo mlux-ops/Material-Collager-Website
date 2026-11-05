@@ -97,7 +97,7 @@ experience are out of scope for this change.
 | Collage Board | Choose collage type, orientation, resolution, and quality. |
 | Relight | Apply a prompt-driven lighting edit. |
 | Variations | Choose size, quality, and 1–10 candidates; select one candidate for the aggregate output. |
-| Masked Edit | Choose GPT Image, Workers AI, or FLUX; draw rectangle/brush/polygon masks; undo/clear/apply. |
+| Masked Edit | Draw rectangle/brush/polygon masks; undo/clear/apply. Runs only on the Sunburst edit path (no engine picker). |
 | Upscaler | Choose an upscale target and run a high-resolution edit. |
 | Accuracy Reviewer | Select a reference subset and emit a structured report. |
 | QA Correction | Repair a reported region using image/reference/report inputs. |
@@ -109,9 +109,8 @@ experience are out of scope for this change.
 ## Regression requirements for this change
 
 1. Masked Edit keeps the base image first, adds an optional reference-image
-   port, and applies the mask to the base image. GPT Image receives the
-   reference as the second image plus dedicated reference guidance. Workers AI
-   and FLUX must clearly report that they do not support the reference input.
+   port, and applies the mask to the base image. The edit receives the
+   reference as the second image plus dedicated reference guidance.
 2. `Clear all nodes` removes every node and connected edge through React
    Flow's normal deletion path, so blob release and autosave dirtiness still
    occur. It is disabled while running and requires confirmation.

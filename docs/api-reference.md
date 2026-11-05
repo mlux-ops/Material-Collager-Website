@@ -6,17 +6,14 @@
 
 - All endpoints are same-origin and JSON unless noted; request bodies are capped at **32 MB** (`next.config.ts`).
 - In production every request must carry a valid Cloudflare Access JWT — the Worker rejects bypasses (`worker/access.ts`). Local dev disables the check via blank `CF_ACCESS_*` overrides in `.dev.vars`.
-- Image uploads never go up in one request; they use the chunked reference-transport flow below (`app/lib/image-transport.ts`).
+- Reference images go up as multipart files on the generation request; the browser budgets them under the 32 MB cap first (`app/lib/image-transport.ts`).
 
-## Reference transport (`/api/references/*`)
+## References (`/api/references/*`)
 
-Chunked upload pipeline that preserves original files end-to-end.
+Reference analysis and import. (The chunked `start`/`part`/`complete` upload routes were removed with Economy, their only client; generation takes references as multipart files.)
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/references/start` | Open an upload session for a reference file |
-| POST | `/api/references/part` | Upload one request-safe chunk |
-| POST | `/api/references/complete` | Finalize; assemble and persist the reference |
 | POST | `/api/references/analyze` | Vision analysis of a reference (`MATERIAL_COLLAGER_ANALYSIS_MODEL`) |
 | POST | `/api/references/matches` | Material matching (`MATERIAL_COLLAGER_MATCH_MODEL`) |
 | POST | `/api/references/import` | Import references from an exported draft |
@@ -25,7 +22,7 @@ Chunked upload pipeline that preserves original files end-to-end.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/generate` | Run a board generation: sends original references as multipart `gpt-image-2` inputs (`app/lib/openai-server.ts`, `app/lib/collage.ts`) |
+| POST | `/api/generate` | Run a board generation: sends original references as multipart `gpt-image-2.6-sunburst` inputs (`app/lib/openai-server.ts`, `app/lib/collage.ts`) |
 | POST | `/api/dry-run` | Validate a board configuration without spending a generation |
 
 ## Library
@@ -43,17 +40,15 @@ Chunked upload pipeline that preserves original files end-to-end.
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/api/workbench/edit` | Image edit node execution (`app/lib/image-edit.ts`) |
-| POST | `/api/workbench/inpaint` | Masked Edit pixel-exact engine via Workers AI (`@cf/runwayml/stable-diffusion-v1-5-inpainting`) |
 | POST | `/api/workbench/assist` | Assistant-driven node help |
 | POST | `/api/workbench/save` | Persist a workbench draft |
 
-## Economy
+## Jobs
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/economy` | Queue a final render through OpenAI's Batch API (half price, up to 24h) |
-| GET | `/api/economy` | Refresh up to two pending batches, then list the newest 30 jobs of every render kind. `?ids=<id>,<id>` (at most 200) also returns those Economy jobs as `tracked`, listed or not; the autoboard CLI's `batch-status` relies on it |
-| GET | `/api/economy/output/[id]` | Fetch a costed output |
+| GET | `/api/jobs` | The Generator's History drawer: the newest 30 generation jobs of every render kind, drafts included. Read-only; refreshes nothing and calls no model |
+| GET | `/api/jobs/[id]/output` | Fetch a job's stored output while it is within retention |
 
 ## Example: dry-run a board
 
@@ -79,8 +74,7 @@ curl -X POST http://localhost:3000/api/dry-run \
 | Variable | Consumer | Purpose |
 |---|---|---|
 | `OPENAI_API_KEY` | `app/lib/openai-server.ts` | Image generation/edit |
-| `BFL_API_KEY` | image-edit path | FLUX editing engine |
 | `MATERIAL_COLLAGER_ANALYSIS_MODEL` | `/api/references/analyze` | Override analysis model |
 | `MATERIAL_COLLAGER_MATCH_MODEL` | `/api/references/matches` | Override match model |
 | `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD` | `worker/access.ts` | Access JWT verification (blank in local dev) |
-| Bindings: `DB`, `OUTPUTS`, `AI`, `IMAGES`, `ASSETS` | `worker/index.ts` | D1, R2, Workers AI, Images, static assets |
+| Bindings: `DB`, `OUTPUTS`, `IMAGES`, `ASSETS` | `worker/index.ts` | D1, R2, Images, static assets |

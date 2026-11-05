@@ -9,10 +9,11 @@ import type { ImportParamRule, NodeManifest } from "../types";
 // patched back with the same protection guarantee.
 //
 // This exists because the pixel-exact engines and the reference-capable engines
-// are disjoint: FLUX.1 Fill takes a mask but has no reference input, while
-// gpt-image-2 and the FLUX.2 family take references but treat a mask as
-// guidance at best. Separating "edit" from "patch" means the edit step can use
-// whichever model has the right inputs, and this node supplies the precision.
+// were disjoint when it was designed (FLUX.1 Fill took a mask but no reference
+// input), and Sunburst -- gpt-image-2.6-sunburst, the only image model the site
+// now calls -- takes references but treats a mask as guidance at best.
+// Separating "edit" from "patch" lets the Sunburst edit step use its
+// references freely while this zero-cost node supplies the pixel precision.
 
 export const PATCH_FIT_MODES = ["auto", "aligned", "region"] as const;
 export type PatchFit = (typeof PATCH_FIT_MODES)[number];

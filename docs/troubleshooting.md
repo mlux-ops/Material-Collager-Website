@@ -9,11 +9,8 @@
 - Miniflare reads bindings from `wrangler.jsonc` and secrets from `.dev.vars`. If `.dev.vars` is missing, copy `.dev.vars.example` and fill in `OPENAI_API_KEY`.
 - The placeholder D1 `database_id` in `wrangler.jsonc` is intentional — Miniflare ignores it. Do not "fix" it locally; the deploy workflow resolves the real id by name.
 
-### Inpainting (`/api/workbench/inpaint`) fails locally
-The Workers AI binding proxies to Cloudflare's network **even in local dev**. It requires a logged-in `wrangler` session and consumes the account's free-tier neurons. Run `npx wrangler login` first; if you see auth errors, that's the cause — not the route handler.
-
 ### Generation returns 413 (payload too large)
-Request bodies are capped at **32 MB** (`next.config.ts` `serverActions.bodySizeLimit`, applied by vinext to route handlers too). A single 4K PNG is ~20 MB, so one oversized reference plus overhead can exceed it. References should flow through the chunked transport (`/api/references/start|part|complete`) rather than any single request.
+Request bodies are capped at **32 MB** (`next.config.ts` `serverActions.bodySizeLimit`, applied by vinext to route handlers too). A single 4K PNG is ~20 MB, so one oversized reference plus overhead can exceed it. The browser shrinks references to fit that budget before sending them (`app/lib/image-transport.ts`); if a render still fails on size, use fewer or smaller references. (The old chunked `/api/references/start|part|complete` upload was removed with Economy.)
 
 ### Access-related 401/403 locally
 `worker/access.ts` rejects requests without a valid Cloudflare Access JWT — but only when `CF_ACCESS_TEAM_DOMAIN`/`CF_ACCESS_AUD` are set. Local dev must blank them in `.dev.vars` (there is no Access proxy on localhost). If you copied production values into `.dev.vars`, remove them.

@@ -4,10 +4,9 @@ export type Quality = (typeof QUALITY_OPTIONS)[number];
 export const BACKGROUND_OPTIONS = ["auto", "opaque", "transparent"] as const;
 export type Background = (typeof BACKGROUND_OPTIONS)[number];
 
-export const MODEL_FLARE = "gpt-image-2.5-flare" as const;
-export const MODEL_SUNBURST = "gpt-image-2.5-sunburst" as const;
+export const MODEL_SUNBURST = "gpt-image-2.6-sunburst" as const;
 
-export type ModelId = typeof MODEL_FLARE | typeof MODEL_SUNBURST;
+export type ModelId = typeof MODEL_SUNBURST;
 
 export interface SizeClassification {
   size: string;

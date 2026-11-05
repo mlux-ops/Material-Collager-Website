@@ -23,7 +23,6 @@ Fill in `.dev.vars` (git-ignored; Miniflare reads it the way Workers reads produ
 ```ini
 OPENAI_API_KEY=sk-...
 # Optional overrides:
-# BFL_API_KEY=...
 # MATERIAL_COLLAGER_ANALYSIS_MODEL=...
 # MATERIAL_COLLAGER_MATCH_MODEL=...
 # Leave CF_ACCESS_TEAM_DOMAIN / CF_ACCESS_AUD blank locally (no Access proxy on localhost).
@@ -36,8 +35,6 @@ npm run dev
 ```
 
 Runs `vinext dev` on Miniflare with the bindings declared in `wrangler.jsonc`. Open the URL shown in the terminal.
-
-**Workers AI caveat**: the `AI` binding (used by `/api/workbench/inpaint`) proxies to Cloudflare's network even in local dev — it needs a logged-in `wrangler` session and consumes the account's free-tier neurons.
 
 ## Tests
 

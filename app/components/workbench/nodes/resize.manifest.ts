@@ -1,6 +1,6 @@
 import type { NodeManifest } from "../types";
 
-// Zero-token client node: conforms an image to valid gpt-image-2 dimensions
+// Zero-token client node: conforms an image to valid Sunburst dimensions
 // (divisible by 16, aspect 1:3-3:1, 655,360-8,294,400 px) via
 // createImageBitmap + canvas, routed through putBlob (no base64 in store
 // state). Zero API round-trips. The DOM-touching execute wrapper lives in

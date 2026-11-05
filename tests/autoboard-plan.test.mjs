@@ -314,30 +314,6 @@ test("boardPayload passes the app's own validator for every default variant", ()
   assert.equal(finalPayload.layoutReferenceMode, "approved-draft");
 });
 
-test("boardPayload emits imageFileIds + layoutReferenceFileId for economy submissions, and still validates", () => {
-  const rows = [
-    row({ rowId: "1", itemName: "Brizo Odin Lavatory Faucet" }),
-    row({ rowId: "2", itemName: "Brizo Round Showerhead" }),
-  ];
-  const { boards } = buildBoards(rows, { resolveImages: (rowId) => [`/fake/${rowId}.png`], gaps: emptyGaps() });
-  const fileIdsBySlot = new Map([
-    ["vanity_faucet", ["file-abc123"]],
-    ["shower_head", ["file-def456"]],
-  ]);
-  const payload = boardPayload(boards[0], DEFAULT_VARIANTS[0], {
-    quality: "high",
-    outputResolution: "final",
-    renderKind: "final",
-    layoutReference: true,
-    layoutReferenceFileId: "file-layout789",
-    fileIdsBySlot,
-  });
-  assert.equal(payload.layoutReferenceFileId, "file-layout789");
-  assert.deepEqual(payload.items.find((item) => item.id === "vanity_faucet").imageFileIds, ["file-abc123"]);
-  assert.ok(!("imageNames" in payload.items[0]));
-  assert.doesNotThrow(() => validateCollageRequest(payload));
-});
-
 test("boardReferenceFiles matches payload imageNames in count and order", () => {
   const rows = [
     row({ rowId: "1", itemName: "Brizo Odin Lavatory Faucet" }),

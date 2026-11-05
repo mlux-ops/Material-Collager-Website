@@ -685,16 +685,6 @@ button:disabled {
   top: 6px;
 }
 
-.reference-progress {
-  background: rgba(40, 104, 91, 0.24);
-  bottom: 0;
-  left: 0;
-  pointer-events: none;
-  position: absolute;
-  transition: height 160ms ease;
-  width: 100%;
-}
-
 .reference-tile figcaption {
   display: flex;
   gap: 6px;
@@ -2115,7 +2105,7 @@ body {
 }
 
 .final-actions {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   margin-top: 8px;
 }
 
@@ -2132,16 +2122,6 @@ body {
 
 .final-now-button small {
   color: #fff1ed;
-}
-
-.economy-button {
-  background: #24342d;
-  border-color: #24342d;
-  color: #fff;
-}
-
-.economy-button small {
-  color: #c9d8d0;
 }
 
 .generation-history {
@@ -3065,7 +3045,6 @@ button.site-wordmark {
 
 .generator-shell .draft-button,
 .generator-shell .secondary-button,
-.generator-shell .economy-button,
 .generator-shell .download-button,
 .generator-shell .library-save-button,
 .generator-shell .library-link-button {

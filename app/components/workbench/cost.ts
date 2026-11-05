@@ -1,6 +1,8 @@
-// Deterministic client-side cost estimate for gpt-image-2 output tokens,
-// validated against OpenAI's own calculator (see
-// docs/workbench-node-editor-design.md §4). Input-image tokens have no
+// Client-side cost estimate seeded from the original gpt-image-2 output-token
+// formula, validated against OpenAI's calculator at the time (see
+// docs/workbench-node-editor-design.md §4). The output rate below is
+// Sunburst's ($30/1M image output, unchanged for gpt-image-2.6-sunburst); the
+// learned table further down supersedes this seed once a combination has run. Input-image tokens have no
 // published formula; we seed a conservative per-input estimate and then
 // self-calibrate it from each run's actual
 // `usage.input_tokens_details.image_tokens` (S27/AC21).
@@ -11,7 +13,7 @@ import {
   recordOutputTokens,
   type OutputTokenTable,
 } from "../../lib/output-tokens.ts";
-import { SUNBURST_MODEL } from "../../lib/sunburst.ts";
+import { normalizeStoredModel } from "../../lib/sunburst.ts";
 
 const QUALITY_FACTOR: Record<string, number> = { low: 16, medium: 48, high: 96 };
 const OUTPUT_USD_PER_TOKEN = 30 / 1_000_000;
@@ -159,9 +161,9 @@ function saveCalibration(record: CalibrationRecord): void {
 // Records one run's actual input-image cost, updating that (size, quality)
 // bucket's EMA. Called after every generation-shaped run that returned usage
 // details; a run with no input images or no usage detail is a no-op (nothing
-// to learn from). gpt-image-2 has no published input-vs-output token price
-// split, so this reuses the output per-token rate -- the calibrated bucket
-// value is what actually matters, not this constant.
+// to learn from). This reuses the output per-token rate rather than
+// Sunburst's lower image-input rate, kept deliberately conservative -- the
+// calibrated bucket value is what actually matters, not this constant.
 export function recordImageTokenCalibration(size: string, quality: string, imageTokens: number | undefined, inputImages: number): void {
   if (!imageTokens || imageTokens <= 0 || inputImages <= 0) return;
   const usdPerImage = (imageTokens * OUTPUT_USD_PER_TOKEN) / inputImages;
@@ -265,7 +267,8 @@ export function recordRunOutputTokens(
 ): void {
   const table = loadOutputTokenTable();
   const changed = recordOutputTokens(table, {
-    model: typeof params.model === "string" ? params.model : SUNBURST_MODEL,
+    // Normalized so a stale param (a 2.5 id) never writes a 2.5-keyed entry.
+    model: normalizeStoredModel(params.model),
     size: typeof params.size === "string" ? params.size : undefined,
     quality: typeof params.quality === "string" ? params.quality : undefined,
     outputTokens: outputTokensFromUsage(usage),
@@ -285,7 +288,7 @@ export function estimateOutputOnlyUsd(options: {
   candidates?: number;
 }): number | null {
   return estimateOutputUsd(loadOutputTokenTable(), {
-    model: options.model || SUNBURST_MODEL,
+    model: normalizeStoredModel(options.model),
     size: options.size,
     quality: options.quality,
     count: Math.max(1, Math.round(options.candidates ?? 1)),

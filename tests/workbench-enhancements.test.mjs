@@ -4,16 +4,11 @@ import test from "node:test";
 
 import { collectFinalImageOutputs } from "../app/components/workbench/final-outputs.ts";
 import { MANIFESTS, outputValuesFor } from "../app/components/workbench/nodes/manifests.ts";
-import {
-  buildMaskedReferencePrompt,
-  clampFluxGuidance,
-  FLUX_FILL_GUIDANCE_DEFAULT,
-  FLUX_FILL_GUIDANCE_MAX,
-  FLUX_FILL_GUIDANCE_MIN,
-  FLUX_FILL_SEED_MAX,
-  maskedReferenceSupported,
-  normalizeFluxSeed,
-} from "../app/components/workbench/nodes/maskedEdit.manifest.ts";
+import { EXPORT_FORMAT, EXPORT_VERSION, validateImport } from "../app/components/workbench/export-import.ts";
+import { estimateSunburstCost, generationDraftOverride } from "../app/components/workbench/nodes/generation.ts";
+import { buildMaskedReferencePrompt, usesRetiredEngine } from "../app/components/workbench/nodes/maskedEdit.manifest.ts";
+import { signatureFor } from "../app/components/workbench/signature.ts";
+import { SUNBURST_MODEL } from "../app/lib/sunburst.ts";
 import { IMAGE_DESCRIPTION_INSTRUCTION } from "../app/components/workbench/nodes/imageDescription.manifest.ts";
 import {
   channelCorrection,
@@ -53,9 +48,6 @@ test("Masked Edit declares a GPT-native optional reference image plus dedicated 
   assert.deepEqual(reference, { id: "reference", kind: "image", label: "Reference image" });
   assert.equal(manifest.defaultParams.referenceInstruction, "");
   assert.equal(manifest.importSchema.paramKeys.referenceInstruction.type, "string");
-  assert.equal(maskedReferenceSupported("gpt-image"), true);
-  assert.equal(maskedReferenceSupported("workers-ai"), false);
-  assert.equal(maskedReferenceSupported("flux-fill"), false);
 
   assert.equal(buildMaskedReferencePrompt("Replace the tile.", "", false), "Replace the tile.");
   assert.match(
@@ -64,26 +56,91 @@ test("Masked Edit declares a GPT-native optional reference image plus dedicated 
   );
 });
 
-test("Masked Edit exposes FLUX Fill guidance and seed, defaulting guidance below BFL's literal-prompt 60", () => {
+test("Masked Edit has a single Sunburst backend: no engine, FLUX or Workers AI params remain", () => {
   const manifest = MANIFESTS.maskedEdit;
+  for (const key of ["engine", "fluxGuidance", "fluxSeed"]) {
+    assert.equal(key in manifest.defaultParams, false, `${key} must not ship as a default`);
+    assert.equal(key in manifest.importSchema.paramKeys, false, `${key} must not be importable`);
+  }
+  assert.equal(manifest.defaultParams.model, SUNBURST_MODEL);
+  assert.deepEqual(manifest.importSchema.paramKeys.model.values, [SUNBURST_MODEL]);
+});
 
-  assert.equal(manifest.defaultParams.fluxGuidance, FLUX_FILL_GUIDANCE_DEFAULT);
-  assert.ok(FLUX_FILL_GUIDANCE_DEFAULT < 60, "the default must blend material fills rather than render prompts literally");
-  assert.equal(manifest.importSchema.paramKeys.fluxGuidance.type, "number");
-  assert.equal(manifest.importSchema.paramKeys.fluxSeed.integer, true);
-  // Unset seed means "random per run", so it must not ship a default.
-  assert.equal("fluxSeed" in manifest.defaultParams, false);
+function maskedExport(params) {
+  return {
+    format: EXPORT_FORMAT,
+    version: EXPORT_VERSION,
+    exportedAt: Date.now(),
+    graphOnly: true,
+    nodes: [{ id: "masked-legacy", kind: "maskedEdit", position: { x: 0, y: 0 }, params }],
+    edges: [],
+    images: {},
+  };
+}
 
-  assert.equal(clampFluxGuidance(35), 35);
-  assert.equal(clampFluxGuidance(500), FLUX_FILL_GUIDANCE_MAX);
-  assert.equal(clampFluxGuidance(0), FLUX_FILL_GUIDANCE_MIN);
-  assert.equal(clampFluxGuidance(""), FLUX_FILL_GUIDANCE_DEFAULT);
+for (const engine of ["workers-ai", "flux-fill"]) {
+  test(`importing a saved Masked Edit on the retired "${engine}" engine yields a Sunburst node`, () => {
+    const result = validateImport(maskedExport({
+      engine,
+      fluxGuidance: 45,
+      fluxSeed: 7,
+      prompt: "ignored",
+      size: "1024x1024",
+      quality: "high",
+      maskRegionX: 10,
+      maskRegionY: 20,
+      maskRegionWidth: 300,
+      maskRegionHeight: 400,
+    }));
+    const [node] = result.nodes;
+    assert.equal(node.kind, "maskedEdit");
+    assert.equal("engine" in node.params, false);
+    assert.equal("fluxGuidance" in node.params, false);
+    assert.equal("fluxSeed" in node.params, false);
+    assert.equal(node.params.model, SUNBURST_MODEL);
+    // Settings that still mean something survive the migration.
+    assert.equal(node.params.size, "1024x1024");
+    assert.equal(node.params.quality, "high");
+    assert.equal(node.params.maskRegionWidth, 300);
+  });
 
-  assert.equal(normalizeFluxSeed(""), undefined, "a cleared seed field means random, not seed 0");
-  assert.equal(normalizeFluxSeed(undefined), undefined);
-  assert.equal(normalizeFluxSeed(-4), undefined);
-  assert.equal(normalizeFluxSeed(0), 0, "0 is a seed BFL honours and must survive normalization");
-  assert.equal(normalizeFluxSeed(1e12), FLUX_FILL_SEED_MAX);
+  test(`a persisted Masked Edit still carrying "${engine}" is billed, drafted and signed as a Sunburst edit`, () => {
+    const manifest = MANIFESTS.maskedEdit;
+    // persistence.ts restores `{ ...defaultParams, ...stored.params }`, so a
+    // reloaded graph keeps the dead keys; nothing may act on them.
+    const legacy = { ...manifest.defaultParams, engine, fluxGuidance: 30, fluxSeed: 3 };
+    const current = { ...manifest.defaultParams };
+    assert.equal(usesRetiredEngine(legacy), true);
+
+    const estimate = manifest.estimateCost({ params: legacy, inputImages: 1 });
+    assert.equal(estimate, estimateSunburstCost({ params: current, inputImages: 1 }));
+    assert.notEqual(estimate, 0, "a formerly free Workers AI node must not show $0 and then bill Sunburst");
+    assert.deepEqual(manifest.draftOverride(legacy), generationDraftOverride(legacy));
+
+    // The old SD/FLUX run was signed with the engine in it: the signature must
+    // move so the cached output is stale and the next run goes to Sunburst.
+    const context = { incoming: new Map(), liveNode: () => undefined, draft: false };
+    const asNode = (params) => node("m", "maskedEdit", undefined, params);
+    const stable = manifest.stableParams(legacy);
+    assert.equal("engine" in stable, false);
+    assert.equal("fluxGuidance" in stable, false);
+    assert.equal("fluxSeed" in stable, false);
+    assert.equal(signatureFor(context, asNode(legacy)), signatureFor(context, asNode(current)));
+  });
+}
+
+test("an existing GPT Image Masked Edit keeps its signature, so its cached run is not re-billed", () => {
+  const manifest = MANIFESTS.maskedEdit;
+  const saved = { ...manifest.defaultParams, engine: "gpt-image", fluxGuidance: 30 };
+  assert.equal(usesRetiredEngine(saved), false);
+  assert.deepEqual(manifest.stableParams(saved), saved);
+});
+
+test("Masked Edit executes only through /api/workbench/edit", async () => {
+  const source = await readFile(new URL("../app/components/workbench/nodes/maskedEdit.tsx", import.meta.url), "utf8");
+  assert.match(source, /fetch\("\/api\/workbench\/edit"/);
+  assert.doesNotMatch(source, /\/api\/workbench\/inpaint/);
+  assert.doesNotMatch(source, /fluxGuidance|fluxSeed|"workers-ai"|"flux-fill"|<select/);
 });
 
 test("Patch declares two image inputs plus an optional Region mask input and stays a free, blob-owning-free client node", () => {

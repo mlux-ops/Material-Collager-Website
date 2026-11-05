@@ -202,7 +202,7 @@ export function regionShapesFor(selection: CropSelection): MaskShape[] {
 
 // DOM-touching execute wrapper: crops the cached input image to the selected
 // region via canvas (polygon crops fill the outside of the shape with
-// transparency), clamps the result to a valid gpt-image-2 size, then caches
+// transparency), clamps the result to a valid Sunburst size, then caches
 // it through putBlob. Also rasterizes the region as an alpha mask at source
 // size so the "Region" output survives persistence like any other blob-backed
 // value. No network request.

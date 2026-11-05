@@ -34,7 +34,6 @@ import {
   selectionHash,
 } from "../scripts/autoboard/lib/render.mjs";
 import { DEFAULT_VARIANTS } from "../scripts/autoboard/lib/variants.mjs";
-import { uploadFileToOpenAI } from "../scripts/autoboard/lib/openai-upload.mjs";
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
 const A = DEFAULT_VARIANTS[0];
@@ -228,28 +227,6 @@ test("postGeneration turns an Access 302/403 into AccessError and surfaces Worke
 test("postGeneration honours an AbortSignal", async (t) => {
   t.mock.method(globalThis, "fetch", async (_url, init) => { init.signal.throwIfAborted(); return Response.json({ ok: true }); });
   await assert.rejects(postGeneration("https://w.example", {}, [], { signal: AbortSignal.abort() }), (error) => error.name === "AbortError");
-});
-
-test("Batch reference uploads preserve structured failure diagnostics without retrying", async (t) => {
-  const { runDir } = scratchRun();
-  const filePath = path.join(runDir, "lib", "faucet.png");
-  let calls = 0;
-  t.mock.method(globalThis, "fetch", async () => {
-    calls++;
-    return Response.json({
-      ok: false,
-      error: "Busy",
-      code: "rate_limited",
-      retryAfterMs: 120000,
-      diagnostics: { attempts: [{ stage: "upload", outcome: "ambiguous" }] },
-    }, { status: 429 });
-  });
-  await assert.rejects(
-    uploadFileToOpenAI("https://w.example", {}, filePath, "test-key"),
-    (error) => error.status === 429 && error.code === "rate_limited" && error.retryAfterMs === 120000 && error.diagnostics.attempts.length === 1,
-  );
-  assert.equal(calls, 1);
-  rmSync(runDir, { recursive: true, force: true });
 });
 
 test("ensureRenders creates the per-board record once and nextRenderId zero-pads per kind", () => {
@@ -475,7 +452,7 @@ test("runRenderJob carries selected quality/background and completed usage metad
       ok: true,
       imageBase64: PNG.toString("base64"),
       mimeType: "image/png",
-      model: "gpt-image-2.5-sunburst",
+      model: "gpt-image-2.6-sunburst",
       usage: { input_tokens: 1000, input_tokens_details: { image_tokens: 200, text_tokens: 800 }, output_tokens: 300 },
       jobId: "job-options",
     });
@@ -488,7 +465,7 @@ test("runRenderJob carries selected quality/background and completed usage metad
     signal: new AbortController().signal, onProgress: () => {}, persist: async () => {},
   });
   const record = results.renders[boardId].drafts[0];
-  assert.equal(record.model, "gpt-image-2.5-sunburst");
+  assert.equal(record.model, "gpt-image-2.6-sunburst");
   assert.equal(record.quality, "xhigh");
   assert.equal(record.background, "transparent");
   assert.equal(record.outputFormat, "png");
@@ -522,9 +499,7 @@ test("draft then confirm preserves source draft options for immediate and Batch 
   assert.equal(candidate.background, "transparent");
   assert.equal(candidate.draftQuality, "low");
   assert.equal(candidate.draftBackground, "transparent");
-  for (const mode of ["finalize", "batch-finalize"]) {
-    assert.equal(candidateIsStaleForFinalize(currentBoard, candidate), false, `${mode} should accept the reviewed source`);
-  }
+  assert.equal(candidateIsStaleForFinalize(currentBoard, candidate), false, "finalize should accept the reviewed source");
   rmSync(runDir, { recursive: true, force: true });
 });
 

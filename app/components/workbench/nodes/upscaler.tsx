@@ -3,6 +3,7 @@
 import { memo } from "react";
 import { readApiResponse } from "@/app/lib/api-client";
 import { classifySize } from "@/app/lib/image-model-limits";
+import { SUNBURST_MODEL } from "@/app/lib/sunburst";
 import { putBlob } from "../blob-cache";
 import { useWorkbenchStore } from "../store";
 import styles from "../workbench.module.css";
@@ -96,7 +97,7 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
 
   // issue-7: resolved, not raw -- ctx.params.size may be an arbitrary string
   // from the generic Inspector (or a draft-mode-computed size that's a valid
-  // gpt-image-2 size but not a UPSCALE_SIZES menu member); this is the same
+  // Sunburst size but not a UPSCALE_SIZES menu member); this is the same
   // resolution the manifest's estimateCost/stableParams already apply, so
   // what gets estimated, signed, and submitted always agree.
   const size = resolveUpscaleSize(ctx.params.size);
@@ -106,7 +107,7 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
   if (background === "transparent" && outputFormat === "jpeg") throw new Error("Transparent output requires PNG or WebP; choose a compatible format before generating.");
 
   const form = new FormData();
-  form.append("payload", JSON.stringify({ prompt: UPSCALE_PROMPT, size, quality, n: 1, model: ctx.params.model, background, outputFormat }));
+  form.append("payload", JSON.stringify({ prompt: UPSCALE_PROMPT, size, quality, n: 1, model: SUNBURST_MODEL, background, outputFormat }));
   form.append("image[]", file, "input.png");
 
   ctx.setProgress(`Upscaling to ${size}… long runs may take several minutes.`);
@@ -119,7 +120,7 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
     const bytes = decodeBase64Image(base64);
     const mimeType = response.mimeType || (outputFormat === "jpeg" ? "image/jpeg" : outputFormat === "webp" ? "image/webp" : "image/png");
     const cachedUrl = putBlob(cacheKey, new Blob([bytes], { type: mimeType }));
-    return { kind: "image", url: cachedUrl, cacheKey, mimeType: mimeType as "image/png" | "image/jpeg" | "image/webp", outputFormat, background, model: String(ctx.params.model ?? "gpt-image-2.5-sunburst") };
+    return { kind: "image", url: cachedUrl, cacheKey, mimeType: mimeType as "image/png" | "image/jpeg" | "image/webp", outputFormat, background, model: SUNBURST_MODEL };
   });
   ctx.applyRun({ runId, signature: ctx.signature, at: Date.now(), values: [images], usage: response.usage });
 }

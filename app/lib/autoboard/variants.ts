@@ -120,8 +120,6 @@ export type BoardPayloadOptions = {
   outputResolution?: string;
   renderKind?: string;
   layoutReference?: boolean;
-  layoutReferenceFileId?: string;
-  fileIdsBySlot?: Map<string, string[]>;
   apiKey?: string;
   basename: Basename;
 };
@@ -129,12 +127,6 @@ export type BoardPayloadOptions = {
 // Build the exact CollageRequestInput the app's /api/generate endpoint
 // expects. imageNames drives the server's reference count; the actual files
 // are appended to the multipart form in this same item order.
-//
-// The economy (Batch API) endpoint takes the same payload shape but can't
-// accept multipart bytes — it needs each item's images by OpenAI file id
-// instead (imageFileIds) and an explicit layoutReferenceFileId string rather
-// than implied multipart order. Pass `fileIdsBySlot` (Map<slotId, string[]>)
-// and `layoutReferenceFileId` to get that shape instead of imageNames.
 export function boardPayload(
   board: Board,
   variant: Variant,
@@ -146,8 +138,6 @@ export function boardPayload(
     outputResolution = "studio",
     renderKind = "studio",
     layoutReference = false,
-    layoutReferenceFileId,
-    fileIdsBySlot,
     apiKey,
     basename,
   } = options;
@@ -172,16 +162,13 @@ export function boardPayload(
       brand: item.brand || undefined,
       name: item.name || undefined,
       notes: modelNotes(item.notes),
-      ...(fileIdsBySlot
-        ? { imageFileIds: fileIdsBySlot.get(item.slotId) ?? [] }
-        : { imageNames: item.images.map((imagePath) => `${item.slotId}--${basename(imagePath)}`) }),
+      imageNames: item.images.map((imagePath) => `${item.slotId}--${basename(imagePath)}`),
     })),
   };
   if (layoutReference) {
     payload.layoutReference = true;
     payload.layoutReferenceMode = "approved-draft";
   }
-  if (layoutReferenceFileId) payload.layoutReferenceFileId = layoutReferenceFileId;
   if (apiKey) payload.apiKey = apiKey;
   return payload;
 }

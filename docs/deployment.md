@@ -41,7 +41,6 @@ There is no separate staging Worker; `docs/staging-deployment-checklist.md` gove
 | `DB` | D1 | Drizzle; tables created lazily by the generation-history service |
 | `OUTPUTS` | R2 | Generated board outputs |
 | `IMAGES` | Cloudflare Images | `/_vinext/image` optimizer route |
-| `AI` | Workers AI | `/api/workbench/inpaint` (SD 1.5 inpainting) |
 | `ASSETS` | Static assets | Built client assets |
 
 ## Access control

@@ -130,6 +130,6 @@ Rollback: disable the toggle from step 1 and re-comment the `vars` block.
 - Rollback: Workers & Pages → `material-collager` → Deployments → roll back,
   or `git revert` the offending commit and push.
 - The OpenAI **Uploads API** (`POST /v1/uploads`) was blocked from the old
-  chatgpt.site environment (which is why Economy Final rendering was
-  disabled-in-practice there). On Cloudflare it may work — worth re-testing
-  the Economy Final button after migrating.
+  chatgpt.site environment. On Cloudflare it may work. Nothing in the
+  Generator depends on it any more: the Economy Final mode that did was
+  removed on 2026-11-04 (OpenAI's Batch API supports no 2.6 image model).
