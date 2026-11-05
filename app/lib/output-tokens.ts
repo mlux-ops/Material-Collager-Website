@@ -20,8 +20,9 @@
  * unavailable rather than substituting a neighbour. The table fills itself as
  * work happens.
  *
- * The model is part of the key on purpose: a pinned snapshot bump is exactly
- * the event that would invalidate every recorded count, and keying by it makes
+ * The model is part of the key on purpose: a model bump (2.5 -> 2.6
+ * Sunburst) or a pinned snapshot bump is exactly the event that would
+ * invalidate every recorded count, and keying by it makes
  * the old entries fall out of use instead of quietly misreporting.
  */
 

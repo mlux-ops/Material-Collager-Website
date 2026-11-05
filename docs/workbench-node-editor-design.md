@@ -4,6 +4,8 @@
 **Reference product:** Magnific (Freepik) Spaces — a node-graph canvas for AI image workflows.
 **Goal:** a second generator page where workflows for **interior render editing**, **exterior render editing**, and **material / appliance / tile collage creation and editing** are built as connected nodes on an infinite canvas, instead of the fixed form of `/generator`.
 
+> **Model note (2026-11-04):** every Workbench node now calls only `gpt-image-2.6-sunburst` (`SUNBURST_MODEL` in `app/lib/sunburst.ts`). The `gpt-image-2` references below are this design's original, historical grounding, not the current model.
+
 Everything in this document is grounded in (a) the Magnific Spaces docs, (b) verified OpenAI gpt-image-2 API capabilities, (c) an empirical build-toolchain test in this repo, and (d) a reuse map of the existing codebase. Sources are listed at the end.
 
 ---
@@ -85,7 +87,7 @@ Port types (color-coded): **image** (purple), **text** (blue), **references** (a
 | **Compare A/B** | image + image → — | client | slider comparison, terminal node |
 | **Note / Group** | — | client | sticky notes; colored group frames (React Flow parent nodes) |
 
-Deferred to Phase 3: **Economy (Batch) Render** node — now *provably* revivable despite the dead Uploads API (see §6).
+Deferred to Phase 3: **Economy (Batch) Render** node — *dropped 2026-11-04*: the app's Economy mode was removed, and OpenAI's Batch API supports no 2.6 image model (see §6).
 
 ## 4. Graph model & execution engine
 
@@ -147,7 +149,7 @@ A `workflows` D1 table via the repo's canonical mechanism — **runtime idempote
 
 - **The OpenAI Uploads API is dead here** (`POST /v1/uploads` → 500 from this host). Everything runs on direct multipart — which the existing `/api/generate` proves out in production. No node may depend on creating new `file_id`s.
 - **Client-orchestrated execution is the only safe shape.** The host (OpenAI site-creator wrapping a Workers-like runtime; `.openai/hosting.json` provisions only D1 + R2) has **no Queues, Durable Objects, or cron** — only `ctx.waitUntil` (~30s post-response). One API call per node run; the browser is the scheduler. A single request surviving ~5 min of fetch-wait is proven, but a server-side multi-node chain would be unresumable if the client disconnects — don't build it.
-- **The Economy/Batch path is revivable (Phase 3).** Verified: the Batch API supports gpt-image-2 on `/v1/images/edits` (50% discount, Apr 2026 changelog), and since Feb 2026 the edits endpoint accepts JSON bodies with `images: [{image_url}]` — and `GET /api/library/{id}/image` is **publicly reachable with no auth** (checked: no middleware, no token gates). So a Batch node = stage inputs into R2 → reference them by public URL in the JSONL → poll like the existing economy GET. The dead Uploads API is irrelevant to this path.
+- **(Superseded 2026-11-04 — Economy was removed and Batch supports no 2.6 image model.) The Economy/Batch path is revivable (Phase 3).** Verified: the Batch API supports gpt-image-2 on `/v1/images/edits` (50% discount, Apr 2026 changelog), and since Feb 2026 the edits endpoint accepts JSON bodies with `images: [{image_url}]` — and `GET /api/library/{id}/image` is **publicly reachable with no auth** (checked: no middleware, no token gates). So a Batch node = stage inputs into R2 → reference them by public URL in the JSONL → poll like the existing economy GET. The dead Uploads API is irrelevant to this path.
 - **Edge memory:** base64 inflation is the killer; keep per-node calls (one image round-trip each), never aggregate a whole graph's images into one request.
 - **Client persistence:** IndexedDB, reusing the generator's proven **split-blob pattern** (`writeSavedDraft` at `page.tsx:583`): graph JSON as one small record (rewritten freely on every edit), upload blobs under `blob:` keys written once and garbage-collected. New DB name `material-collager-workbench`, multiple named graphs + autosave. Export/import: graph JSON with uploads embedded as data URLs (self-contained, ComfyUI-style shareability without its missing-asset failure mode).
 
@@ -195,7 +197,7 @@ graph LR
 - Per-node output history + pinning; named graphs; export/import; templates gallery with the three domain presets; Save to Library.
 
 **Phase 3 — power features:**
-- Economy Batch node (R2 staging + `image_url` JSONL + poll), groups, cost self-calibration from usage actuals, optional shared `workflows` D1 table, List-style batching (run a graph per reference set).
+- ~~Economy Batch node (R2 staging + `image_url` JSONL + poll)~~ (dropped), groups, cost self-calibration from usage actuals, optional shared `workflows` D1 table, List-style batching (run a graph per reference set).
 
 ## 9. Risks & honest caveats
 

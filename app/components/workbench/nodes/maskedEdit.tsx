@@ -22,16 +22,8 @@ import {
   type ViewTransform,
 } from "./crop-geometry";
 import { buildGenerationPayload, decodeBase64Image } from "./generation";
-import {
-  buildMaskedReferencePrompt,
-  clampFluxGuidance,
-  FLUX_FILL_GUIDANCE_DEFAULT,
-  FLUX_FILL_GUIDANCE_MAX,
-  FLUX_FILL_GUIDANCE_MIN,
-  FLUX_FILL_SEED_MAX,
-  maskedReferenceSupported,
-  normalizeFluxSeed,
-} from "./maskedEdit.manifest";
+import { SUNBURST_MODEL } from "@/app/lib/sunburst";
+import { buildMaskedReferencePrompt, usesRetiredEngine } from "./maskedEdit.manifest";
 import { outputValuesFor, specFor } from "./manifests";
 import {
   blobFromImageValue,
@@ -46,8 +38,7 @@ import {
 // ---------------------------------------------------------------------------
 // Mask geometry. All coordinates are normalized 0-1000 against the image's
 // width (x) and height (y), so the same shapes render identically onto the
-// preview overlay, the full-res OpenAI mask, each engine's working-size
-// inpaint mask, and the compositor.
+// preview overlay, the full-res OpenAI mask, and the compositor.
 // ---------------------------------------------------------------------------
 
 type NormalizedBox = [number, number, number, number];
@@ -176,19 +167,6 @@ function renderOpenAiMask(shapes: MaskShape[], width: number, height: number): H
   context.fillStyle = "#000";
   context.fillRect(0, 0, width, height);
   context.globalCompositeOperation = "destination-out";
-  context.drawImage(shapesAlphaCanvas(shapes, width, height), 0, 0);
-  return canvas;
-}
-
-// SD/FLUX mask convention: white = repaint, black = keep.
-function renderInpaintMask(shapes: MaskShape[], width: number, height: number): HTMLCanvasElement {
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("This browser cannot render the mask.");
-  context.fillStyle = "#000";
-  context.fillRect(0, 0, width, height);
   context.drawImage(shapesAlphaCanvas(shapes, width, height), 0, 0);
   return canvas;
 }
@@ -710,17 +688,6 @@ export function MaskModal({
   );
 }
 
-// Clamping guidance on every keystroke would make values above the 1.5 minimum
-// untypable: "15" passes through "1", which would snap to 1.5 and strand the
-// caret mid-edit. Accept any numeric value while typing and clamp on blur —
-// /api/workbench/inpaint clamps independently, so an out-of-range value left
-// in an unblurred field can never reach BFL.
-function typedFluxGuidance(value: string): number {
-  if (value === "") return FLUX_FILL_GUIDANCE_DEFAULT;
-  const guidance = Number(value);
-  return Number.isFinite(guidance) ? guidance : FLUX_FILL_GUIDANCE_DEFAULT;
-}
-
 export const Component = memo(function MaskedEditNode({ id, data }: WorkbenchNodeProps) {
   const updateParams = useWorkbenchStore((state) => state.updateParams);
   const touchBlobs = useWorkbenchStore((state) => state.touchBlobs);
@@ -742,8 +709,7 @@ export const Component = memo(function MaskedEditNode({ id, data }: WorkbenchNod
   }, [edges, nodes, id]);
 
   const existingShapes = shapesFromParams(data.params);
-  const engine = data.params.engine || "gpt-image";
-  const referenceConnected = edges.some((edge) => edge.target === id && edge.targetHandle === "reference");
+  const retiredEngine = usesRetiredEngine(data.params);
 
   const applyMask = useCallback(async (shapes: MaskShape[]) => {
     setModalOpen(false);
@@ -781,87 +747,35 @@ export const Component = memo(function MaskedEditNode({ id, data }: WorkbenchNod
 
   return (
     <NodeShell data={data} footer={<RunFooter id={id} data={data} inputImages={inputImages} />}>
-      <p className={styles.hint}>
-        {engine === "workers-ai" && "Pixel-exact: only the masked pixels are repainted (free; best at removal/fill)."}
-        {engine === "flux-fill" && "Pixel-exact: only the masked pixels are repainted (FLUX, ~$0.05/run)."}
-        {engine === "gpt-image" && "Masking is guidance, not pixel-exact."}
-      </p>
-      <label className={styles.field}>
-        <span>Engine</span>
-        <select
-          className="nodrag"
-          value={engine}
-          onChange={(event) => updateParams(id, { engine: event.target.value as "gpt-image" | "workers-ai" | "flux-fill" })}
-        >
-          <option value="gpt-image">gpt-image-2 — guidance mask (paid)</option>
-          <option value="workers-ai">Workers AI SD 1.5 — exact mask (free)</option>
-          <option value="flux-fill">FLUX Fill pro — exact mask (~$0.05)</option>
-        </select>
-      </label>
-      {engine === "flux-fill" && (
-        <>
-          <label className={styles.field}>
-            <span>Prompt adherence (guidance)</span>
-            <input
-              className="nodrag"
-              type="number"
-              min={FLUX_FILL_GUIDANCE_MIN}
-              max={FLUX_FILL_GUIDANCE_MAX}
-              step={0.5}
-              value={data.params.fluxGuidance ?? FLUX_FILL_GUIDANCE_DEFAULT}
-              onChange={(event) => updateParams(id, { fluxGuidance: typedFluxGuidance(event.target.value) })}
-              onBlur={(event) => updateParams(id, { fluxGuidance: clampFluxGuidance(event.target.value) })}
-            />
-          </label>
-          <p className={styles.hint}>
-            {`${FLUX_FILL_GUIDANCE_MIN}–${FLUX_FILL_GUIDANCE_MAX}. Low (20–35) blends a material or texture into its surroundings; high (50–60) renders the prompt literally, which is right when the region should become a specific new object. Describe what the patch should contain, never what to remove — a “remove the metal” prompt puts metal back.`}
-          </p>
-          <label className={styles.field}>
-            <span>Seed (blank = random)</span>
-            <input
-              className="nodrag"
-              type="number"
-              min={0}
-              max={FLUX_FILL_SEED_MAX}
-              step={1}
-              placeholder="random"
-              value={data.params.fluxSeed ?? ""}
-              onChange={(event) => updateParams(id, { fluxSeed: normalizeFluxSeed(event.target.value) })}
-            />
-          </label>
-          <p className={styles.hint}>Fix the seed to make a re-run reproducible, so changing the prompt or guidance is the only variable.</p>
-        </>
+      <p className={styles.hint}>Masking is guidance, not pixel-exact; everything outside the mask is restored from the original.</p>
+      {retiredEngine && (
+        <p className={styles.hint}>
+          {`This node was saved on a retired engine (Workers AI or FLUX Fill). It now runs on ${SUNBURST_MODEL}, billed per run; its earlier output stays until you re-run it.`}
+        </p>
       )}
       <label className={styles.field}>
-        <span>Reference guidance (GPT Image only)</span>
+        <span>Reference guidance</span>
         <textarea
           className={`${styles.textarea} nodrag nowheel`}
           rows={3}
           placeholder="e.g. Match the reference's veining and satin finish, but keep the base image's scale and perspective."
           value={data.params.referenceInstruction ?? ""}
-          disabled={!maskedReferenceSupported(engine)}
           onChange={(event) => updateParams(id, { referenceInstruction: event.target.value })}
         />
       </label>
       <p className={styles.hint}>
-        {maskedReferenceSupported(engine)
-          ? "Optional: connect Reference image. GPT Image receives it as the second image; the mask remains attached to the base image."
-          : referenceConnected
-            ? "The connected reference image cannot be used by this engine. Choose GPT Image or disconnect it before running."
-            : "Workers AI and FLUX Fill do not support a second reference image; choose GPT Image to use reference guidance."}
+        Optional: connect Reference image. It is sent as the second image; the mask remains attached to the base image.
       </p>
       <button type="button" className="nodrag" onClick={() => setModalOpen(true)} disabled={!inputImageUrl}>
         {existingShapes ? "Edit mask…" : "Draw mask…"}
       </button>
-      {/* Size/quality are gpt-image-2 knobs; the inpaint engines derive their
-          working size from the input image, so hide them there. */}
-      {engine === "gpt-image" && <GenerationSettings id={id} data={data} inputPortId="image" />}
+      <GenerationSettings id={id} data={data} inputPortId="image" />
       <OutputPreview id={id} data={data} />
       {modalOpen && inputImageUrl && (
         <MaskModal
           imageUrl={inputImageUrl}
           initialShapes={existingShapes}
-          pixelExact={engine !== "gpt-image"}
+          pixelExact={false}
           onCancel={() => setModalOpen(false)}
           onApply={applyMask}
         />
@@ -922,9 +836,9 @@ async function compositeShapesEdit(originalUrl: string, editedUrl: string, shape
   return outputFormat === "png" ? canvasToBlob(out) : canvasToImageBlob(out, outputFormat);
 }
 
-// Composite each returned candidate and cache the results. Shared by all
-// engines — it's what makes protection pixel-exact regardless of what the
-// model returned or at what size.
+// Composite each returned candidate and cache the results — it's what makes
+// protection pixel-exact regardless of what the model returned or at what
+// size.
 async function compositedOutputs(
   ctx: ExecuteContext,
   runId: string,
@@ -959,78 +873,12 @@ async function compositedOutputs(
   return images;
 }
 
-// Per-engine working sizes; the full-resolution original is composited back
-// over the result, so only the edited region pays the downscale. SD 1.5's
-// quality sweet spot is 1024; FLUX Fill holds up at 2048 (and is priced flat
-// per image, so the larger canvas costs nothing extra).
-const INPAINT_LONG_EDGE = { "workers-ai": 1024, "flux-fill": 2048 } as const;
-
-// Mask-conditioned engines (Workers AI SD 1.5 / FLUX Fill): rebuild the base
-// image + a white-on-black mask (white = repaint) at the engine's working
-// size, straight from the shape params — no dependency on the cached
-// OpenAI-convention mask blob.
-async function executeInpaintEngine(
-  ctx: ExecuteContext,
-  engine: keyof typeof INPAINT_LONG_EDGE,
-  prompt: string,
-  originalUrl: string,
-  shapes: MaskShape[],
-): Promise<void> {
-  const image = await loadInputImage(originalUrl);
-  const scale = Math.min(1, INPAINT_LONG_EDGE[engine] / Math.max(image.naturalWidth, image.naturalHeight, 1));
-  // Model bounds: 256-2048, dimensions divisible by 8.
-  const toDimension = (value: number) => Math.min(2048, Math.max(256, Math.round((value * scale) / 8) * 8));
-  const width = toDimension(image.naturalWidth);
-  const height = toDimension(image.naturalHeight);
-
-  const baseCanvas = document.createElement("canvas");
-  baseCanvas.width = width;
-  baseCanvas.height = height;
-  const baseContext = baseCanvas.getContext("2d");
-  if (!baseContext) throw new Error("This browser cannot prepare the image for inpainting.");
-  baseContext.imageSmoothingQuality = "high";
-  baseContext.drawImage(image, 0, 0, width, height);
-
-  const [baseBlob, maskBlob] = await Promise.all([
-    canvasToBlob(baseCanvas),
-    canvasToBlob(renderInpaintMask(shapes, width, height)),
-  ]);
-  // guidance/seed are FLUX-only knobs; the Workers AI path has its own fixed
-  // guidance, and sending them there would only perturb the payload.
-  const tuning = engine === "flux-fill"
-    ? { guidance: clampFluxGuidance(ctx.params.fluxGuidance), seed: normalizeFluxSeed(ctx.params.fluxSeed) }
-    : {};
-  const form = new FormData();
-  form.append("payload", JSON.stringify({ engine, prompt, width, height, ...tuning }));
-  form.append("image", new File([baseBlob], "input.png", { type: "image/png" }), "input.png");
-  form.append("mask", new File([maskBlob], "mask.png", { type: "image/png" }), "mask.png");
-
-  ctx.setProgress(engine === "flux-fill" ? "Inpainting region (FLUX)…" : "Inpainting region…");
-  const response = await fetch("/api/workbench/inpaint", { method: "POST", body: form, signal: ctx.signal })
-    .then((value) => readApiResponse<{ ok: boolean; images: string[]; mimeType: string }>(value));
-
-  const runId = ctx.createRunId();
-  const outputFormat = ctx.params.outputFormat === "webp" ? "webp" : "png";
-  const images = await compositedOutputs(
-    ctx,
-    runId,
-    response.images,
-    response.mimeType,
-    originalUrl,
-    shapes,
-    outputFormat,
-    ctx.params.background === "transparent" ? "transparent" : "opaque",
-    ctx.params.model || "gpt-image-2.5-sunburst",
-  );
-  ctx.applyRun({ runId, signature: ctx.signature, at: Date.now(), values: [images] });
-}
-
-// DOM-touching execute wrapper. gpt-image engine: uploads the cached PNG mask
-// (<4MB, opaque elsewhere / transparent inside the drawn shapes) alongside
-// the base image to /api/workbench/edit. Inpaint engines:
-// executeInpaintEngine above. All engines composite the edited result back
-// over the original through the shape mask (feathered inward, bit-identical
-// outside).
+// DOM-touching execute wrapper: uploads the cached PNG mask (<4MB, opaque
+// elsewhere / transparent inside the drawn shapes) alongside the base image
+// to /api/workbench/edit, then composites the edited result back over the
+// original through the shape mask (feathered inward, bit-identical outside).
+// A retired `engine` value left in persisted params is never read: every
+// node takes this path.
 export async function execute(ctx: ExecuteContext): Promise<void> {
   const basePayload = buildGenerationPayload(ctx.params, ctx.inputs("prompt"));
   const base = ctx.inputs("image");
@@ -1038,9 +886,6 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
   const baseValue = base[0];
   if (baseValue.kind !== "image") throw new Error("Connect an input image first.");
   const references = ctx.inputs("reference");
-  if (references.length && !maskedReferenceSupported(ctx.params.engine)) {
-    throw new Error("Reference images are supported only by the GPT Image engine. Switch engines or disconnect the reference image.");
-  }
   const referenceValue = references[0];
   if (referenceValue && referenceValue.kind !== "image") throw new Error("Connect a photo to the Reference image input.");
   const payload = {
@@ -1060,11 +905,6 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
 
   const shapes = shapesFromParams(ctx.params);
   if (!shapes) throw new Error("Draw a mask first.");
-
-  if (ctx.params.engine === "workers-ai" || ctx.params.engine === "flux-fill") {
-    await executeInpaintEngine(ctx, ctx.params.engine, payload.prompt, baseValue.url, shapes);
-    return;
-  }
 
   const maskCacheKey = ctx.params.maskCacheKey;
   if (!maskCacheKey) throw new Error("Draw a mask first.");

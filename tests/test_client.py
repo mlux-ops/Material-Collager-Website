@@ -65,8 +65,8 @@ class ClientTests(unittest.TestCase):
             result = generate_collage(request, client=client, output_path=out)
 
             self.assertEqual(out.read_bytes(), b"image-bytes")
-            self.assertEqual(result.model, "gpt-image-2.5-sunburst")
-            self.assertEqual(client.images.last_kwargs["model"], "gpt-image-2.5-sunburst")
+            self.assertEqual(result.model, "gpt-image-2.6-sunburst")
+            self.assertEqual(client.images.last_kwargs["model"], "gpt-image-2.6-sunburst")
             self.assertEqual(client.images.last_kwargs["size"], "1536x1024")
             self.assertEqual(client.images.last_kwargs["quality"], "high")
             self.assertEqual(client.images.last_kwargs["background"], "opaque")

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createImageEdit, isRetryableImageError, resolveTransport } from "../app/lib/image-edit.ts";
+import { createImageEdit, isRetryableImageError } from "../app/lib/image-edit.ts";
 import { OpenAIRequestError, readOpenAIResponse } from "../app/lib/openai-server.ts";
 import { buildGenerationPrompt } from "../app/lib/collage.ts";
 
@@ -9,7 +9,7 @@ const request = {
   items: [{ id: "faucet", role: "vanity faucet", imageNames: ["front.png", "side.png"] }],
 };
 const body = {
-  model: "gpt-image-2", prompt: "Preserve the faucet finish.", size: "2560x1440",
+  model: "gpt-image-2.6-sunburst", prompt: "Preserve the faucet finish.", size: "2560x1440",
   quality: "high", background: "opaque", output_format: "png",
   references: [{ blob: new Blob(["original pixels"], { type: "image/png" }), filename: "front.png" }],
 };
@@ -97,61 +97,47 @@ test("Retry-After is surfaced without an automatic repeat", async (t) => {
 
 test("input_fidelity never reaches the wire, because no model this app uses accepts it", async (t) => {
   // Settled live on 2026-09-08: gpt-image-2.5-sunburst-2026-09-08 answers
-  // HTTP 400 invalid_input_fidelity_model, and gpt-image-2 rejects the field
-  // too. The /v1/images/edits schema lists it without a model restriction, so
-  // this guard exists to stop the schema tempting it back in.
+  // HTTP 400 invalid_input_fidelity_model, and gpt-image-2 rejected the field
+  // too. gpt-image-2.6-sunburst does not document it. The /v1/images/edits
+  // schema lists it without a model restriction, so this guard exists to stop
+  // the schema tempting it back in.
   const sent = [];
   t.mock.method(globalThis, "fetch", async (_url, init) => {
     sent.push(init.body);
     return Response.json({ data: [{ b64_json: "AA==" }], usage: {} });
   });
 
-  await createImageEdit("k", { ...body, model: "gpt-image-2.5-sunburst", input_fidelity: "low" }, []);
+  await createImageEdit("k", { ...body, model: "gpt-image-2.6-sunburst", input_fidelity: "low" }, []);
   assert.equal(sent[0].has("input_fidelity"), false);
-  assert.equal(sent[0].get("model"), "gpt-image-2.5-sunburst-2026-09-08");
+  assert.equal(sent[0].get("model"), "gpt-image-2.6-sunburst");
 
+  // A retired id that slips through is coerced to 2.6 Sunburst on the wire.
   await createImageEdit("k", { ...body, model: "gpt-image-2" }, []);
   assert.equal(sent[1].has("input_fidelity"), false);
+  assert.equal(sent[1].get("model"), "gpt-image-2.6-sunburst");
 });
 
-test("references already uploaded to OpenAI are named by id instead of re-sent as bytes", async (t) => {
+test("references and the mask always go up as multipart bytes, never as file ids", async (t) => {
   let sent;
-  let contentType;
+  let headers;
   t.mock.method(globalThis, "fetch", async (_url, init) => {
     sent = init.body;
-    contentType = init.headers["Content-Type"];
+    headers = init.headers;
     return Response.json({ data: [{ b64_json: "AA==" }], usage: {} });
   });
   await createImageEdit("k", {
     ...body,
-    model: "gpt-image-2.5-sunburst",
+    model: "gpt-image-2.6-sunburst",
     references: [
-      { filename: "faucet.png", fileId: "file-aaa" },
-      { filename: "tile.png", fileId: "file-bbb" },
+      { filename: "faucet.png", blob: new Blob(["a"], { type: "image/png" }) },
+      { filename: "tile.png", blob: new Blob(["b"], { type: "image/png" }) },
     ],
+    mask: { filename: "mask.png", blob: new Blob(["m"], { type: "image/png" }) },
   }, []);
-  assert.equal(contentType, "application/json");
-  const json = JSON.parse(sent);
-  assert.deepEqual(json.images, [{ file_id: "file-aaa" }, { file_id: "file-bbb" }]);
-  assert.equal(json.model, "gpt-image-2.5-sunburst-2026-09-08");
-  assert.equal(json.size, "2560x1440");
-  assert.equal(json.background, "opaque");
-});
-
-test("a single bytes-only reference keeps the whole request on multipart", () => {
-  // The endpoint takes one form or the other; a mixed set must not be split.
-  assert.equal(resolveTransport({
-    ...body,
-    references: [{ filename: "a.png", fileId: "file-aaa" }, { blob: new Blob(["x"]), filename: "b.png" }],
-  }), "multipart");
-  assert.equal(resolveTransport({
-    ...body,
-    references: [{ filename: "a.png", fileId: "file-aaa" }],
-  }), "file_id");
-  // A mask that exists only as bytes drags the request back to multipart too.
-  assert.equal(resolveTransport({
-    ...body,
-    references: [{ filename: "a.png", fileId: "file-aaa" }],
-    mask: { blob: new Blob(["m"]), filename: "mask.png" },
-  }), "multipart");
+  assert.ok(sent instanceof FormData);
+  assert.equal(headers["Content-Type"], undefined, "fetch sets the multipart boundary itself");
+  assert.deepEqual(sent.getAll("image[]").map((file) => file.name), ["faucet.png", "tile.png"]);
+  assert.equal(sent.get("mask").name, "mask.png");
+  assert.equal(sent.get("model"), "gpt-image-2.6-sunburst");
+  assert.equal(sent.has("images"), false);
 });

@@ -3,7 +3,7 @@ import type { CostEstimateInput, ImportParamRule, NodeManifest, WorkbenchParams 
 import { estimateSunburstCost, GENERATION_BACKGROUNDS, GENERATION_FORMATS, GENERATION_QUALITIES } from "./generation.ts";
 import { SUNBURST_MODEL } from "../../../lib/sunburst.ts";
 
-// Valid gpt-image-2 target sizes for upscaling, clamped to a 3840x2160
+// Valid Sunburst target sizes for upscaling, clamped to a 3840x2160
 // ceiling (all divisible by 16, aspect within 1:3-3:1, total pixels within
 // 655,360-8,294,400 — the same bounds validateEditSize enforces server-side;
 // this list is just the client's menu of options, not a reimplementation of
@@ -104,7 +104,7 @@ function upscalerDraftOverride(params: WorkbenchParams): WorkbenchParams {
 }
 
 // Buffered-only (no SSE) upscale over /api/workbench/edit. Target sizes clamp
-// to valid gpt-image-2 dimensions (validateEditSize rules, reused not
+// to valid Sunburst dimensions (validateEditSize rules, reused not
 // reinvented) with a 3840x2160 ceiling; the UI warns 2K+ buffered runs may
 // fail on idle-gateway timeouts. Cancellation threads the client AbortSignal
 // through the route into the upstream OpenAI fetch (see image-edit.ts /

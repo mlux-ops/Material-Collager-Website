@@ -156,10 +156,9 @@ export function recordMetadata(payload, json) {
   };
 }
 
-// Direct CLI finalize and batch-finalize share the same review gate. When a
-// plan has saved render options (or the operator supplies an explicit CLI
-// override), compare the candidate's effective draft settings before either
-// path consumes its source. Plans and candidates predating render metadata
+// The direct CLI finalize's review gate. When a plan has saved render
+// options (or the operator supplies an explicit CLI override), compare the
+// candidate's effective draft settings before finalize consumes its source. Plans and candidates predating render metadata
 // remain compatible when no option selection is in force.
 export function candidateIsStaleForFinalize(board, candidate, overrides = {}) {
   if (!candidate) return true;

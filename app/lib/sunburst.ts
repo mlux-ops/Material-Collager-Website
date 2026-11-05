@@ -1,32 +1,71 @@
 /** Shared contracts and accounting for the Sunburst image API model. */
 
-// The floating alias. It stays the stored/UI identity: node params, saved
-// workflows, plan files, and cache keys all carry this value, so an old
-// workflow keeps importing and a Sunburst render keeps matching a Sunburst
-// cache entry across snapshot bumps.
-export const SUNBURST_MODEL = "gpt-image-2.5-sunburst" as const;
+// The only image model the site renders with. It is both the stored/UI
+// identity (node params, saved workflows, plan files, cache keys) and the id
+// put on the wire: OpenAI lists no dated snapshot for gpt-image-2.6-sunburst
+// (2026-11-04), only this alias, so there is nothing to pin. If a dated
+// snapshot appears later, pin it in resolveWireModel, not here.
+export const SUNBURST_MODEL = "gpt-image-2.6-sunburst" as const;
 
-// The dated snapshot actually sent upstream. Pinning it means a silent
-// server-side alias bump cannot change how a board renders underneath stored
-// provenance; bumping it here is a deliberate, reviewable change.
-export const SUNBURST_MODEL_SNAPSHOT = "gpt-image-2.5-sunburst-2026-09-08" as const;
+// The one exception: the Workbench's "Test" node renders on the previous
+// Sunburst, pinned to the dated snapshot the site sent until 2026-11-04 (its
+// input_fidelity behaviour was verified live on 2026-09-08, see below). Only
+// this exact dated id survives on the wire. The bare 2.5 alias
+// ("gpt-image-2.5-sunburst"), which is what stale tabs and saved workflows
+// carry, still becomes SUNBURST_MODEL, so nothing reaches 2.5 by accident.
+export const TEST_MODEL_2_5 = "gpt-image-2.5-sunburst-2026-09-08" as const;
 
-export const LEGACY_IMAGE_MODEL = "gpt-image-2" as const;
+export type AllowedImageModel = typeof SUNBURST_MODEL | typeof TEST_MODEL_2_5;
 
 /**
- * Map a stored model identity onto the exact model id to put on the wire.
- *
- * Only the Sunburst alias is redirected. A caller that already holds a dated
- * snapshot (a replayed historical job, say) keeps it, and the legacy model is
- * passed through untouched.
+ * Map any stored or requested model identity onto the exact model id to put
+ * on the wire. TEST_MODEL_2_5 (the Test node) is passed through; every other
+ * value -- gpt-image-2, the bare gpt-image-2.5-sunburst alias, other dated
+ * snapshots, any flare id, an empty string, garbage -- becomes SUNBURST_MODEL.
+ * A stale tab, an old saved workflow or a replayed job can therefore never
+ * send a retired model upstream.
  */
-export function resolveWireModel(model: string): string {
-  return model === SUNBURST_MODEL ? SUNBURST_MODEL_SNAPSHOT : model;
+export function resolveWireModel(model: unknown): AllowedImageModel {
+  return model === TEST_MODEL_2_5 ? TEST_MODEL_2_5 : SUNBURST_MODEL;
 }
 
-/** True for the Sunburst alias and every dated Sunburst snapshot. */
+/**
+ * Map a stored model value (a node param, a plan file, an imported workflow)
+ * onto the current identity, for use on load/import. TEST_MODEL_2_5 is kept so
+ * a saved Test node keeps rendering on 2.5. Legacy values -- gpt-image-2, the
+ * bare 2.5 alias, any other snapshot -- become SUNBURST_MODEL, so a signature
+ * or cache key computed from the normalized params no longer matches a run
+ * rendered by the old model. Same answer as resolveWireModel; kept separate
+ * because the two answer different questions (what to store vs. what to send)
+ * and may diverge if a 2.6 snapshot is pinned.
+ */
+export function normalizeStoredModel(value: unknown): AllowedImageModel {
+  return value === TEST_MODEL_2_5 ? TEST_MODEL_2_5 : SUNBURST_MODEL;
+}
+
+/**
+ * Normalize a params record's `model` field, but only when it holds an
+ * OpenAI image-model id (`gpt-image-*`). Text-model params (the AI Assistant's
+ * `gpt-5.4-mini`, a CLI node's model) are returned untouched, as is a record
+ * with no string `model`. Returns the same object when nothing changes.
+ */
+export function normalizeImageModelParams<T extends Record<string, unknown>>(params: T): T {
+  const model = params.model;
+  if (typeof model !== "string" || !model.startsWith("gpt-image-")) return params;
+  const normalized = normalizeStoredModel(model);
+  return normalized === model ? params : { ...params, model: normalized };
+}
+
+/**
+ * True for a Sunburst identity, current or historical: the 2.6 and 2.5
+ * aliases and any dated snapshot of either. For reading history records and
+ * accepting a stale client's request (which is then sent as SUNBURST_MODEL);
+ * never for choosing what goes on the wire.
+ */
 export function isSunburstModel(model: string): boolean {
-  return model === SUNBURST_MODEL || model.startsWith(`${SUNBURST_MODEL}-`);
+  return ["gpt-image-2.6-sunburst", "gpt-image-2.5-sunburst"].some(
+    (alias) => model === alias || model.startsWith(`${alias}-`),
+  );
 }
 
 /**
@@ -37,9 +76,13 @@ export function isSunburstModel(model: string): boolean {
  *
  * The `/v1/images/edits` schema lists the field without a model restriction,
  * and the image generation guide documents it only under earlier GPT Image
- * models, so the schema alone is misleading. gpt-image-2 rejects it too, which
- * leaves no model this app uses that takes it. Reference fidelity is the
- * model's own decision and is not available as a cost or quality lever.
+ * models, so the schema alone is misleading. gpt-image-2 rejected it too.
+ *
+ * gpt-image-2.6-sunburst (current, 2026-11-04) does not document the field at
+ * all, so it is never sent: no model this app uses takes it. Reference
+ * fidelity is the model's own decision and is not available as a cost or
+ * quality lever. (2.6 also adds an optional `complexity` parameter; the app
+ * does not send it, so the documented default applies.)
  *
  * tests/image-efficiency.test.mjs pins that nothing ever puts it on the wire.
  */
@@ -61,12 +104,6 @@ export const SUNBURST_RATES_USD_PER_MILLION = {
   cachedImageInput: 2,
   imageOutput: 30,
 } as const;
-
-export const SUNBURST_BATCH_COST_MULTIPLIER = 0.5 as const;
-export type SunburstBillingMode = "standard" | "batch";
-export type SunburstCostOptions =
-  | SunburstBillingMode
-  | { mode?: SunburstBillingMode; multiplier?: number };
 
 type UsageRecord = Record<string, unknown>;
 
@@ -90,13 +127,12 @@ function recordFrom(value: unknown): UsageRecord | undefined {
 /**
  * Calculate a completed Sunburst request's actual token cost.
  *
- * The API's usage detail can vary slightly between Image API and Batch
- * responses. We accept the documented token fields and a few equivalent
- * spellings, but deliberately return null when text/image input or cache
+ * The API's usage detail can vary slightly between responses. We accept the
+ * documented token fields and a few equivalent spellings, but deliberately return null when text/image input or cache
  * allocation is incomplete. A partial subtotal must never be presented as a
  * complete cost to a user.
  */
-export function calculateSunburstUsageCost(usage: unknown, options: SunburstCostOptions = "standard"): number | null {
+export function calculateSunburstUsageCost(usage: unknown): number | null {
   const root = recordFrom(usage);
   if (!root) return null;
   const inputDetails = recordFrom(root.input_tokens_details ?? root.inputTokenDetails);
@@ -138,12 +174,6 @@ export function calculateSunburstUsageCost(usage: unknown, options: SunburstCost
     ?? numberFrom(root, ["output_tokens", "outputTokens"]);
   if (imageOutput === undefined) return null;
 
-  const mode = typeof options === "string" ? options : options.mode ?? "standard";
-  const explicitMultiplier = typeof options === "string" ? undefined : options.multiplier;
-  if (mode !== "standard" && mode !== "batch") return null;
-  const multiplier = explicitMultiplier ?? (mode === "batch" ? SUNBURST_BATCH_COST_MULTIPLIER : 1);
-  if (!Number.isFinite(multiplier) || multiplier < 0) return null;
-
   const rates = SUNBURST_RATES_USD_PER_MILLION;
   const cost = (
     (textInput - resolvedCachedText) * rates.textInput
@@ -151,6 +181,6 @@ export function calculateSunburstUsageCost(usage: unknown, options: SunburstCost
     + (imageInput - resolvedCachedImage) * rates.imageInput
     + resolvedCachedImage * rates.cachedImageInput
     + imageOutput * rates.imageOutput
-  ) / 1_000_000 * multiplier;
+  ) / 1_000_000;
   return Number.isFinite(cost) ? cost : null;
 }

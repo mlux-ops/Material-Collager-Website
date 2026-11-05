@@ -20,7 +20,7 @@ COLLAGE_TYPES = {
 }
 
 ORIENTATIONS = {"landscape", "portrait", "square"}
-SUNBURST_MODEL = "gpt-image-2.5-sunburst"
+SUNBURST_MODEL = "gpt-image-2.6-sunburst"
 QUALITIES = {"low", "medium", "high", "xhigh", "max", "auto"}
 BACKGROUNDS = {"opaque", "transparent"}
 OUTPUT_FORMATS = {"png", "jpeg", "webp"}

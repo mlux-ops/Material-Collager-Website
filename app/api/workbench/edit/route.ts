@@ -17,6 +17,7 @@ import {
   SUNBURST_BACKGROUNDS,
   SUNBURST_MODEL,
   SUNBURST_QUALITIES,
+  TEST_MODEL_2_5,
   isSunburstModel,
   resolveWireModel,
   type SunburstBackground,
@@ -67,10 +68,15 @@ export async function POST(request: Request) {
     // The Workbench runs the same model as the rest of the app, so it gets the
     // full Sunburst contract: every quality tier including xhigh and max, an
     // explicit background, and a chosen output format.
+    // The Test node sends TEST_MODEL_2_5 (the dated 2.5 snapshot) and is the
+    // only caller rendered on 2.5. A stale tab or saved workflow may still send
+    // another 2.5 Sunburst id (the bare alias); that is accepted and rendered
+    // as the current Sunburst. Anything that is not a Sunburst id
+    // (gpt-image-2, Flare, garbage) is refused before spending.
     if (payload.model !== undefined && !isSunburstModel(payload.model)) {
-      throw new Error(`This node's model "${payload.model}" is no longer supported; Sunburst is the only image model.`);
+      throw new Error(`This node's model "${payload.model}" is no longer supported; ${SUNBURST_MODEL} is the only image model.`);
     }
-    const model = SUNBURST_MODEL;
+    const model = payload.model === TEST_MODEL_2_5 ? TEST_MODEL_2_5 : SUNBURST_MODEL;
     if (payload.quality !== undefined && !SUNBURST_QUALITIES.includes(payload.quality)) {
       throw new Error("Choose a supported quality.");
     }

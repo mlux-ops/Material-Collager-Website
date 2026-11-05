@@ -8,6 +8,7 @@ import type { Edge } from "@xyflow/react";
 // resolve at runtime and is left extensionless like the rest of the codebase.
 import { ensureThumbnail, getBlob, putBlob, thumbnailKeyFor, totalCachedBytes } from "./blob-cache.ts";
 import { defaultParams, MANIFESTS } from "./nodes/manifests.ts";
+import { normalizeImageModelParams } from "../../lib/sunburst.ts";
 import type { NodeKind, NodeOutputValue, NodeRun, WorkbenchNode, WorkbenchParams } from "./types";
 
 // Named-graph, split-blob IndexedDB persistence (AC16, AC17).
@@ -841,7 +842,11 @@ export async function loadGraph(graphId: string): Promise<{ nodes: WorkbenchNode
           position: stored.position,
           data: {
             kind: stored.kind,
-            params: { ...defaultParams(stored.kind), ...stored.params },
+            // A graph saved before the 2.6 bump stores an image node's model
+            // as "gpt-image-2.5-sunburst" (or older). Normalizing it here
+            // changes the node's signature, so its cached run reads as stale
+            // instead of being served as a current-model result.
+            params: normalizeImageModelParams({ ...defaultParams(stored.kind), ...stored.params }),
             status: "idle",
             runs: [],
             activeRun: 0,

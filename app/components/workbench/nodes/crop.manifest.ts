@@ -1,7 +1,7 @@
 import type { NodeManifest } from "../types";
 
 // Zero-token client node: canvas-only crop to a selected region, clamped to
-// valid gpt-image-2 dimensions (divisible by 16, aspect 1:3-3:1,
+// valid Sunburst dimensions (divisible by 16, aspect 1:3-3:1,
 // 655,360-8,294,400 px). Region coordinates are stored as fractions (0-1) of
 // the source image so the same crop rectangle survives regardless of the
 // upstream image's actual pixel size. Routed through putBlob; zero API

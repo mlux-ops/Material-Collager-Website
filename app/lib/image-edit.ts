@@ -5,16 +5,18 @@
 
 import { OpenAIRequestError, combineAbortSignals, readOpenAIResponse } from "./openai-server.ts";
 import {
-  LEGACY_IMAGE_MODEL,
   SUNBURST_MODEL,
   resolveWireModel,
+  type AllowedImageModel,
   type SunburstBackground,
   type SunburstQuality,
 } from "./sunburst.ts";
 
 export type ImageQuality = SunburstQuality;
 export type ImageBackground = SunburstBackground;
-export type ImageModel = typeof SUNBURST_MODEL | typeof LEGACY_IMAGE_MODEL;
+// Sunburst is the only image model; resolveWireModel coerces anything else
+// to it before it reaches the wire.
+export type ImageModel = AllowedImageModel;
 
 export type OpenAIImageResponse = {
   data?: Array<{ b64_json?: string }>;
@@ -22,23 +24,17 @@ export type OpenAIImageResponse = {
 };
 
 /**
- * One reference image, held either as bytes or as an already-uploaded file.
- *
- * A reference that OpenAI already stores needs neither half of the old
- * round trip: `blob` stays undefined and the edit request names the file by id
- * instead of downloading it and posting the same bytes straight back.
+ * One reference image, sent as bytes in the multipart edit request. (The
+ * uploaded-file `file_id` form went with the chunked reference transport,
+ * whose only client was the removed Economy mode.)
  */
 export type PreparedReference = {
-  // Undefined for a reference that exists only as an uploaded OpenAI file.
-  blob?: Blob;
+  blob: Blob;
   filename: string;
-  // Present when the reference exists as an uploaded OpenAI file. Also lets QA
-  // reference it by ID instead of inlining a multi-MB base64 copy.
-  fileId?: string;
 };
 
 export function referenceBytes(reference: PreparedReference): number {
-  return reference.blob?.size ?? 0;
+  return reference.blob.size;
 }
 
 export type ImageEditRequest = {
@@ -80,13 +76,15 @@ export type AttemptDiagnostic = {
   error?: string;
 };
 
-export type ImageEditTransport = "multipart" | "file_id";
+// Always multipart. Kept as a recorded field so stored diagnostics, which
+// once could also say "file_id", keep the same shape.
+export type ImageEditTransport = "multipart";
 
 export type GenerationDiagnostics = {
   model: ImageModel;
-  // The exact model id put on the wire. Differs from `model` whenever the
-  // stored Sunburst alias resolves to its pinned dated snapshot, so a stored
-  // diagnostic records which snapshot actually produced the pixels.
+  // The exact model id put on the wire (resolveWireModel's answer). Equal to
+  // `model` today -- 2.6 Sunburst has no dated snapshot -- but recorded
+  // separately so a future pinned snapshot shows which one made the pixels.
   wireModel?: string;
   transport: ImageEditTransport;
   quality: ImageQuality;
@@ -95,7 +93,7 @@ export type GenerationDiagnostics = {
   referenceCount: number;
   totalReferenceBytes: number;
   largestReferenceBytes: number;
-  references: Array<{ filename: string; bytes: number; mimeType: string; fileId?: string }>;
+  references: Array<{ filename: string; bytes: number; mimeType: string }>;
   attempts: AttemptDiagnostic[];
 };
 
@@ -115,20 +113,6 @@ export class DiagnosedGenerationError extends Error {
 // it per request, including disabling it outright — see ImageEditRequest.
 export const IMAGE_EDIT_TIMEOUT_MS = 300_000;
 
-/**
- * Pick the transport for one edit request.
- *
- * `file_id` needs every reference to be an uploaded file and no bytes-only
- * mask, since the endpoint takes one form or the other, never a mix. Anything
- * else falls back to multipart, which always works.
- */
-export function resolveTransport(body: ImageEditRequest): ImageEditTransport {
-  if (body.references.length === 0) return "multipart";
-  if (!body.references.every((reference) => reference.fileId && !reference.blob)) return "multipart";
-  if (body.mask && !body.mask.fileId) return "multipart";
-  return "file_id";
-}
-
 function buildEditForm(body: ImageEditRequest, wireModel: string) {
   const form = new FormData();
   form.append("model", wireModel);
@@ -142,14 +126,9 @@ function buildEditForm(body: ImageEditRequest, wireModel: string) {
   }
   if (body.n && body.n > 1) form.append("n", String(body.n));
   for (const reference of body.references) {
-    if (!reference.blob) {
-      // resolveTransport only selects multipart when at least one reference
-      // lacks bytes, so reaching here means the caller mixed forms.
-      throw new Error(`Reference ${reference.filename} has no image data to upload.`);
-    }
     form.append("image[]", reference.blob, reference.filename);
   }
-  if (body.mask?.blob) form.append("mask", body.mask.blob, body.mask.filename);
+  if (body.mask) form.append("mask", body.mask.blob, body.mask.filename);
   return form;
 }
 
@@ -165,42 +144,18 @@ export async function createImageEdit(
   }
   const startedAt = Date.now();
   const wireModel = resolveWireModel(body.model);
-  // No input_fidelity anywhere: every model this app uses rejects it. See
+  // No input_fidelity anywhere: 2.5 rejected it and 2.6 does not document it. See
   // SUNBURST_SUPPORTS_INPUT_FIDELITY.
   // Declared outside the try so the failure diagnostics below can report what
   // was actually attempted.
-  const transport: ImageEditTransport = resolveTransport(body);
+  const transport: ImageEditTransport = "multipart";
   try {
     callerSignal?.throwIfAborted();
 
-    // Every reference OpenAI already stores can be named by id instead of
-    // shipped as bytes. That drops a download and a re-upload of the same
-    // multi-MB images per render and keeps the request far below the 32 MB
-    // body cap. It does NOT buy the cached image-input rate: /v1/images/edits
-    // exposes no cache parameter, so any caching there is implicit and
-    // unsteerable. Mixing the two forms in one request is not supported, so a
-    // single bytes-only reference sends the whole set as multipart.
     const response = await fetch("https://api.openai.com/v1/images/edits", {
       method: "POST",
-      headers: transport === "file_id"
-        ? { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }
-        : { Authorization: `Bearer ${apiKey}` },
-      body: transport === "file_id"
-        ? JSON.stringify({
-          model: wireModel,
-          prompt: body.prompt,
-          images: body.references.map((reference) => ({ file_id: reference.fileId })),
-          size: body.size,
-          quality: body.quality,
-          background: body.background,
-          output_format: body.output_format,
-          ...(body.output_compression !== undefined && body.output_format !== "png"
-            ? { output_compression: body.output_compression }
-            : {}),
-          ...(body.n && body.n > 1 ? { n: body.n } : {}),
-          ...(body.mask?.fileId ? { mask: { file_id: body.mask.fileId } } : {}),
-        })
-        : buildEditForm(body, wireModel),
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: buildEditForm(body, wireModel),
       // E1 cancellation threading: combine the caller's AbortSignal (aborted
       // when the client fetch to /api/workbench/edit is cancelled) with the
       // per-attempt timeout, so BOTH a client cancel and the timeout abort
@@ -224,8 +179,6 @@ export async function createImageEdit(
     throw new DiagnosedGenerationError(error, {
       model: body.model,
       wireModel,
-      // A file_id request carries no bytes, so the byte counters below are 0
-      // by construction. `transport` is what tells the two cases apart.
       transport,
       quality: body.quality,
       background: body.background,
@@ -236,8 +189,7 @@ export async function createImageEdit(
       references: body.references.map((reference) => ({
         filename: reference.filename,
         bytes: referenceBytes(reference),
-        mimeType: reference.blob?.type ?? "",
-        ...(reference.fileId ? { fileId: reference.fileId } : {}),
+        mimeType: reference.blob.type,
       })),
       attempts: diagnostics,
     });
@@ -262,8 +214,8 @@ export async function createImageGeneration(
   callerSignal?: AbortSignal,
 ) {
   validateImagePrompt(body.prompt);
-  // Callers name their model; the legacy default only covers an omitted one.
-  const model = body.model ?? LEGACY_IMAGE_MODEL;
+  // Callers name their model; an omitted one is Sunburst, the site's model.
+  const model = resolveWireModel(body.model ?? SUNBURST_MODEL);
   const background = body.background ?? "opaque";
   const outputFormat = body.output_format ?? "png";
   if (background === "transparent" && outputFormat === "jpeg") {
@@ -276,7 +228,7 @@ export async function createImageGeneration(
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: resolveWireModel(model),
+        model,
         prompt: body.prompt,
         size: body.size,
         quality: body.quality,
@@ -351,7 +303,7 @@ export function validateImagePrompt(prompt: string) {
   if (prompt.length > 32_000) throw new Error("The prompt exceeds the 32,000 character limit. Shorten the item notes or prompt and retry.");
 }
 
-// gpt-image-2 size constraints: dimensions divisible by 16, aspect between
+// Sunburst (gpt-image-2.6) size constraints: dimensions divisible by 16, aspect between
 // 1:3 and 3:1, longest edge <= 3840, total pixels 655,360 - 8,294,400.
 export function validateEditSize(size: string): string | null {
   const match = /^(\d{2,4})x(\d{2,4})$/.exec(size);
@@ -436,7 +388,7 @@ function solveEditSize(aspect: number, targetPixels: number): { width: number; h
   return { width, height };
 }
 
-// Conforms arbitrary dimensions to the same gpt-image-2 constraints
+// Conforms arbitrary dimensions to the same Sunburst size constraints
 // validateEditSize checks (divisible by 16, aspect 1:3-3:1, longest edge
 // <=3840, total pixels 655,360-8,294,400). Used by zero-token client nodes
 // (Resize/Crop) so a downstream edit node's input always passes
@@ -454,7 +406,7 @@ export function clampToValidEditSize(rawWidth: number, rawHeight: number): { wid
   return solveEditSize(aspect, targetPixels);
 }
 
-// The SMALLEST valid gpt-image-2 size at the given (width, height)'s aspect
+// The SMALLEST valid Sunburst size at the given (width, height)'s aspect
 // ratio — i.e. solveEditSize pinned to the pixel-count FLOOR rather than a
 // clamp of the raw pixel count. Used by Draft mode's small-size half
 // (generation.ts's generationDraftOverride, AC22/issue-3): every draft-

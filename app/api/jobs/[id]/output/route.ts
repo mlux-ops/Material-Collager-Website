@@ -2,6 +2,7 @@ import { ensureJobStorage, runtimeStorage } from "@/app/lib/generation-jobs";
 
 export const runtime = "edge";
 
+// A History item's stored output, by job id, while it is within retention.
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
   const DB = await ensureJobStorage();
@@ -13,7 +14,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   return new Response(object.body, {
     headers: {
       "Content-Type": object.httpMetadata?.contentType || "image/png",
-      "Content-Disposition": `inline; filename="${row.filename.replace(/[\r\n\"]+/g, "_")}"`,
+      "Content-Disposition": `inline; filename="${row.filename.replace(/[\r\n"]+/g, "_")}"`,
       "Cache-Control": "private, max-age=300",
     },
   });

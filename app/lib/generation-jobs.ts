@@ -1,12 +1,14 @@
 import { env } from "cloudflare:workers";
-import { isStaleSubmitting, staleSubmittingGuidance } from "./economy-submission-status.ts";
 import { calculateSunburstUsageCost } from "./sunburst.ts";
 
 export type RenderKind = "draft" | "studio" | "final" | "repair";
 
+// `mode` and the batch columns are read as stored: rows written by the
+// retired Economy (Batch API) mode can still be in the table until their
+// retention passes, and the schema is left as it is rather than migrated.
 export type GenerationJob = {
   id: string;
-  mode: "economy" | "immediate";
+  mode: string;
   status: string;
   openaiBatchId: string | null;
   outputKey: string | null;
@@ -32,7 +34,7 @@ export type GenerationJob = {
 
 export type JobRow = {
   id: string;
-  mode: "economy" | "immediate";
+  mode: string;
   status: string;
   openai_batch_id: string | null;
   output_key: string | null;
@@ -66,7 +68,7 @@ type RuntimeEnv = {
 };
 
 // Retention horizon for generated outputs. Exported as the single source of
-// truth: the economy route stamps the same lifetime, and cleanupExpiredJobs
+// truth: every writer stamps the same lifetime, and cleanupExpiredJobs
 // deletes both the D1 row and its R2 object once it passes, with no backup.
 export const RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
 
@@ -301,18 +303,29 @@ export async function listLibraryJobs() {
     .bind(Date.now()).all<JobRow>();
 }
 
+const TERMINAL_STATUSES = new Set(["completed", "failed", "expired", "cancelled"]);
+
+// Nothing refreshes a retired Economy batch any more, so an economy row left
+// non-terminal (submitting, validating, in_progress, ...) would read as pending
+// forever. Report it as cancelled, with the batch id so it can still be found
+// on OpenAI's Batches page. The stored row is not changed.
+function publicStatus(row: JobRow): { status: string; error: string | null } {
+  if (row.mode !== "economy" || TERMINAL_STATUSES.has(row.status)) {
+    return { status: row.status, error: row.error };
+  }
+  const batch = row.openai_batch_id ? ` Batch ${row.openai_batch_id}` : "";
+  return {
+    status: "cancelled",
+    error: row.error ?? `Economy mode was removed before this render finished.${batch} is no longer collected.`,
+  };
+}
+
 export function publicJob(row: JobRow): GenerationJob {
-  // A 'submitting' row whose paid call was interrupted (the request was
-  // cancelled, or the UPDATE that would have recorded its outcome itself
-  // failed — see POST in app/api/economy/route.ts) never moves on its own:
-  // it has no batch id yet, so the poller never picks it up. Read one old
-  // enough to be sure of that as failed instead of pending forever. The row
-  // itself is untouched; only what a reader is told changes.
-  const stale = isStaleSubmitting(row.status, row.updated_at);
+  const { status, error } = publicStatus(row);
   return {
     id: row.id,
     mode: row.mode,
-    status: stale ? "failed" : row.status,
+    status,
     openaiBatchId: row.openai_batch_id,
     outputKey: row.output_key,
     filename: row.filename,
@@ -329,7 +342,7 @@ export function publicJob(row: JobRow): GenerationJob {
     outputFormat: row.output_format ?? null,
     usage: parseJson(row.usage_json),
     qa: parseJson(row.qa_json),
-    error: stale ? staleSubmittingGuidance(row.id) : row.error,
+    error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     expiresAt: row.expires_at,

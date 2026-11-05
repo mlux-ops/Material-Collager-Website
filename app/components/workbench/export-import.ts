@@ -35,6 +35,7 @@ import type { Edge } from "@xyflow/react";
 import { blobToDataUrl, getBlob, getBlobUrl, putBlob } from "./blob-cache.ts";
 import { buildPhotoRun, PHOTO_SOURCE_KEY, sourceBlobKeysForNode } from "./persistence.ts";
 import { defaultParams, importSchemaMap, NODE_KINDS, specFor } from "./nodes/manifests.ts";
+import { normalizeImageModelParams } from "../../lib/sunburst.ts";
 // acceptedKindsFor is a real (value) import, so unlike the type-only imports
 // elsewhere in this file, this one needs the explicit .ts extension for
 // Node's --experimental-strip-types loader to resolve it at runtime.
@@ -445,7 +446,11 @@ export function validateImport(raw: unknown): ValidatedImport {
         ? { x: rawPosition.x, y: rawPosition.y }
         : { x: 0, y: 0 };
 
-    const paramsRaw = isPlainRecord(rawNode.params) ? rawNode.params : {};
+    // A workflow exported before the 2.6 bump carries "gpt-image-2.5-sunburst"
+    // (or older) as an image node's model. Map it onto the current model
+    // BEFORE the enum check, so it imports cleanly instead of being dropped
+    // with a warning. Text-model params are left alone.
+    const paramsRaw = normalizeImageModelParams(isPlainRecord(rawNode.params) ? rawNode.params : {});
     const validatedFields = validateNodeParams(kind as NodeKind, paramsRaw, oldId, newId, decodedImages, usedImageKeys);
     const params: WorkbenchParams = { ...defaultParams(kind as NodeKind), ...validatedFields };
 

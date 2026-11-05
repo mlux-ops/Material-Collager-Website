@@ -44,7 +44,6 @@ export type CollageItemInput = {
   role: string;
   imageKeys?: string[];
   imageNames?: string[];
-  imageFileIds?: string[];
   brand?: string;
   name?: string;
   finish?: string;
@@ -65,7 +64,6 @@ export type CollageRequestInput = {
   outputFilename?: string;
   apiKey?: string;
   layoutReference?: boolean;
-  layoutReferenceFileId?: string;
   // What kind of authority Image 1 carries when layoutReference is set.
   // "approved-draft" (the default, and what a Final render sends) is this
   // app's own draft being rebuilt at full quality, so its composition is a
@@ -260,7 +258,7 @@ export function validateCollageRequest(request: CollageRequestInput) {
 }
 
 export function referenceCount(item: CollageItemInput) {
-  return Math.max(item.imageFileIds?.length ?? 0, item.imageKeys?.length ?? 0, item.imageNames?.length ?? 0);
+  return Math.max(item.imageKeys?.length ?? 0, item.imageNames?.length ?? 0);
 }
 
 export function totalReferenceCount(request: CollageRequestInput) {

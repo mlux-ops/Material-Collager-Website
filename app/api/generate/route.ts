@@ -20,7 +20,6 @@ import {
   DiagnosedGenerationError,
   createImageEdit,
   referenceBytes,
-  resolveTransport,
   safeReferenceFilename,
   validateImagePrompt,
   type AttemptDiagnostic,
@@ -73,7 +72,7 @@ export async function POST(request: Request) {
       if (file.size >= MAX_REFERENCE_FILE_BYTES) throw new Error(`Reference ${file.name || "image"} must be under 50 MB.`);
     }
     const boardReferenceCount = items.reduce(
-      (total, item) => total + Math.max(item.imageNames?.length ?? 0, item.imageFileIds?.length ?? 0),
+      (total, item) => total + (item.imageNames?.length ?? 0),
       0,
     );
     const requestedDiagnosticCount = Math.max(
@@ -100,46 +99,21 @@ export async function POST(request: Request) {
       references: [],
       attempts,
     };
-    const remoteProductReferences = items.flatMap((item) =>
-      (item.imageFileIds ?? []).map((fileId, index) => ({
-        fileId,
-        filename: item.imageNames?.[index] || `${item.id}-${index + 1}.png`,
-      })),
-    );
-    let preparedReferences: PreparedReference[];
-    if (directFiles.length) {
-      if (directFiles.length !== expectedReferences) {
-        throw new Error("One or more reference images were missing from the direct generation request.");
-      }
-      preparedReferences = directFiles.map((file) => ({ blob: file, filename: safeReferenceFilename(file.name) }));
-    } else if (!diagnosticMode && remoteProductReferences.length === boardReferenceCount) {
-      const remoteReferences = payload.layoutReference && payload.layoutReferenceFileId
-        ? [{ fileId: payload.layoutReferenceFileId, filename: "approved-draft.png" }, ...remoteProductReferences]
-        : remoteProductReferences;
-      if (remoteReferences.length !== expectedReferences) {
-        throw new Error("The approved draft or one of its full-quality references is no longer available. Upload it again and retry.");
-      }
-      // These references already live in OpenAI's Files API, so name them by
-      // id rather than downloading every one and posting the same bytes back.
-      // The old round trip cost a full download plus re-upload of up to 16
-      // multi-MB images before generation could even start.
-      preparedReferences = remoteReferences.map((reference) => ({
-        filename: safeReferenceFilename(reference.filename),
-        fileId: reference.fileId,
-      }));
-    } else {
+    // References arrive as multipart bytes. (The uploaded-file file_id path
+    // went with the chunked transport, whose only client was Economy.)
+    if (!directFiles.length) {
       throw new Error("One or more reference images were missing from the generation request.");
     }
-    // Byte counters stay 0 for the file_id transport: nothing is uploaded, so
-    // there are no request bytes to report. `transport` distinguishes that
-    // from a genuinely empty multipart request.
+    if (directFiles.length !== expectedReferences) {
+      throw new Error("One or more reference images were missing from the direct generation request.");
+    }
+    const preparedReferences: PreparedReference[] = directFiles.map((file) => ({ blob: file, filename: safeReferenceFilename(file.name) }));
     diagnostics.totalReferenceBytes = preparedReferences.reduce((sum, reference) => sum + referenceBytes(reference), 0);
     diagnostics.largestReferenceBytes = Math.max(...preparedReferences.map(referenceBytes), 0);
     diagnostics.references = preparedReferences.map((reference) => ({
       filename: reference.filename,
       bytes: referenceBytes(reference),
-      mimeType: reference.blob?.type ?? "",
-      ...(reference.fileId ? { fileId: reference.fileId } : {}),
+      mimeType: reference.blob.type,
     }));
     const requestedSize = resolvedSize(payload);
     const outputFormat = resolvedOutputFormat(payload);
@@ -156,7 +130,6 @@ export async function POST(request: Request) {
         ? { output_compression: payload.outputCompression }
         : {}),
     };
-    diagnostics.transport = resolveTransport(imageRequest);
     if (diagnosticMode) {
       const counts = [requestedDiagnosticCount];
       const isolationResults: Array<{ referenceCount: number; outcome: "succeeded" | "failed"; requestId?: string; error?: string }> = [];

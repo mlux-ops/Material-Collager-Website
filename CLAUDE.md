@@ -29,7 +29,7 @@ Node 22.13+ required (`engines` in `package.json`).
 ### Tests
 
 `npm run test:transitions` is misnamed: its glob is `tests/*.test.mjs`, so it runs
-the **entire** suite (883 tests), not just transitions. Use it as the run-all.
+the **entire** suite (906 tests), not just transitions. Use it as the run-all.
 
 Individual suites:
 
@@ -60,8 +60,7 @@ static imports resolve before its `cloudflare:workers` hook exists.
 ### Autoboard
 
 Board-generation pipeline in `scripts/autoboard/`, run as `npm run autoboard -- <cmd>`.
-Subcommands: `plan`, `generate`, `redraft`, `confirm`, `finalize`, `batch-finalize`,
-`batch-status`, `review`.
+Subcommands: `plan`, `generate`, `redraft`, `confirm`, `finalize`, `review`.
 
 The slot rules and board assembly live in `app/lib/autoboard/`, not in
 `scripts/autoboard/lib/`; the `.mjs` files there re-export them, so existing
@@ -171,8 +170,10 @@ transparency rules.
 ## Cloudflare bindings
 
 Declared in `wrangler.jsonc`: `DB` (D1, `material-collager-db`), `OUTPUTS` (R2),
-`IMAGES` (image optimizer behind `/_vinext/image`), `AI` (Workers AI, used by
-`/api/workbench/inpaint`). Access vars `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD`
+`IMAGES` (image optimizer behind `/_vinext/image`). The `AI` (Workers AI)
+binding is gone along with `/api/workbench/inpaint`: the only image model the
+site calls is OpenAI's `gpt-image-2.6-sunburst` (plus the 2.5 snapshot, from the
+Workbench's Test node only). Access vars `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD`
 are enforced by `worker/access.ts`.
 
 ## Deploy
@@ -210,7 +211,7 @@ localhost to mint a JWT. Blank both in `.dev.vars`, which overrides
   `node --test` fails. It also sets `verbatimModuleSyntax`, because a
   value-position import of a type is a link-time `SyntaxError` that neither gate
   can see.
-- `npm run typecheck` is not a pass/fail gate: 14 errors pre-date this tree
+- `npm run typecheck` is not a pass/fail gate: 10 errors pre-date this tree
   (workbench, scene-lab, `db/index.ts`, and the `examples/` tree). The gate is
   `node scripts/typecheck-baseline.mjs`: it fails when tsc reports more errors
   than `scripts/typecheck-baseline.json` records, or when tsc does not run
@@ -227,14 +228,26 @@ localhost to mint a JWT. Blank both in `.dev.vars`, which overrides
   `worker-configuration.d.ts` from `wrangler types`, not a hand-written
   declaration.
 - Request bodies cap at 32 MB (`next.config.ts` `serverActions.bodySizeLimit`), applied
-  to route handlers too. Large reference sets must use the chunked transport rather
-  than one request.
-- The `AI` binding hits Cloudflare's network even in local dev: it spends real
-  free-tier neurons and needs a logged-in `wrangler` session.
-- Sunburst rejects `input_fidelity`. The `/v1/images/edits` schema lists the
-  field with no model restriction, but `gpt-image-2.5-sunburst-2026-09-08`
-  answers HTTP 400 `invalid_input_fidelity_model`, and `gpt-image-2` rejects it
-  too. Verified live 2026-09-08; do not re-add it on the strength of the schema.
+  to route handlers too. References always go up as multipart files, and the
+  browser budgets the body under that cap (`app/lib/image-transport.ts`). The
+  chunked `/api/references/start|part|complete` upload and the `file_id` edit
+  form were deleted with Economy, their only client; `/api/references/analyze`,
+  `matches` and `import` remain.
+- Never send `input_fidelity`. The `/v1/images/edits` schema lists the field
+  with no model restriction, but `gpt-image-2.5-sunburst-2026-09-08` answered
+  HTTP 400 `invalid_input_fidelity_model` (verified live 2026-09-08), and
+  `gpt-image-2` rejected it too. The current `gpt-image-2.6-sunburst` does not
+  document it at all, so it stays unsent; do not re-add it on the strength of
+  the schema.
+- `gpt-image-2.6-sunburst` is the only model the Workbench and Generator call,
+  and it has no dated snapshot, so the alias is also the wire id.
+  `resolveWireModel` (`app/lib/sunburst.ts`) returns Sunburst for any input
+  except `TEST_MODEL_2_5` (`gpt-image-2.5-sunburst-2026-09-08`), which only the
+  Workbench's **Test** node sends, to compare 2.5 against 2.6. The node kind picks
+  that model (`executeGeneration`'s `model` option), never a param, and the bare
+  2.5 alias that stale tabs carry still renders on 2.6. Saved graphs and
+  imports run `normalizeImageModelParams` so a stored 2.5 id re-signs the node
+  instead of serving its old 2.5 render as current.
 - A render's cost is dominated by reference images, not by quality. Measured on
   a 6-reference board at quality `low`: 8,349 image input tokens ($0.067) vs 158
   image output tokens ($0.005) — 88% of the bill, and image input does not vary
@@ -257,9 +270,7 @@ localhost to mint a JWT. Blank both in `.dev.vars`, which overrides
 - Any paid board action (a render) must `await` the board save queue's
   `flush()` first (see `renderDraft` in `BoardWorkflow.tsx`). That's how a
   render sees exactly what was typed, and a failed save stops the render.
-- An Economy row stays `submitting` until its batch id is recorded.
-  `publicJob` reads a `submitting` row older than 5 minutes as failed, with
-  `material_collager_job = <id>` guidance, and the row itself isn't changed.
-- Economy history refreshes only the 2 oldest pending rows per request. A
-  rejected refresh bumps `updated_at` (except for `finalizing` rows), so a
-  stuck row can't pin a slot.
+- Economy (Batch API, half price) was removed: no gpt-image-2.6 model supports
+  Batch, and Flare costs the same as Sunburst. Generator History reads
+  `GET /api/jobs` and `GET /api/jobs/[id]/output`; legacy economy rows stay in
+  `generation_jobs` until retention expires.

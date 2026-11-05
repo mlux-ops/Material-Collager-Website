@@ -11,7 +11,7 @@ import {
 } from "../app/lib/output-tokens.ts";
 import { outputTokenTableFrom, stageSize } from "../scripts/autoboard/lib/render.mjs";
 
-const MODEL = "gpt-image-2.5-sunburst";
+const MODEL = "gpt-image-2.6-sunburst";
 
 test("a combination that has never rendered has no estimate, rather than a neighbour's", () => {
   const table = {};

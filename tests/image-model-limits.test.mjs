@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { classifySize, QUALITY_OPTIONS, BACKGROUND_OPTIONS, MODEL_FLARE, MODEL_SUNBURST } from "../app/lib/image-model-limits.ts";
+import { classifySize, QUALITY_OPTIONS, BACKGROUND_OPTIONS, MODEL_SUNBURST } from "../app/lib/image-model-limits.ts";
 
 test("classifySize: clearly legal size", () => {
   const result = classifySize("1536x1024");
@@ -140,10 +140,6 @@ test("exports: BACKGROUND_OPTIONS", () => {
   assert.deepEqual(BACKGROUND_OPTIONS, ["auto", "opaque", "transparent"]);
 });
 
-test("exports: MODEL_FLARE", () => {
-  assert.equal(MODEL_FLARE, "gpt-image-2.5-flare");
-});
-
 test("exports: MODEL_SUNBURST", () => {
-  assert.equal(MODEL_SUNBURST, "gpt-image-2.5-sunburst");
+  assert.equal(MODEL_SUNBURST, "gpt-image-2.6-sunburst");
 });

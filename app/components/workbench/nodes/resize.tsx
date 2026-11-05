@@ -31,14 +31,14 @@ export const Component = memo(function ResizeNode({ id, data }: WorkbenchNodePro
           onChange={(event) => updateParams(id, { targetHeight: Number(event.target.value) || 0 })}
         />
       </label>
-      <p className={styles.hint}>Conforms to gpt-image-2 size rules — zero API cost.</p>
+      <p className={styles.hint}>Conforms to Sunburst size rules — zero API cost.</p>
       <OutputPreview id={id} data={data} />
     </NodeShell>
   );
 });
 
 // DOM-touching execute wrapper: createImageBitmap + canvas conform the cached
-// input image to a valid gpt-image-2 size, then cache the result through
+// input image to a valid Sunburst size, then cache the result through
 // putBlob. No network request — this node never spends a paid round trip.
 export async function execute(ctx: ExecuteContext): Promise<void> {
   const inputs = ctx.inputs("image");

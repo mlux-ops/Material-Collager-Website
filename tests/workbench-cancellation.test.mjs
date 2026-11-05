@@ -61,7 +61,7 @@ test("createImageEdit (image-edit path): the caller's AbortSignal is threaded in
       const controller = new AbortController();
       await createImageEdit(
         NOT_A_REAL_API_KEY,
-        { model: "gpt-image-2", prompt: "p", references: [{ blob: pngBlob(), filename: "a.png" }], size: "1024x1024", quality: "medium", background: "opaque", output_format: "png" },
+        { model: "gpt-image-2.6-sunburst", prompt: "p", references: [{ blob: pngBlob(), filename: "a.png" }], size: "1024x1024", quality: "medium", background: "opaque", output_format: "png" },
         [],
         controller.signal,
       );
@@ -87,7 +87,7 @@ test("createImageEdit: a caller abort during the in-flight upstream call aborts 
     },
     async () => createImageEdit(
       NOT_A_REAL_API_KEY,
-      { model: "gpt-image-2", prompt: "p", references: [{ blob: pngBlob(), filename: "a.png" }], size: "1024x1024", quality: "medium", background: "opaque", output_format: "png" },
+      { model: "gpt-image-2.6-sunburst", prompt: "p", references: [{ blob: pngBlob(), filename: "a.png" }], size: "1024x1024", quality: "medium", background: "opaque", output_format: "png" },
       [],
       callerController.signal,
     ),

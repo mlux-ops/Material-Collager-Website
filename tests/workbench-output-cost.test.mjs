@@ -11,7 +11,7 @@ import {
 } from "../app/components/workbench/cost.ts";
 import { estimateSunburstCost } from "../app/components/workbench/nodes/generation.ts";
 
-const MODEL = "gpt-image-2.5-sunburst";
+const MODEL = "gpt-image-2.6-sunburst";
 
 // An in-memory store so the real persistence path runs under the test runner,
 // where there is no window.localStorage.

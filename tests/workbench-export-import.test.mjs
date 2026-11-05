@@ -108,6 +108,26 @@ test("optional declared params absent still import fine (defaults fill in)", () 
   assert.equal(typeof result.nodes[0].params.size, "string"); // defaultParams filled it in
 });
 
+test("an export from before the 2.6 bump imports its image nodes on gpt-image-2.6-sunburst", () => {
+  const result = validateImport(
+    baseGraph({
+      nodes: [
+        { id: "n1", kind: "imageEdit", position: { x: 0, y: 0 }, params: { model: "gpt-image-2.5-sunburst" } },
+        { id: "n2", kind: "imageGenerate", position: { x: 0, y: 0 }, params: { model: "gpt-image-2" } },
+        { id: "n3", kind: "upscaler", position: { x: 0, y: 0 }, params: { model: "gpt-image-2.5-sunburst-2026-09-08" } },
+        { id: "n4", kind: "aiAssistant", position: { x: 0, y: 0 }, params: { model: "gpt-5.6" } },
+      ],
+    }),
+  );
+  assert.deepEqual(result.nodes.map((node) => node.params.model), [
+    "gpt-image-2.6-sunburst",
+    "gpt-image-2.6-sunburst",
+    "gpt-image-2.6-sunburst",
+    "gpt-5.6",
+  ]);
+  assert.deepEqual(result.warnings, []);
+});
+
 test("rejects invalid enum/number values for a declared key rather than trusting them", () => {
   const result = validateImport(
     baseGraph({

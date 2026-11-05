@@ -24,18 +24,16 @@ flowchart LR
     subgraph Bindings
         D1[(D1: material-collager-db)]
         R2[(R2: material-collager-outputs)]
-        AI[Workers AI<br/>SD 1.5 inpainting]
         CFIMG[Cloudflare Images]
     end
 
-    OPENAI[OpenAI Image API<br/>gpt-image-2]
+    OPENAI[OpenAI Image API<br/>gpt-image-2.6-sunburst]
 
     Browser -->|HTTPS via Cloudflare Access| ACC --> RSC
     ACC --> API
     ACC --> IMG
     API --> D1
     API --> R2
-    API --> AI
     IMG --> CFIMG
     API -->|multipart, original files| OPENAI
 ```
@@ -95,25 +93,18 @@ The core product invariant (foundation Principle 2): original files reach the Im
 ```mermaid
 sequenceDiagram
     participant B as Browser draft
-    participant API as app/api/references/*
     participant D1
     participant GEN as app/api/generate
     participant OAI as OpenAI Image API
 
-    B->>API: POST /references/start
-    loop chunked upload (request-safe parts)
-        B->>API: POST /references/part
-    end
-    B->>API: POST /references/complete
-    API->>D1: persist reference metadata
-    B->>GEN: POST /generate (board config)
-    GEN->>OAI: multipart request with original files (gpt-image-2)
+    B->>GEN: POST /generate (board config + reference files, multipart)
+    GEN->>OAI: multipart request with original files (gpt-image-2.6-sunburst)
     OAI-->>GEN: generated board
     GEN->>D1: record job (generation-jobs.ts)
     GEN-->>B: output (stored to R2)
 ```
 
-Request bodies are capped at 32 MB (`next.config.ts` `serverActions.bodySizeLimit`) — sized for a 4K PNG plus compressed references, under the Workers 100 MB cap. Chunking logic lives in `app/lib/image-transport.ts`.
+Request bodies are capped at 32 MB (`next.config.ts` `serverActions.bodySizeLimit`) — sized for a 4K PNG plus compressed references, under the Workers 100 MB cap. The browser budgets references under that cap before sending (`app/lib/image-transport.ts`); the old chunked `/api/references/start|part|complete` upload was removed with Economy, its only client.
 
 ## Rendering Strategy
 
@@ -133,6 +124,6 @@ Request bodies are capped at 32 MB (`next.config.ts` `serverActions.bodySizeLimi
 | State | Zustand 5 (workbench) |
 | Styling | Tailwind CSS 4 + token CSS (`globals.css`, `effects.css`, `motion-tokens.css`) |
 | Data | D1 (Drizzle, lazy tables) + R2 outputs |
-| AI | OpenAI `gpt-image-2` (generation/edit), Workers AI SD 1.5 (inpainting) |
+| AI | OpenAI `gpt-image-2.6-sunburst` (generation/edit), the only image model |
 | Hosting | Cloudflare Worker behind Cloudflare Access |
 | Tests | Node built-in runner (`node --test`), suite per concern |
