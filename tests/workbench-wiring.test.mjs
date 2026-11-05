@@ -170,11 +170,23 @@ test("autoAttachConnection returns null for the origin card, an incompatible car
   assert.equal(autoAttachConnection(nodes, edges, fromOutput("photo", "image"), "missing"), null, "unknown node");
 });
 
+test("autoAttachConnection never fills Image Edit's explicit-only Markup port", () => {
+  const nodes = [node("photo", "photo"), node("a", "photo"), node("b", "photo"), node("edit", "imageEdit")];
+  // Image and References taken: a dropped photo appends to References (or
+  // would replace Image) -- it never becomes the annotation layer.
+  const wired = [edge("a", "image", "edit", "image"), edge("b", "image", "edit", "references")];
+  const attached = autoAttachConnection(nodes, wired, fromOutput("photo", "image"), "edit");
+  assert.notEqual(attached?.targetHandle, "markup");
+  assert.equal(attached?.targetHandle, "references");
+});
+
 test("compatiblePorts lists exactly the ports the drag highlighting lights up", () => {
   const nodes = [node("photo", "photo"), node("edit", "imageEdit"), node("variations", "variations"), node("text", "text")];
   assert.deepEqual(
     compatiblePorts(nodes, [], fromOutput("photo", "image"), nodes[1]).map((port) => port.id),
-    ["image", "references"],
+    // Markup lights up too: it takes a wire dropped on its own handle, it is
+    // just never auto-attached (see the explicitOnly test below).
+    ["image", "references", "markup"],
   );
   assert.deepEqual(compatiblePorts(nodes, [], fromOutput("photo", "image"), nodes[0]), [], "the origin card offers nothing");
   assert.deepEqual(compatiblePorts(nodes, [], fromOutput("photo", "image"), nodes[3]).map((port) => port.id), [], "Text has no image input");

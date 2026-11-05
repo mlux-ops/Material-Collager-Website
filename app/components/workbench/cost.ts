@@ -10,6 +10,7 @@
 import {
   estimateOutputUsd,
   outputTokensFromUsage,
+  outputTokenVariant,
   recordOutputTokens,
   type OutputTokenTable,
 } from "../../lib/output-tokens.ts";
@@ -262,7 +263,7 @@ function saveOutputTokenTable(table: OutputTokenTable): void {
  * size, and a response without image output tokens teaches nothing.
  */
 export function recordRunOutputTokens(
-  params: { model?: unknown; size?: unknown; quality?: unknown },
+  params: { model?: unknown; size?: unknown; quality?: unknown; complexity?: unknown; outputFormat?: unknown; frameCount?: unknown },
   usage: unknown,
 ): void {
   const table = loadOutputTokenTable();
@@ -271,6 +272,9 @@ export function recordRunOutputTokens(
     model: normalizeStoredModel(params.model),
     size: typeof params.size === "string" ? params.size : undefined,
     quality: typeof params.quality === "string" ? params.quality : undefined,
+    // SVG, GIF and a non-default complexity learn under their own key so they
+    // never overwrite the plain raster entry (see outputTokenVariant).
+    variant: outputTokenVariant(params),
     outputTokens: outputTokensFromUsage(usage),
   });
   if (changed) saveOutputTokenTable(table);
@@ -285,12 +289,16 @@ export function estimateOutputOnlyUsd(options: {
   model?: string;
   size?: string;
   quality?: string;
+  complexity?: unknown;
+  outputFormat?: unknown;
+  frameCount?: unknown;
   candidates?: number;
 }): number | null {
   return estimateOutputUsd(loadOutputTokenTable(), {
     model: normalizeStoredModel(options.model),
     size: options.size,
     quality: options.quality,
+    variant: outputTokenVariant(options),
     count: Math.max(1, Math.round(options.candidates ?? 1)),
   });
 }

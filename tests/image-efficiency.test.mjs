@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createImageEdit, isRetryableImageError } from "../app/lib/image-edit.ts";
+import {
+  buildGenerationBody,
+  createImageEdit,
+  createImageGeneration,
+  isRetryableImageError,
+  validateGifSize,
+} from "../app/lib/image-edit.ts";
 import { OpenAIRequestError, readOpenAIResponse } from "../app/lib/openai-server.ts";
 import { buildGenerationPrompt } from "../app/lib/collage.ts";
 
@@ -140,4 +146,91 @@ test("references and the mask always go up as multipart bytes, never as file ids
   assert.equal(sent.get("mask").name, "mask.png");
   assert.equal(sent.get("model"), "gpt-image-2.6-sunburst");
   assert.equal(sent.has("images"), false);
+});
+
+test("createImageEdit sends complexity only when set and refuses it for the 2.5 snapshot", async (t) => {
+  const sent = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    sent.push(init.body);
+    return Response.json({ data: [{ b64_json: "AA==" }], usage: {} });
+  });
+  await createImageEdit("k", body, []);
+  await createImageEdit("k", { ...body, complexity: "low" }, []);
+  assert.equal(sent[0].has("complexity"), false);
+  assert.equal(sent[1].get("complexity"), "low");
+  assert.equal(sent[1].has("input_fidelity"), false);
+
+  await assert.rejects(
+    createImageEdit("k", { ...body, model: "gpt-image-2.5-sunburst-2026-09-08", complexity: "high" }, []),
+    /2\.6/,
+  );
+  await assert.rejects(createImageEdit("k", { ...body, complexity: "extreme" }, []), /complexity/i);
+  assert.equal(sent.length, 2, "a refused complexity never reaches the wire");
+});
+
+test("markup is appended as its own form file and is never combined with a mask", async (t) => {
+  const sent = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    sent.push(init.body);
+    return Response.json({ data: [{ b64_json: "AA==" }], usage: {} });
+  });
+  const markup = { filename: "markup.png", blob: new Blob(["m"], { type: "image/png" }) };
+  await createImageEdit("k", { ...body, markup }, []);
+  assert.equal(sent[0].get("markup").name, "markup.png");
+  assert.equal(sent[0].has("mask"), false);
+
+  await assert.rejects(
+    createImageEdit("k", { ...body, markup, mask: { filename: "mask.png", blob: new Blob(["x"], { type: "image/png" }) } }, []),
+    /markup and a mask/i,
+  );
+  await assert.rejects(createImageEdit("k", { ...body, references: [], markup }, []), /input image/i);
+  await assert.rejects(createImageEdit("k", { ...body, output_format: "svg" }, []), /text-to-image/);
+  assert.equal(sent.length, 1);
+});
+
+test("generation bodies: SVG is one uncompressed image, GIF carries rounded frame params, complexity only when set", () => {
+  const base = { prompt: "A looping candle flame.", size: "512x512", quality: "low" };
+  const svg = buildGenerationBody({ ...base, output_format: "svg", n: 3, output_compression: 70 });
+  assert.equal(svg.output_format, "svg");
+  assert.equal("n" in svg, false);
+  assert.equal("output_compression" in svg, false);
+  assert.equal("complexity" in svg, false);
+  assert.equal("frame_count" in svg, false);
+
+  const gif = buildGenerationBody({ ...base, output_format: "gif", frame_count: 30, frame_duration_ms: 333, output_compression: 70, n: 2, complexity: "medium" });
+  assert.equal(gif.frame_count, 30);
+  assert.equal(gif.frame_duration_ms, 330);
+  assert.equal("output_compression" in gif, false);
+  assert.equal(gif.n, 2);
+  assert.equal(gif.complexity, "medium");
+
+  // Frame params never ride along with a still format.
+  const webp = buildGenerationBody({ ...base, size: "1024x1024", output_format: "webp", frame_count: 9, output_compression: 70 });
+  assert.equal("frame_count" in webp, false);
+  assert.equal(webp.output_compression, 70);
+  assert.equal(webp.model, "gpt-image-2.6-sunburst");
+});
+
+test("createImageGeneration refuses SVG, GIF and complexity on the 2.5 snapshot, and out-of-range frames", async (t) => {
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    calls++;
+    return Response.json({ data: [{ b64_json: "AA==" }] });
+  });
+  const base = { prompt: "A looping candle flame.", size: "512x512", quality: "low" };
+  const test25 = "gpt-image-2.5-sunburst-2026-09-08";
+  await assert.rejects(createImageGeneration("k", { ...base, model: test25, output_format: "svg" }, []), /2\.6/);
+  await assert.rejects(createImageGeneration("k", { ...base, model: test25, output_format: "gif" }, []), /2\.6/);
+  await assert.rejects(createImageGeneration("k", { ...base, model: test25, complexity: "low" }, []), /2\.6/);
+  await assert.rejects(createImageGeneration("k", { ...base, output_format: "gif", frame_count: 65 }, []), /frame count/i);
+  await assert.rejects(createImageGeneration("k", { ...base, output_format: "gif", frame_duration_ms: 19 }, []), /frame duration/i);
+  assert.equal(calls, 0);
+});
+
+test("GIF sizes skip the still-image pixel floor but keep the multiple-of-16, edge and aspect rules", () => {
+  assert.equal(validateGifSize("512x512"), null);
+  assert.equal(validateGifSize("768x512"), null);
+  assert.notEqual(validateGifSize("500x500"), null);
+  assert.notEqual(validateGifSize("2048x512"), null, "4:1 is past the 3:1 aspect bound");
+  assert.notEqual(validateGifSize("4096x2048"), null);
 });

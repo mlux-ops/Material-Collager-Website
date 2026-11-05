@@ -1,5 +1,5 @@
 import type { ImportParamRule, NodeManifest, WorkbenchParams } from "../types";
-import { estimateSunburstCost, GENERATION_BACKGROUNDS, GENERATION_FORMATS, GENERATION_QUALITIES, GENERATION_SIZES, generationDraftOverride } from "./generation.ts";
+import { estimateSunburstCost, GENERATION_BACKGROUNDS, GENERATION_COMPLEXITIES, GENERATION_FORMATS, GENERATION_QUALITIES, GENERATION_SIZES, generationDraftOverride } from "./generation.ts";
 import { SUNBURST_MODEL } from "../../../lib/sunburst.ts";
 
 // Masked Edit runs on one backend only: /api/workbench/edit (Sunburst, the
@@ -51,6 +51,7 @@ export const MASKED_EDIT_PARAM_RULES = {
   model: { type: "enum", optional: true, values: [SUNBURST_MODEL] },
   background: { type: "enum", optional: true, values: GENERATION_BACKGROUNDS },
   outputFormat: { type: "enum", optional: true, values: GENERATION_FORMATS },
+  complexity: { type: "enum", optional: true, values: GENERATION_COMPLEXITIES },
   referenceInstruction: { type: "string", optional: true, maxLength: 4000 },
   // JSON-serialized MaskShape[] (rect/polygon/brush, normalized 0-1000).
   // Opaque to import validation beyond the size cap; execute() parses it

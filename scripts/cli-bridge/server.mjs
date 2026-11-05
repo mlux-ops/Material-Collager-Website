@@ -31,7 +31,9 @@ import {
   inspectClaudeEvent,
   isAllowedHost,
   isAllowedOrigin,
+  loadPersonas,
   MAX_BODY_BYTES,
+  personaTextFor,
   resolveExecutable,
   scrubEnv,
   validateRunPayload,
@@ -55,6 +57,9 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 }
 const allowedOrigins = [...DEFAULT_ALLOWED_ORIGINS, ...(values["allow-origin"] ?? [])];
 const childEnv = scrubEnv(process.env);
+// Read once at startup from fixed server-side paths. A missing file only
+// fails the runs that name its persona (HTTP 500 naming the file).
+const personas = loadPersonas({ readFile: (file) => readFileSync(file, "utf8") });
 
 // Every spawn starts in a fresh, empty temp directory so no project's
 // CLAUDE.md, AGENTS.md or .claude/ settings load into the run.
@@ -185,7 +190,8 @@ async function runClaude({ model, effort, instruction, images }, signal) {
   return result.text;
 }
 
-async function runCodex({ model, effort, instruction, images }, signal) {
+async function runCodex({ model, effort, instruction, images, persona }, signal) {
+  const personaText = persona === undefined ? undefined : personaTextFor(persona, personas);
   return withWorkDir(async (dir) => {
     const imagePaths = [];
     for (const [index, image] of images.entries()) {
@@ -196,7 +202,7 @@ async function runCodex({ model, effort, instruction, images }, signal) {
     const outFile = path.join(dir, "answer.txt");
     const outcome = await runChild(providers.codex.bin, codexArgs({ model, effort, workDir: dir, imagePaths, outFile }), {
       cwd: dir,
-      stdin: codexPrompt(instruction),
+      stdin: codexPrompt(instruction, personaText),
       signal,
       timeoutMs: RUN_TIMEOUT_MS,
     });
@@ -314,7 +320,9 @@ const server = createServer(async (request, response) => {
       const text = payload.provider === "claude"
         ? await runClaude(payload, controller.signal)
         : await runCodex(payload, controller.signal);
-      send(response, 200, { ok: true, text });
+      // The persona echo lets a node tell this bridge from an older one that
+      // ignored the field and ran without the instruction file.
+      send(response, 200, payload.persona === undefined ? { ok: true, text } : { ok: true, text, persona: payload.persona });
       console.log(`${new Date().toISOString()} ${provider} ok ${Date.now() - started}ms`);
     } finally {
       activeRuns -= 1;
@@ -332,6 +340,9 @@ providers.claude = claude;
 providers.codex = codex;
 for (const [name, state] of Object.entries(providers)) {
   console.log(`${name}: ${state.available ? `ready (${state.bin})` : `unavailable — ${state.reason}`}`);
+}
+for (const [id, entry] of Object.entries(personas)) {
+  console.log(`persona ${id}: ${entry.error ? `unavailable — ${entry.error}` : `ready (${entry.text.length.toLocaleString("en-US")} chars)`}`);
 }
 
 server.listen(port, "127.0.0.1", () => {

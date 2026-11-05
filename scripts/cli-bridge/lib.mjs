@@ -4,6 +4,7 @@
 // payload caps — without running a real CLI.
 
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const DEFAULT_PORT = 4795;
 
@@ -71,6 +72,19 @@ export const CODEX_DISABLED_FEATURES = [
   "tool_suggest",
   "skill_search",
 ];
+
+// Server-owned instruction files a run can opt into with `persona`. The path
+// is fixed here and never comes from the request; each persona runs on the
+// listed providers only. The text rides in the prompt on top of SYSTEM_PROMPT,
+// so it does not count against MAX_INSTRUCTION_CHARS — MAX_PERSONA_CHARS caps
+// it instead, keeping the whole prompt under ~73k characters.
+export const MAX_PERSONA_CHARS = 40_000;
+export const PERSONAS = {
+  "gpt-image-2.6-prompting": {
+    providers: ["codex"],
+    file: fileURLToPath(new URL("./personas/gpt-image-2-6-prompting.md", import.meta.url)),
+  },
+};
 
 export class BridgeError extends Error {
   constructor(status, message) {
@@ -142,7 +156,44 @@ export function validateRunPayload(body) {
   });
   if (totalChars > MAX_TOTAL_BASE64_CHARS) throw new BridgeError(413, "The images are too large for one request.");
 
-  return { provider, model, effort, instruction, images };
+  // Absent persona leaves the payload exactly as before; a present one must
+  // be a known id that its provider supports.
+  if (body.persona === undefined) return { provider, model, effort, instruction, images };
+  if (typeof body.persona !== "string") throw new BridgeError(400, "persona must be a string.");
+  const persona = Object.hasOwn(PERSONAS, body.persona) ? body.persona : null;
+  if (!persona) throw new BridgeError(400, `Choose a supported persona (${Object.keys(PERSONAS).join(", ")}).`);
+  if (!PERSONAS[persona].providers.includes(provider)) {
+    throw new BridgeError(400, `The ${persona} persona runs on ${PERSONAS[persona].providers.join(" or ")} only.`);
+  }
+  return { provider, model, effort, instruction, images, persona };
+}
+
+// Reads every persona file once (the server calls this at startup). A file
+// that is missing, empty or over the cap is recorded as an error rather than
+// thrown, so the plain Claude / Codex runs keep working without it.
+export function loadPersonas({ readFile }) {
+  const loaded = {};
+  for (const [id, { file }] of Object.entries(PERSONAS)) {
+    let text;
+    try {
+      text = String(readFile(file)).trim();
+    } catch {
+      loaded[id] = { file, error: `Persona instruction file is missing: ${file}` };
+      continue;
+    }
+    if (!text) loaded[id] = { file, error: `Persona instruction file is empty: ${file}` };
+    else if (text.length > MAX_PERSONA_CHARS) {
+      loaded[id] = { file, error: `Persona instruction file exceeds ${MAX_PERSONA_CHARS.toLocaleString("en-US")} characters: ${file}` };
+    } else loaded[id] = { file, text };
+  }
+  return loaded;
+}
+
+export function personaTextFor(persona, loaded) {
+  const entry = loaded[persona];
+  if (!entry) throw new BridgeError(500, `Persona ${persona} was not loaded.`);
+  if (entry.error) throw new BridgeError(500, entry.error);
+  return entry.text;
 }
 
 // Claude runs with every tool removed (--tools ""), user settings skipped
@@ -213,9 +264,11 @@ export function codexArgs({ model, effort = "default", workDir, imagePaths, outF
   return args;
 }
 
-// Codex has no system-prompt flag; the server-owned prompt leads the message.
-export function codexPrompt(instruction) {
-  return `${SYSTEM_PROMPT}\n\n${instruction}`;
+// Codex has no system-prompt flag; the server-owned prompt leads the message,
+// followed by the persona's instruction file when the run names one.
+export function codexPrompt(instruction, personaText) {
+  if (personaText === undefined) return `${SYSTEM_PROMPT}\n\n${instruction}`;
+  return `${SYSTEM_PROMPT}\n\n${personaText}\n\n${instruction}`;
 }
 
 export function claudeUsesSubscription(statusJson) {

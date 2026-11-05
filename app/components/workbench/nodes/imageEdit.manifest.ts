@@ -15,6 +15,10 @@ export const imageEditManifest: NodeManifest = {
       { id: "image", kind: "image", label: "Image", required: true },
       { id: "prompt", kind: "text", label: "Prompt", required: true },
       { id: "references", kind: "image", label: "References", multi: true, acceptedKinds: ["image", "references"] },
+      // Optional annotation layer: a transparent PNG the same size as Image,
+      // with circles or arrows marking what to change. Sent as the edit's
+      // `markup` file (never with a mask); see imageEdit.tsx.
+      { id: "markup", kind: "image", label: "Markup", explicitOnly: true },
     ],
     outputs: [{ id: "image", kind: "image", label: "Image" }],
     paid: true,

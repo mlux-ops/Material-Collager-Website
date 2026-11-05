@@ -1,11 +1,12 @@
 "use client";
 
 import { memo } from "react";
+import { sanitizeSvg } from "@/app/lib/svg-sanitize";
 import { useWorkbenchStore } from "../store";
 import styles from "../workbench.module.css";
 import { runNodes } from "../executor";
 import { fileFromCacheKey, NodeShell, type WorkbenchNodeProps } from "./shared";
-import { imageCacheKeysFromValue } from "./generation";
+import { extensionForMimeType, imageCacheKeysFromValue } from "./generation";
 import type { ExecuteContext } from "../types";
 
 export const Component = memo(function ExportDownloadNode({ id, data }: WorkbenchNodeProps) {
@@ -33,6 +34,7 @@ export const Component = memo(function ExportDownloadNode({ id, data }: Workbenc
           <option value="jpeg">JPEG</option>
         </select>
       </label>
+      <p className={styles.hint}>An SVG or animated GIF input downloads as-is (.svg or .gif); converting it would flatten the vector or drop the animation.</p>
       <button
         type="button"
         className={`nodrag ${styles.smallButton}`}
@@ -50,16 +52,52 @@ export const Component = memo(function ExportDownloadNode({ id, data }: Workbenc
   );
 });
 
+function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 // DOM-touching execute wrapper: draws the cached input image onto a canvas,
-// exports it as a PNG or JPEG blob, and triggers a browser download. Terminal
-// (no output ports) — no network request, no return value stored beyond a
-// run marker so re-running re-triggers the download.
+// exports it as a PNG or JPEG blob, and triggers a browser download. An SVG
+// or animated GIF is downloaded as its original bytes instead (a canvas would
+// rasterize the vector or keep only the first frame). Terminal (no output
+// ports) — no network request, no return value stored beyond a run marker so
+// re-running re-triggers the download.
 export async function execute(ctx: ExecuteContext): Promise<void> {
   const inputs = ctx.inputs("image");
   if (!inputs.length) throw new Error("Connect an input image first.");
   const [cacheKey] = imageCacheKeysFromValue(inputs[0]);
   if (!cacheKey) throw new Error("Connect an input image first.");
-  const file = fileFromCacheKey(cacheKey);
+  const file = fileFromCacheKey(cacheKey, { allowVectorAndAnimated: true });
+
+  const requested = (ctx.params.filename || "workbench-output").trim() || "workbench-output";
+  const base = requested.replace(/\.[^./\\]+$/, "");
+
+  if (file.type === "image/svg+xml") {
+    // Sanitized again on the way out: the cached copy already was, but a
+    // downloaded file is opened outside the app, so it is never trusted to
+    // that alone.
+    ctx.setProgress("Preparing download…");
+    const safe = sanitizeSvg(await file.text());
+    triggerDownload(new Blob([safe], { type: "image/svg+xml" }), `${base}.svg`);
+    ctx.applyRun({ runId: ctx.createRunId(), signature: ctx.signature, at: Date.now(), values: [] });
+    return;
+  }
+  if (file.type === "image/gif") {
+    ctx.setProgress("Preparing download…");
+    triggerDownload(file, `${base}.${extensionForMimeType(file.type)}`);
+    ctx.applyRun({ runId: ctx.createRunId(), signature: ctx.signature, at: Date.now(), values: [] });
+    return;
+  }
 
   const format: "png" | "jpeg" = ctx.params.exportFormat === "jpeg" ? "jpeg" : "png";
   const mimeType = format === "jpeg" ? "image/jpeg" : "image/png";
@@ -90,21 +128,7 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
     bitmap.close();
   }
 
-  const requested = (ctx.params.filename || "workbench-output").trim() || "workbench-output";
-  const base = requested.replace(/\.[^./\\]+$/, "");
-  const filename = `${base}.${format === "jpeg" ? "jpg" : "png"}`;
-
-  const url = URL.createObjectURL(blob);
-  try {
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+  triggerDownload(blob, `${base}.${format === "jpeg" ? "jpg" : "png"}`);
 
   ctx.applyRun({ runId: ctx.createRunId(), signature: ctx.signature, at: Date.now(), values: [] });
 }

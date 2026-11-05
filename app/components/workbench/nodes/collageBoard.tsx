@@ -18,8 +18,9 @@ import { recordUsageCalibration } from "../cost";
 import { useWorkbenchStore } from "../store";
 import styles from "../workbench.module.css";
 import type { ExecuteContext, NodeOutputValue } from "../types";
-import { decodeBase64Image, referenceItemsFromValues } from "./generation";
+import { complexityFor, decodeBase64Image, referenceItemsFromValues } from "./generation";
 import {
+  ComplexityField,
   fileFromCacheKey,
   NodeShell,
   OutputPreview,
@@ -65,6 +66,7 @@ export const Component = memo(function CollageBoardNode({ id, data }: WorkbenchN
           <option value="high">high</option>
         </select>
       </label>
+      <ComplexityField id={id} value={data.params.complexity} />
       <OutputPreview id={id} data={data} />
     </NodeShell>
   );
@@ -113,10 +115,18 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
   if (!orderedKeys.length) throw new Error("Connected items have no uploaded images.");
   if (orderedKeys.length > 16) throw new Error("A collage can use at most 16 reference images.");
 
-  const files = await optimizeReferencesForTransport(orderedKeys.map(fileFromCacheKey));
+  // fileFromCacheKey refuses SVG/GIF items before the transport re-encode.
+  const files = await optimizeReferencesForTransport(orderedKeys.map((key) => fileFromCacheKey(key)));
 
+  const complexity = complexityFor(ctx.params);
   const form = new FormData();
-  form.append("payload", JSON.stringify({ prompt, size, quality: request.quality, n: 1 }));
+  form.append("payload", JSON.stringify({
+    prompt,
+    size,
+    quality: request.quality,
+    n: 1,
+    ...(complexity !== undefined ? { complexity } : {}),
+  }));
   for (const file of files) form.append("image[]", file, file.name);
 
   ctx.setProgress("Composing collage…");

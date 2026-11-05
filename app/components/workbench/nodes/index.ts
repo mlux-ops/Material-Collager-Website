@@ -19,6 +19,7 @@ import { Component as NoteComponent } from "./note";
 import { Component as PatchComponent, execute as patchExecute } from "./patch";
 import { Component as PhotoComponent } from "./photo";
 import { Component as PromptBuilderComponent } from "./promptBuilder";
+import { Component as PromptExpertComponent, execute as promptExpertExecute } from "./promptExpert";
 import { Component as ReferenceAnalyzerComponent, execute as referenceAnalyzerExecute } from "./referenceAnalyzer";
 import { Component as ReferenceFinderComponent } from "./referenceFinder";
 import { Component as ReferencesComponent } from "./references";
@@ -55,6 +56,7 @@ export const NODE_TYPES = {
   aiAssistant: AiAssistantComponent,
   claudeCli: ClaudeCliComponent,
   codexCli: CodexCliComponent,
+  promptExpert: PromptExpertComponent,
   resize: ResizeComponent,
   crop: CropComponent,
   patch: PatchComponent,
@@ -79,6 +81,7 @@ const DOM_EXECUTES: Partial<Record<NodeKind, NodeExecute>> = {
   aiAssistant: aiAssistantExecute,
   claudeCli: claudeCliExecute,
   codexCli: codexCliExecute,
+  promptExpert: promptExpertExecute,
   collageBoard: collageBoardExecute,
   relight: relightExecute,
   variations: variationsExecute,

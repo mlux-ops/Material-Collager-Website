@@ -17,10 +17,12 @@ import {
 import { memo, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { readApiResponse } from "@/app/lib/api-client";
+import { MARKUP_MAX_PIXELS, validateEditSize } from "@/app/lib/image-edit";
 import { classifySize } from "@/app/lib/image-model-limits";
 import { optimizeReferencesForTransport } from "@/app/lib/image-transport";
 import type { AllowedImageModel } from "@/app/lib/sunburst";
-import { ensureThumbnail, getBlob, getBlobUrl, putBlob } from "../blob-cache";
+import { sanitizeSvg, SvgSanitizeError } from "@/app/lib/svg-sanitize";
+import { ensureThumbnail, getBlob, getBlobUrl, putBlob, putSvgBlob } from "../blob-cache";
 import { confirmHighCost, formatOutputUsd } from "../cost";
 import { cancelExecution, estimateStaleCost, retryFrom, runNodes } from "../executor";
 import { MAX_IMAGE_BYTES } from "../export-import";
@@ -31,23 +33,41 @@ import styles from "../workbench.module.css";
 import {
   acceptedKindsFor,
   type ExecuteContext,
+  type ImageOutputFormat,
+  type ImageOutputMimeType,
   type NodeKind,
   type NodeOutputValue,
   type PortKind,
   type PortSpec,
   type WorkbenchNode,
   type WorkbenchNodeData,
+  type WorkbenchParams,
 } from "../types";
 import { compatiblePorts } from "../wiring";
 import {
   buildGenerationPayload,
   customSizeError,
   decodeBase64Image,
+  extensionForMimeType,
+  GENERATION_COMPLEXITIES,
   GENERATION_QUALITIES,
   GENERATION_BACKGROUNDS,
   GENERATION_FORMATS,
   GENERATION_SIZES,
+  GIF_DEFAULT_SIZE,
+  GIF_FRAME_COUNT_DEFAULT,
+  GIF_FRAME_COUNT_MAX,
+  GIF_FRAME_COUNT_MIN,
+  GIF_FRAME_DURATION_DEFAULT_MS,
+  GIF_FRAME_DURATION_MAX_MS,
+  GIF_FRAME_DURATION_MIN_MS,
+  GIF_SIZES,
+  gifFrameParamsError,
   imageCacheKeysFromValue,
+  isVectorOrAnimatedFormat,
+  markupLayerError,
+  mimeTypeForFormat,
+  modelInputTypeError,
   parseSize,
   sizeForInput,
   type GenerationSizeMode,
@@ -672,6 +692,11 @@ export function OutputPreview({ id, data }: { id: string; data: WorkbenchNodeDat
   const { closing, requestClose } = useModalDismiss(() => setLightboxOpen(false));
 
   if (!image || image.kind !== "image") return null;
+  // SVG and animated GIF are shown from their own bytes: the canvas thumbnail
+  // path cannot rasterize an SVG reliably and would freeze a GIF on its first
+  // frame. Both are rendered only through <img>, which never runs SVG script.
+  const mimeType = image.mimeType ?? (cacheKey ? getBlob(cacheKey)?.type : undefined);
+  const showsOwnBytes = mimeType === "image/svg+xml" || mimeType === "image/gif";
 
   // Output pinning (AC15): the currently-browsed history entry (data.activeRun)
   // is what "promote to pinned" pins -- so browsing to an older entry with the
@@ -687,7 +712,11 @@ export function OutputPreview({ id, data }: { id: string; data: WorkbenchNodeDat
         onClick={() => setLightboxOpen(true)}
         aria-label="Open full-resolution image"
       >
-        <ThumbnailImage cacheKey={cacheKey} alt="Node output" width={256} height={192} className={styles.thumbImg} />
+        {showsOwnBytes ? (
+          <img src={image.url} alt="Node output" draggable={false} decoding="async" width={256} height={192} className={styles.thumbImg} />
+        ) : (
+          <ThumbnailImage cacheKey={cacheKey} alt="Node output" width={256} height={192} className={styles.thumbImg} />
+        )}
       </button>
       <button
         type="button"
@@ -836,15 +865,66 @@ export function useConnectedImageCacheKey(id: string, portId: string | undefined
 
 const SIZE_MODE_INPUT = "__input__";
 const SIZE_MODE_CUSTOM = "__custom__";
+const COMPLEXITY_DEFAULT = "";
 
-export function GenerationSettings({ id, data, inputPortId }: { id: string; data: WorkbenchNodeData; inputPortId?: string }) {
+// 2.6's planning-depth control, shared by every 2.6 render node. The empty
+// option leaves the param unset, so nothing is sent and the API default
+// ("high") applies. Not rendered on the Test node (2.5 has no such setting).
+export function ComplexityField({ id, value }: { id: string; value: WorkbenchParams["complexity"] }) {
+  const updateParams = useWorkbenchStore((state) => state.updateParams);
+  return (
+    <label className={styles.field}>
+      <span>Complexity</span>
+      <select
+        className="nodrag"
+        value={value ?? COMPLEXITY_DEFAULT}
+        onChange={(event) => {
+          const next = event.target.value;
+          updateParams(id, { complexity: next === COMPLEXITY_DEFAULT ? undefined : next as WorkbenchParams["complexity"] });
+        }}
+      >
+        <option value={COMPLEXITY_DEFAULT}>Default (high)</option>
+        {GENERATION_COMPLEXITIES.map((option) => <option key={option} value={option}>{option}</option>)}
+      </select>
+    </label>
+  );
+}
+
+const FORMAT_LABELS: Record<ImageOutputFormat, string> = {
+  png: "PNG",
+  webp: "WEBP",
+  jpeg: "JPEG",
+  svg: "SVG (vector)",
+  gif: "GIF (animated)",
+};
+
+export function GenerationSettings({
+  id,
+  data,
+  inputPortId,
+  showComplexity = true,
+  formats = GENERATION_FORMATS,
+}: {
+  id: string;
+  data: WorkbenchNodeData;
+  inputPortId?: string;
+  // False only on the Test node, which renders on the 2.5 snapshot.
+  showComplexity?: boolean;
+  // Image Generation passes IMAGE_GENERATE_FORMATS (adds svg/gif); every
+  // other node keeps the raster formats an edit can return.
+  formats?: readonly ImageOutputFormat[];
+}) {
   const updateParams = useWorkbenchStore((state) => state.updateParams);
   const background = data.params.background ?? "opaque";
-  const requestedFormat = data.params.outputFormat ?? "png";
+  const requestedFormat: ImageOutputFormat = data.params.outputFormat && formats.includes(data.params.outputFormat)
+    ? data.params.outputFormat
+    : "png";
   const outputFormat = background === "transparent" && requestedFormat === "jpeg" ? "png" : requestedFormat;
+  const isGif = outputFormat === "gif";
+  const presets: readonly string[] = isGif ? GIF_SIZES : GENERATION_SIZES;
 
-  const size = data.params.size || "1536x1024";
-  const sizeMode: GenerationSizeMode = data.params.sizeMode ?? ((GENERATION_SIZES as readonly string[]).includes(size) ? "preset" : "custom");
+  const size = data.params.size || (isGif ? GIF_DEFAULT_SIZE : "1536x1024");
+  const sizeMode: GenerationSizeMode = data.params.sizeMode ?? (presets.includes(size) ? "preset" : "custom");
   const inputCacheKey = useConnectedImageCacheKey(id, inputPortId);
   // Dimensions are stored with the cacheKey they were measured from, so a
   // changed/disconnected input simply stops matching -- no reset needed.
@@ -878,10 +958,37 @@ export function GenerationSettings({ id, data, inputPortId }: { id: string; data
     };
   }, [inputCacheKey, sizeMode, size, id, updateParams]);
 
-  const selectValue = sizeMode === "input" ? SIZE_MODE_INPUT : sizeMode === "custom" ? SIZE_MODE_CUSTOM : size;
+  // A preset that is not on the current list (a still preset after switching
+  // to GIF, say) shows as Custom so the select never claims a missing option.
+  const selectValue = sizeMode === "input"
+    ? SIZE_MODE_INPUT
+    : sizeMode === "custom" || !presets.includes(size) ? SIZE_MODE_CUSTOM : size;
   const parsed = parseSize(size) ?? { width: 1536, height: 1024 };
-  const customError = sizeMode === "custom" ? customSizeError(size) : null;
-  const snapped = customError ? sizeForInput(parsed.width, parsed.height) : null;
+  const customError = selectValue === SIZE_MODE_CUSTOM ? customSizeError(size, outputFormat) : null;
+  const snapped = customError && !isGif ? sizeForInput(parsed.width, parsed.height) : null;
+  const frameError = isGif ? gifFrameParamsError(data.params.frameCount, data.params.frameDurationMs) : null;
+
+  const onFormatSelect = (next: ImageOutputFormat) => {
+    const patch: Partial<WorkbenchParams> = { outputFormat: next };
+    if (next === "gif" && !isGif) {
+      // Every frame is rendered and they share the pixel budget, so start a
+      // GIF at the guide's 512x512 rather than a still-image size.
+      patch.sizeMode = "preset";
+      patch.size = GIF_DEFAULT_SIZE;
+    } else if (next !== "gif" && isGif && validateEditSize(size) !== null) {
+      // A GIF size is usually below the still-image pixel floor.
+      patch.sizeMode = "preset";
+      patch.size = "1536x1024";
+    }
+    // SVG is always one image (OpenAI: n must be 1).
+    if (next === "svg") patch.candidates = 1;
+    updateParams(id, patch);
+  };
+
+  const onFrameParam = (key: "frameCount" | "frameDurationMs", raw: string) => {
+    const trimmed = raw.trim();
+    updateParams(id, { [key]: trimmed === "" ? undefined : Number(trimmed) });
+  };
   const inputExact = inputSize ? sizeForInput(inputSize.width, inputSize.height) === `${inputSize.width}x${inputSize.height}` : true;
 
   const onSizeSelect = (value: string) => {
@@ -907,7 +1014,7 @@ export function GenerationSettings({ id, data, inputPortId }: { id: string; data
       <label className={styles.field}>
         <span>Size</span>
         <select className="nodrag" value={selectValue} onChange={(event) => onSizeSelect(event.target.value)}>
-          {GENERATION_SIZES.map((option) => {
+          {presets.map((option) => {
             const label = `${option}${option === "2560x1440" ? " (2K)" : ""}`;
             return (
               <option key={option} value={option}>
@@ -928,7 +1035,7 @@ export function GenerationSettings({ id, data, inputPortId }: { id: string; data
           Input is {inputSize.width}×{inputSize.height}; Sunburst needs multiples of 16 within its limits, so the render uses {sizeForInput(inputSize.width, inputSize.height)}.
         </p>
       )}
-      {sizeMode === "custom" && (
+      {selectValue === SIZE_MODE_CUSTOM && (
         <>
           <div className={styles.sizeCustomRow}>
             <label className={styles.field}>
@@ -951,7 +1058,11 @@ export function GenerationSettings({ id, data, inputPortId }: { id: string; data
               )}
             </p>
           ) : (
-            <p className={styles.hint}>Multiples of 16, aspect 1:3–3:1, longest edge ≤ 3840, 0.66–8.3 MP.</p>
+            <p className={styles.hint}>
+              {isGif
+                ? "Multiples of 16, aspect 1:3–3:1, longest edge ≤ 3840. Frames × pixels must fit the model’s pixel budget."
+                : "Multiples of 16, aspect 1:3–3:1, longest edge ≤ 3840, 0.66–8.3 MP."}
+            </p>
           )}
         </>
       )}
@@ -972,14 +1083,58 @@ export function GenerationSettings({ id, data, inputPortId }: { id: string; data
       </label>
       <label className={styles.field}>
         <span>Output format</span>
-        <select className="nodrag" value={outputFormat} onChange={(event) => updateParams(id, { outputFormat: event.target.value as WorkbenchParams["outputFormat"] })}>
-          {GENERATION_FORMATS.map((option) => (
+        <select className="nodrag" value={outputFormat} onChange={(event) => onFormatSelect(event.target.value as ImageOutputFormat)}>
+          {formats.map((option) => (
             <option key={option} value={option} disabled={background === "transparent" && option === "jpeg"}>
-              {option.toUpperCase()}{background === "transparent" && option === "jpeg" ? " (not available with transparency)" : ""}
+              {FORMAT_LABELS[option]}{background === "transparent" && option === "jpeg" ? " (not available with transparency)" : ""}
             </option>
           ))}
         </select>
       </label>
+      {isVectorOrAnimatedFormat(outputFormat) && (
+        <p className={styles.hint}>
+          {outputFormat === "svg"
+            ? "SVG is a single vector image (one candidate). "
+            : "GIF renders every frame, so keep the size small. "}
+          Text-to-image only: disconnect Image Reference inputs. Edit, Variations and other model nodes can’t take {outputFormat.toUpperCase()} as an input; render PNG or WebP for those.
+        </p>
+      )}
+      {isGif && (
+        <>
+          <div className={styles.sizeCustomRow}>
+            <label className={styles.field}>
+              <span>Frames</span>
+              <input
+                className="nodrag"
+                type="number"
+                min={GIF_FRAME_COUNT_MIN}
+                max={GIF_FRAME_COUNT_MAX}
+                step={1}
+                placeholder={String(GIF_FRAME_COUNT_DEFAULT)}
+                value={data.params.frameCount ?? ""}
+                onChange={(event) => onFrameParam("frameCount", event.target.value)}
+              />
+            </label>
+            <label className={styles.field}>
+              <span>Frame ms</span>
+              <input
+                className="nodrag"
+                type="number"
+                min={GIF_FRAME_DURATION_MIN_MS}
+                max={GIF_FRAME_DURATION_MAX_MS}
+                step={10}
+                placeholder={String(GIF_FRAME_DURATION_DEFAULT_MS)}
+                value={data.params.frameDurationMs ?? ""}
+                onChange={(event) => onFrameParam("frameDurationMs", event.target.value)}
+              />
+            </label>
+          </div>
+          <p className={`${styles.hint} ${frameError ? styles.sizeCustomError : ""}`}>
+            {frameError ?? `Frames ${GIF_FRAME_COUNT_MIN}–${GIF_FRAME_COUNT_MAX} (default ${GIF_FRAME_COUNT_DEFAULT}); ${GIF_FRAME_DURATION_MIN_MS}–${GIF_FRAME_DURATION_MAX_MS} ms per frame, rounded to 10 (default ${GIF_FRAME_DURATION_DEFAULT_MS}).`}
+          </p>
+        </>
+      )}
+      {showComplexity && <ComplexityField id={id} value={data.params.complexity} />}
     </>
   );
 }
@@ -989,17 +1144,87 @@ export function GenerationSettings({ id, data, inputPortId }: { id: string; data
 // the execute wrappers in imageGenerate/imageEdit/saveToLibrary .tsx modules.
 // ---------------------------------------------------------------------------
 
-export function fileFromCacheKey(cacheKey: string): File {
+// Reads a cached image as a File for a node to send on. By default it refuses
+// SVG and GIF bytes (an Image Generation output in those formats): no image
+// or vision model this app calls takes them, and the canvas nodes cannot
+// decode an SVG reliably. Because the guard sits here, every caller that
+// sends pixels on gets it, including nodes added later. Only nodes that
+// hand the original bytes back to the user (Export/Download) opt out.
+export function fileFromCacheKey(cacheKey: string, options: { allowVectorAndAnimated?: boolean } = {}): File {
   const blob = getBlob(cacheKey);
   if (!blob) throw new Error("An input image is no longer cached. Re-run its node.");
-  const extension = blob.type === "image/jpeg" ? "jpg" : blob.type === "image/webp" ? "webp" : "png";
-  return new File([blob], `input.${extension}`, { type: blob.type || "image/png" });
+  const type = blob.type || "image/png";
+  if (!options.allowVectorAndAnimated) {
+    const refusal = modelInputTypeError(type);
+    if (refusal) throw new Error(refusal);
+  }
+  return new File([blob], `input.${extensionForMimeType(type)}`, { type });
 }
 
-export async function blobFromImageValue(value: NodeOutputValue): Promise<File> {
+export async function blobFromImageValue(value: NodeOutputValue, options: { allowVectorAndAnimated?: boolean } = {}): Promise<File> {
   const [cacheKey] = imageCacheKeysFromValue(value);
   if (!cacheKey) throw new Error("Expected an image input.");
-  return fileFromCacheKey(cacheKey);
+  return fileFromCacheKey(cacheKey, options);
+}
+
+// Model-returned SVG never reaches the cache raw: it is sanitized
+// (svg-sanitize.ts) and cached under a data: URL (putSvgBlob). An SVG that
+// cannot be parsed, or is not an SVG, fails the run rather than being shown.
+function cacheSanitizedSvg(cacheKey: string, bytes: Uint8Array): string {
+  try {
+    return putSvgBlob(cacheKey, sanitizeSvg(new TextDecoder().decode(bytes)));
+  } catch (error) {
+    if (error instanceof SvgSanitizeError) throw new Error(`The model returned an SVG that can't be shown safely: ${error.message}`);
+    throw error;
+  }
+}
+
+// True when any pixel of the bitmap is less than fully opaque. Scanned in row
+// strips so a 16-megapixel layer never needs one 64 MB readback, and stops at
+// the first transparent pixel.
+function bitmapHasTransparency(bitmap: ImageBitmap): boolean {
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) throw new Error("Could not read the Markup layer's pixels.");
+  context.drawImage(bitmap, 0, 0);
+  const strip = 256;
+  for (let top = 0; top < bitmap.height; top += strip) {
+    const rows = Math.min(strip, bitmap.height - top);
+    const { data } = context.getImageData(0, top, bitmap.width, rows);
+    for (let index = 3; index < data.length; index += 4) {
+      if (data[index] < 255) return true;
+    }
+  }
+  return false;
+}
+
+// Browser-side Markup checks the edge route cannot make without decoding:
+// the layer must match the FIRST input image's width and height exactly and
+// actually contain transparent pixels. Type, byte and pixel caps come from
+// generation.ts's markupLayerError so they are unit-tested.
+async function validateMarkupLayer(markup: File, base: File): Promise<void> {
+  const early = markupLayerError({ type: markup.type, bytes: markup.size });
+  if (early) throw new Error(early);
+  const [layer, image] = await Promise.all([createImageBitmap(markup), createImageBitmap(base)]);
+  try {
+    const sizeError = markupLayerError({
+      type: markup.type,
+      bytes: markup.size,
+      markupWidth: layer.width,
+      markupHeight: layer.height,
+      baseWidth: image.width,
+      baseHeight: image.height,
+      maxPixels: MARKUP_MAX_PIXELS,
+    });
+    if (sizeError) throw new Error(sizeError);
+    const transparencyError = markupLayerError({ type: markup.type, bytes: markup.size, hasTransparency: bitmapHasTransparency(layer) });
+    if (transparencyError) throw new Error(transparencyError);
+  } finally {
+    layer.close();
+    image.close();
+  }
 }
 
 // DOM-touching generation executor composing generation.ts's pure core:
@@ -1007,9 +1232,18 @@ export async function blobFromImageValue(value: NodeOutputValue): Promise<File> 
 // images as object URLs.
 export async function executeGeneration(
   ctx: ExecuteContext,
-  options: { requireBaseImage: boolean; model?: AllowedImageModel },
+  options: {
+    requireBaseImage: boolean;
+    model?: AllowedImageModel;
+    // Image Generation only: SVG/GIF output may pass through.
+    allowVectorAndAnimated?: boolean;
+    // Image Edit only: read the optional "markup" port.
+    markup?: boolean;
+  },
 ): Promise<void> {
-  const payload = buildGenerationPayload(ctx.params, ctx.inputs("prompt"), options.model);
+  const payload = buildGenerationPayload(ctx.params, ctx.inputs("prompt"), options.model, {
+    allowVectorAndAnimated: options.allowVectorAndAnimated,
+  });
 
   const form = new FormData();
   const files: File[] = [];
@@ -1018,23 +1252,42 @@ export async function executeGeneration(
     if (!base.length) throw new Error("Connect an input image first.");
     files.push(await blobFromImageValue(base[0]));
   }
+  // The Markup layer goes up as its own raw PNG -- never through the
+  // reference transport below, whose re-encode can flatten its alpha -- and
+  // is checked against the raw base image, which is what is actually sent.
+  let markupFile: File | undefined;
+  if (options.markup) {
+    const markupValues = ctx.inputs("markup");
+    if (markupValues.length) {
+      if (!files.length) throw new Error("Markup needs an input image to annotate.");
+      markupFile = await blobFromImageValue(markupValues[0]);
+      ctx.setProgress("Checking markup…");
+      await validateMarkupLayer(markupFile, files[0]);
+    }
+  }
   // Image Generation's "size" port is deliberately NOT read here: it only
   // drives params.size via "Match input image" (GenerationSettings) and is
   // never sent to the model, so it costs no image-input tokens.
   const references = ctx.inputs("references");
   if (references.length) {
     // Each plain image contributes one file; a references value expands to
-    // its ordered image cacheKeys.
-    const rawReferences = references.flatMap(imageCacheKeysFromValue).map(fileFromCacheKey);
+    // its ordered image cacheKeys. fileFromCacheKey refuses SVG/GIF here,
+    // BEFORE the transport step, which would otherwise re-encode a GIF into
+    // a still and let it through.
+    const rawReferences = references.flatMap(imageCacheKeysFromValue).map((key) => fileFromCacheKey(key));
     // The base image travels at full quality; supporting references share
     // the same transport budget the generator uses.
     const optimized = await optimizeReferencesForTransport(rawReferences);
     files.push(...optimized);
   }
   if (files.length > 16) throw new Error("A node can send at most 16 images.");
+  if (isVectorOrAnimatedFormat(payload.outputFormat) && files.length) {
+    throw new Error(`${payload.outputFormat.toUpperCase()} output is text-to-image only; disconnect the Image Reference inputs or choose PNG or WebP.`);
+  }
 
   form.append("payload", JSON.stringify(payload));
   for (const file of files) form.append("image[]", file, file.name);
+  if (markupFile) form.append("markup", markupFile, "markup.png");
 
   ctx.setProgress("Rendering…");
   const response = await fetch("/api/workbench/edit", { method: "POST", body: form, signal: ctx.signal })
@@ -1044,9 +1297,11 @@ export async function executeGeneration(
   const images: NodeOutputValue[] = response.images.map((base64, index) => {
     const cacheKey = `${ctx.nodeId}:${runId}:${index}`;
     const bytes = decodeBase64Image(base64);
-    const mimeType = response.mimeType || (payload.outputFormat === "jpeg" ? "image/jpeg" : payload.outputFormat === "webp" ? "image/webp" : "image/png");
-    const cachedUrl = putBlob(cacheKey, new Blob([bytes], { type: mimeType }));
-    return { kind: "image", url: cachedUrl, cacheKey, mimeType: mimeType as "image/png" | "image/jpeg" | "image/webp", outputFormat: payload.outputFormat, background: payload.background, model: payload.model };
+    const mimeType = (response.mimeType || mimeTypeForFormat(payload.outputFormat)) as ImageOutputMimeType;
+    const cachedUrl = mimeType === "image/svg+xml"
+      ? cacheSanitizedSvg(cacheKey, bytes)
+      : putBlob(cacheKey, new Blob([bytes], { type: mimeType }));
+    return { kind: "image", url: cachedUrl, cacheKey, mimeType, outputFormat: payload.outputFormat, background: payload.background, model: payload.model };
   });
   ctx.applyRun({ runId, signature: ctx.signature, at: Date.now(), values: [images], usage: response.usage });
 

@@ -43,6 +43,23 @@ Reference analysis and import. (The chunked `start`/`part`/`complete` upload rou
 | POST | `/api/workbench/assist` | Assistant-driven node help |
 | POST | `/api/workbench/save` | Persist a workbench draft |
 
+### `/api/workbench/edit`: GPT Image 2.6 parameters
+
+Multipart: a `payload` JSON field, plus `image[]` files, an optional `mask`,
+and an optional `markup`. With no `image[]` files, the request goes to
+`/v1/images/generations`; otherwise it goes to `/v1/images/edits`.
+
+| Payload / file | Values | Rules |
+|---|---|---|
+| `complexity` | `low` \| `medium` \| `high` | Sent only when present. When omitted, the API default (`high`) applies. It has no fee of its own. Refused with 400 for the Test node's `gpt-image-2.5-sunburst-2026-09-08`. |
+| `outputFormat` | `png` \| `jpeg` \| `webp` \| `svg` \| `gif` | `svg` and `gif` are generation-only, so they're refused when `image[]` is present. They're also refused for the 2.5 snapshot. `svg` forces `n=1`, and neither format sends `output_compression`. The response `mimeType` is `image/svg+xml` or `image/gif`. |
+| `frameCount` / `frameDurationMs` | 2–64 / 20–2000 ms (rounded to 10) | GIF only. Out of range, or sent with any other format, returns 400. Size follows `validateGifSize`: multiples of 16 with no still-image pixel floor. Frames × pixels × n must fit the model's budget, and the API reports when they don't. |
+| `markup` (file) | transparent PNG, ≤ 50 MB | An annotation layer over the FIRST `image[]`. It needs at least one input image and is never combined with `mask`. The Image Edit node checks in the browser that its size matches the input and that it has transparent pixels. The edge route can't do either check without decoding. |
+| `image[]` | PNG, JPEG or WebP | SVG and GIF inputs are refused. |
+
+Diagnostics record `complexity`, `frameCount`, `frameDurationMs` and
+`markup: true` only when they were sent.
+
 ## Jobs
 
 | Method | Path | Purpose |

@@ -30,7 +30,7 @@ function probeBridge(): Promise<BridgeHealth> {
   return promise;
 }
 
-function healthHint(health: BridgeHealth | null, provider: CliProvider): string | null {
+export function healthHint(health: BridgeHealth | null, provider: CliProvider): string | null {
   if (!health) return null;
   if (!health.online) return OFFLINE_HINT;
   const state = health.providers[provider];
@@ -38,15 +38,21 @@ function healthHint(health: BridgeHealth | null, provider: CliProvider): string 
   return state.available ? null : `Unavailable: ${state.reason ?? "unknown reason"}`;
 }
 
-function CliNodeBody({ id, data, provider }: WorkbenchNodeProps & { provider: CliProvider }) {
-  const updateParams = useWorkbenchStore((state) => state.updateParams);
-  const inputImages = useConnectedImageCount(id, ["image"]);
+// Re-probes (through the shared cache) whenever the node's status changes.
+export function useBridgeHealth(status: string): BridgeHealth | null {
   const [health, setHealth] = useState<BridgeHealth | null>(null);
   useEffect(() => {
     let live = true;
     void probeBridge().then((result) => { if (live) setHealth(result); });
     return () => { live = false; };
-  }, [data.status]);
+  }, [status]);
+  return health;
+}
+
+function CliNodeBody({ id, data, provider }: WorkbenchNodeProps & { provider: CliProvider }) {
+  const updateParams = useWorkbenchStore((state) => state.updateParams);
+  const inputImages = useConnectedImageCount(id, ["image"]);
+  const health = useBridgeHealth(data.status);
   const run = data.runs[data.activeRun];
   const answer = run?.values[0]?.find((value) => value.kind === "text");
   const models = CLI_MODELS[provider];
@@ -98,58 +104,81 @@ export const CodexCliComponent = memo(function CodexCliNode(props: WorkbenchNode
   return <CliNodeBody {...props} provider="codex" />;
 });
 
+export type BridgeRunOptions = {
+  provider: CliProvider;
+  model: string;
+  effort: string;
+  progress: string;
+  // Server-owned instruction file to run under; the bridge must echo it back,
+  // or the answer came from a bridge that ignored it.
+  persona?: string;
+  // Lets a node add to the instruction once the image count is known.
+  finishInstruction?: (instruction: string, imageCount: number) => string;
+};
+
 // Same input handling as the AI Assistant's execute, posted to the local
 // bridge instead of /api/workbench/assist. The answer is a plain Text value.
+export async function runBridge(ctx: ExecuteContext, options: BridgeRunOptions): Promise<void> {
+  const { provider, model, effort, persona } = options;
+  const instruction = (ctx.params.instruction ?? "").trim();
+  if (!instruction) throw new Error("Enter an instruction for the assistant.");
+
+  const contextText = ctx.inputs("text")
+    .filter((value): value is Extract<NodeOutputValue, { kind: "text" }> => value.kind === "text")
+    .map((value) => value.text)
+    .filter(Boolean)
+    .join("\n\n");
+  const combinedInstruction = contextText ? `${instruction}\n\nContext:\n${contextText}` : instruction;
+
+  const imageKeys = ctx.inputs("image").flatMap(imageCacheKeysFromValue);
+  if (imageKeys.length > 16) throw new Error("Connect at most 16 images to the assistant.");
+  const images = await Promise.all(imageKeys.map(async (key) => {
+    const file = fileFromCacheKey(key);
+    return { imageBase64: await fileToBase64(file), mimeType: file.type || "image/png" };
+  }));
+  const finalInstruction = options.finishInstruction ? options.finishInstruction(combinedInstruction, images.length) : combinedInstruction;
+
+  ctx.setProgress(options.progress);
+  let response: Response;
+  try {
+    response = await fetch(`${CLI_BRIDGE_ORIGIN}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: ctx.signal,
+      // persona: undefined is dropped by JSON.stringify, so the CLI nodes'
+      // body is unchanged.
+      body: JSON.stringify({ provider, model, effort, instruction: finalInstruction, images, persona }),
+    });
+  } catch (error) {
+    if (ctx.signal.aborted) throw error;
+    healthCache = null;
+    throw new Error(OFFLINE_HINT);
+  }
+  const body = await response.json().catch(() => null) as { ok?: boolean; text?: string; error?: string; persona?: string } | null;
+  if (!response.ok || !body?.ok || typeof body.text !== "string") {
+    throw new Error(body?.error || `CLI helper answered HTTP ${response.status}.`);
+  }
+  if (persona !== undefined && body.persona !== persona) {
+    throw new Error("The CLI helper is out of date and ran without the prompting guide. Restart npm run cli-bridge.");
+  }
+
+  ctx.applyRun({
+    runId: ctx.createRunId(),
+    signature: ctx.signature,
+    at: Date.now(),
+    values: [[{ kind: "text", text: body.text }]],
+  });
+}
+
 function cliExecute(provider: CliProvider) {
   return async (ctx: ExecuteContext): Promise<void> => {
-    const instruction = (ctx.params.instruction ?? "").trim();
-    if (!instruction) throw new Error("Enter an instruction for the assistant.");
-
     const requestedModel = String(ctx.params.model ?? "").trim();
     const model = CLI_MODELS[provider].find((entry) => entry === requestedModel) ?? CLI_DEFAULT_MODEL[provider];
 
     const requestedEffort = String(ctx.params.effort ?? "").trim();
     const effort = CLI_EFFORTS.find((entry) => entry === requestedEffort) ?? "default";
 
-    const contextText = ctx.inputs("text")
-      .filter((value): value is Extract<NodeOutputValue, { kind: "text" }> => value.kind === "text")
-      .map((value) => value.text)
-      .filter(Boolean)
-      .join("\n\n");
-    const combinedInstruction = contextText ? `${instruction}\n\nContext:\n${contextText}` : instruction;
-
-    const imageKeys = ctx.inputs("image").flatMap(imageCacheKeysFromValue);
-    if (imageKeys.length > 16) throw new Error("Connect at most 16 images to the assistant.");
-    const images = await Promise.all(imageKeys.map(async (key) => {
-      const file = fileFromCacheKey(key);
-      return { imageBase64: await fileToBase64(file), mimeType: file.type || "image/png" };
-    }));
-
-    ctx.setProgress(provider === "claude" ? "Asking Claude…" : "Asking Codex…");
-    let response: Response;
-    try {
-      response = await fetch(`${CLI_BRIDGE_ORIGIN}/run`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: ctx.signal,
-        body: JSON.stringify({ provider, model, effort, instruction: combinedInstruction, images }),
-      });
-    } catch (error) {
-      if (ctx.signal.aborted) throw error;
-      healthCache = null;
-      throw new Error(OFFLINE_HINT);
-    }
-    const body = await response.json().catch(() => null) as { ok?: boolean; text?: string; error?: string } | null;
-    if (!response.ok || !body?.ok || typeof body.text !== "string") {
-      throw new Error(body?.error || `CLI helper answered HTTP ${response.status}.`);
-    }
-
-    ctx.applyRun({
-      runId: ctx.createRunId(),
-      signature: ctx.signature,
-      at: Date.now(),
-      values: [[{ kind: "text", text: body.text }]],
-    });
+    await runBridge(ctx, { provider, model, effort, progress: provider === "claude" ? "Asking Claude…" : "Asking Codex…" });
   };
 }
 

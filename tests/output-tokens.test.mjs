@@ -7,6 +7,7 @@ import {
   outputTokenKey,
   outputTokensFromUsage,
   outputTokensToUsd,
+  outputTokenVariant,
   recordOutputTokens,
 } from "../app/lib/output-tokens.ts";
 import { outputTokenTableFrom, stageSize } from "../scripts/autoboard/lib/render.mjs";
@@ -115,4 +116,33 @@ test("stageSize matches the sizes the payload builders actually request", () => 
   assert.equal(stageSize("draft"), "1536x1024");
   assert.equal(stageSize("confirm"), "1536x1024");
   assert.equal(stageSize("final"), "2560x1440");
+});
+
+test("SVG, GIF and a non-default complexity learn under their own key and never overwrite the raster entry", () => {
+  const table = {};
+  recordOutputTokens(table, { model: MODEL, size: "1024x1024", quality: "low", outputTokens: 120 });
+  for (const params of [
+    { outputFormat: "gif", frameCount: 9 },
+    { outputFormat: "svg" },
+    { complexity: "low" },
+    { complexity: "medium", outputFormat: "gif", frameCount: 16 },
+  ]) {
+    recordOutputTokens(table, { model: MODEL, size: "1024x1024", quality: "low", variant: outputTokenVariant(params), outputTokens: 999 });
+  }
+  assert.equal(lookupOutputTokens(table, MODEL, "1024x1024", "low"), 120, "the PNG/default entry is untouched");
+  assert.equal(lookupOutputTokens(table, MODEL, "1024x1024", "low", "gif=9"), 999);
+  // A GIF's frame count is part of its key: 16 frames is not priced from 9.
+  assert.equal(lookupOutputTokens(table, MODEL, "1024x1024", "low", "gif=16"), undefined);
+});
+
+test("unset and explicit high complexity share the original three-part key", () => {
+  assert.equal(outputTokenVariant({}), "");
+  assert.equal(outputTokenVariant({ complexity: "high" }), "");
+  assert.equal(outputTokenVariant({ outputFormat: "png" }), "");
+  assert.equal(outputTokenVariant({ complexity: "low" }), "complexity=low");
+  assert.equal(outputTokenVariant({ outputFormat: "gif" }), "gif=9", "an unset frame count is the API default of 9");
+  assert.equal(outputTokenKey(MODEL, "1536x1024", "low", ""), outputTokenKey(MODEL, "1536x1024", "low"));
+  const table = {};
+  recordOutputTokens(table, { model: MODEL, size: "1536x1024", quality: "low", outputTokens: 158 });
+  assert.equal(estimateOutputUsd(table, { model: MODEL, size: "1536x1024", quality: "low", variant: outputTokenVariant({ complexity: "high" }) }) > 0, true);
 });

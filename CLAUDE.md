@@ -29,7 +29,7 @@ Node 22.13+ required (`engines` in `package.json`).
 ### Tests
 
 `npm run test:transitions` is misnamed: its glob is `tests/*.test.mjs`, so it runs
-the **entire** suite (906 tests), not just transitions. Use it as the run-all.
+the **entire** suite (954 tests), not just transitions. Use it as the run-all.
 
 Individual suites:
 
@@ -146,6 +146,17 @@ login) and runs them with no tools. Pure logic
 is in `scripts/cli-bridge/lib.mjs`, tested by `tests/cli-bridge.test.mjs`;
 `docs/cli-bridge.md` has the rules and the reasons.
 
+The **Prompt Expert** node (`promptExpert`) always runs codex on `gpt-6-astra`
+with `persona: "gpt-image-2.6-prompting"`; its output is prompt text only, for
+an Image Generation / Image Edit / Test node's Prompt port. The bridge prepends
+`scripts/cli-bridge/personas/gpt-image-2-6-prompting.md` (a fixed server-side
+path, read once at startup — restart the bridge after editing it; codex only;
+capped at 40k chars, separate from the 32k instruction cap). A persona run's
+response echoes `persona` and the node refuses an answer without it, so a
+bridge older than the persona can't silently run without the guide. Keep that
+file and `docs/reference/openai-image-prompting.md` in step; both paraphrase
+OpenAI's guide rather than quoting it.
+
 ## Architecture
 
 | Path | Role |
@@ -211,7 +222,7 @@ localhost to mint a JWT. Blank both in `.dev.vars`, which overrides
   `node --test` fails. It also sets `verbatimModuleSyntax`, because a
   value-position import of a type is a link-time `SyntaxError` that neither gate
   can see.
-- `npm run typecheck` is not a pass/fail gate: 10 errors pre-date this tree
+- `npm run typecheck` is not a pass/fail gate: 7 errors pre-date this tree
   (workbench, scene-lab, `db/index.ts`, and the `examples/` tree). The gate is
   `node scripts/typecheck-baseline.mjs`: it fails when tsc reports more errors
   than `scripts/typecheck-baseline.json` records, or when tsc does not run
@@ -248,6 +259,24 @@ localhost to mint a JWT. Blank both in `.dev.vars`, which overrides
   2.5 alias that stale tabs carry still renders on 2.6. Saved graphs and
   imports run `normalizeImageModelParams` so a stored 2.5 id re-signs the node
   instead of serving its old 2.5 render as current.
+- GPT Image 2.6 extras in the Workbench (`modelSupports` in `sunburst.ts` gates
+  them; the Test node's 2.5 snapshot refuses all three, and `/generator` sends
+  none of them):
+  - `complexity` (low/medium/high) is sent only when a node sets it; unset
+    means the API default, high. The Test node's import rules drop it.
+  - SVG/GIF output is Image Generation only (text-to-image). GIF sizes use
+    `validateGifSize`, which has no pixel floor; frames × pixels × n must fit a
+    budget the API enforces and reports. Model-made SVG is sanitized before it
+    is cached. `fileFromCacheKey` refuses SVG/GIF unless the caller passes
+    `allowVectorAndAnimated`; only Export/Download and Save to Library pass it,
+    and Save to Library then refuses them itself.
+  - `markup` is Image Edit only and never combined with a mask. Its size-match
+    and transparency checks run in the browser only; the edge route can't
+    decode images.
+  - The output-token table keys `svg`, `gif=<frames>` and complexity low/medium
+    separately; unset and "high" share the original three-part key.
+  - Ports marked `explicitOnly` (Image Edit's Markup) are never auto-attached
+    on a drop onto the card.
 - A render's cost is dominated by reference images, not by quality. Measured on
   a 6-reference board at quality `low`: 8,349 image input tokens ($0.067) vs 158
   image output tokens ($0.005) — 88% of the bill, and image input does not vary

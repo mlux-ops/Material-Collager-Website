@@ -24,6 +24,17 @@
  * Sunburst) or a pinned snapshot bump is exactly the event that would
  * invalidate every recorded count, and keying by it makes
  * the old entries fall out of use instead of quietly misreporting.
+ *
+ * An optional fourth part, the render VARIANT, separates requests whose output
+ * is not the plain raster image the three-part key was learned from: SVG
+ * output, an animated GIF (keyed with its frame count, since every frame is
+ * output), and a non-default 2.6 `complexity`. Complexity has no separate fee,
+ * but whether its planning changes the reported output count is unverified;
+ * without its own key, one `low` run would overwrite the default entry
+ * ("later observation wins") and misprice every default run after it. Unset
+ * and "high" are the same request (high is the API default), so they keep the
+ * three-part key and every entry recorded before complexity existed stays
+ * valid -- including the autoboard writer, which never sets a variant.
  */
 
 import { SUNBURST_RATES_USD_PER_MILLION } from "./sunburst.ts";
@@ -35,11 +46,33 @@ export type OutputTokenObservation = {
   model?: string | null;
   size?: string | null;
   quality?: string | null;
+  // See outputTokenVariant; empty/absent for a default raster render.
+  variant?: string | null;
   outputTokens?: number | null;
 };
 
-export function outputTokenKey(model: string, size: string, quality: string): string {
-  return `${model}|${size}|${quality}`;
+export function outputTokenKey(model: string, size: string, quality: string, variant?: string | null): string {
+  const base = `${model}|${size}|${quality}`;
+  return variant ? `${base}|${variant}` : base;
+}
+
+/**
+ * The variant part of a render's key, from its params. "" for a default
+ * raster render (png/jpeg/webp at the default complexity).
+ */
+export function outputTokenVariant(params: {
+  complexity?: unknown;
+  outputFormat?: unknown;
+  frameCount?: unknown;
+}): string {
+  const parts: string[] = [];
+  if (params.complexity === "low" || params.complexity === "medium") parts.push(`complexity=${params.complexity}`);
+  if (params.outputFormat === "svg") parts.push("svg");
+  if (params.outputFormat === "gif") {
+    const frames = typeof params.frameCount === "number" && Number.isInteger(params.frameCount) ? params.frameCount : 9;
+    parts.push(`gif=${frames}`);
+  }
+  return parts.join(",");
 }
 
 /** Pull the image-output token count out of a raw OpenAI usage block. */
@@ -66,10 +99,10 @@ export function outputTokensFromUsage(usage: unknown): number | undefined {
  * and the newer number is the one worth keeping.
  */
 export function recordOutputTokens(table: OutputTokenTable, observation: OutputTokenObservation): boolean {
-  const { model, size, quality, outputTokens } = observation;
+  const { model, size, quality, variant, outputTokens } = observation;
   if (!model || !size || !quality) return false;
   if (typeof outputTokens !== "number" || !Number.isFinite(outputTokens) || outputTokens <= 0) return false;
-  const key = outputTokenKey(model, size, quality);
+  const key = outputTokenKey(model, size, quality, variant);
   if (table[key] === outputTokens) return false;
   table[key] = outputTokens;
   return true;
@@ -81,9 +114,10 @@ export function lookupOutputTokens(
   model: string | null | undefined,
   size: string | null | undefined,
   quality: string | null | undefined,
+  variant?: string | null,
 ): number | undefined {
   if (!model || !size || !quality) return undefined;
-  return table[outputTokenKey(model, size, quality)];
+  return table[outputTokenKey(model, size, quality, variant)];
 }
 
 export function outputTokensToUsd(tokens: number): number {
@@ -99,9 +133,9 @@ export function outputTokensToUsd(tokens: number): number {
  */
 export function estimateOutputUsd(
   table: OutputTokenTable,
-  options: { model?: string | null; size?: string | null; quality?: string | null; count?: number },
+  options: { model?: string | null; size?: string | null; quality?: string | null; variant?: string | null; count?: number },
 ): number | null {
-  const tokens = lookupOutputTokens(table, options.model, options.size, options.quality);
+  const tokens = lookupOutputTokens(table, options.model, options.size, options.quality, options.variant);
   if (tokens === undefined) return null;
   const count = options.count ?? 1;
   if (!Number.isInteger(count) || count < 1) return null;
