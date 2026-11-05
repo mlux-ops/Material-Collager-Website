@@ -1,6 +1,6 @@
 import { smallestValidEditSize } from "../../../lib/image-edit.ts";
 import type { CostEstimateInput, ImportParamRule, NodeManifest, WorkbenchParams } from "../types";
-import { estimateSunburstCost, GENERATION_BACKGROUNDS, GENERATION_FORMATS, GENERATION_QUALITIES } from "./generation.ts";
+import { estimateSunburstCost, GENERATION_BACKGROUNDS, GENERATION_COMPLEXITIES, GENERATION_FORMATS, GENERATION_QUALITIES } from "./generation.ts";
 import { SUNBURST_MODEL } from "../../../lib/sunburst.ts";
 
 // Valid Sunburst target sizes for upscaling, clamped to a 3840x2160
@@ -20,6 +20,7 @@ export const UPSCALER_PARAM_RULES = {
   model: { type: "enum", optional: true, values: [SUNBURST_MODEL] },
   background: { type: "enum", optional: true, values: GENERATION_BACKGROUNDS },
   outputFormat: { type: "enum", optional: true, values: GENERATION_FORMATS },
+  complexity: { type: "enum", optional: true, values: GENERATION_COMPLEXITIES },
 } satisfies Record<string, ImportParamRule>;
 
 // N-10: each menu option's own SMALL, aspect-preserving draft counterpart --

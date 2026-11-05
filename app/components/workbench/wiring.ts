@@ -117,6 +117,9 @@ export function compatiblePorts(nodes: WorkbenchNode[], edges: Edge[], from: Wir
 //   2. multi ports -- appending to one never removes an existing wire;
 //   3. occupied single ports -- onConnect replaces that port's wire, which is
 //      exactly what dropping on that handle directly would have done.
+// A port marked `explicitOnly` (Image Edit's optional Markup layer) is never
+// chosen here: an ordinary photo dropped on the card must not become an
+// annotation layer. It still takes a wire dropped on its own handle.
 // Backwards from an input, it is the first ACTIVE output in declared order
 // that passes connectionIsValid: activeOutputPortsFor leaves out outputs a
 // card is not currently showing (Variations' hidden variation-N), so the wire
@@ -142,6 +145,8 @@ export function autoAttachConnection(
   const occupied = new Set(edges.filter((edge) => edge.target === targetNodeId).map((edge) => edge.targetHandle));
   const tier = (port: PortSpec) => (port.multi ? 1 : occupied.has(port.id) ? 2 : 0);
   // Array.prototype.sort is stable, so declared order survives within a tier.
-  const [best] = compatiblePorts(nodes, edges, from, target).sort((a, b) => tier(a) - tier(b));
+  const [best] = compatiblePorts(nodes, edges, from, target)
+    .filter((port) => !port.explicitOnly)
+    .sort((a, b) => tier(a) - tier(b));
   return best ? connectionTo(from, targetNodeId, best.id) : null;
 }

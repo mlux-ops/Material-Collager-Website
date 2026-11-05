@@ -455,3 +455,33 @@ test("recordUsageCalibration is a no-op when usage is missing or carries no imag
   // a real bucket update, a true no-op never calls saveCalibration.
   assert.equal(adapter.store.has(CALIBRATION_STORAGE_KEY), false);
 });
+
+test("a GIF, SVG or low-complexity run never reprices the plain render at the same size and quality", async () => {
+  const { recordRunOutputTokens, resetOutputTokenTableForTests } = await import("../app/components/workbench/cost.ts");
+  const { estimateSunburstCost } = await import("../app/components/workbench/nodes/generation.ts");
+  setCalibrationStorageAdapter(createMemoryAdapter());
+  resetOutputTokenTableForTests();
+  const plain = { model: "gpt-image-2.6-sunburst", size: "1024x1024", quality: "low", candidates: 1 };
+  recordRunOutputTokens(plain, { output_tokens: 100 });
+  recordRunOutputTokens({ ...plain, outputFormat: "gif", frameCount: 9 }, { output_tokens: 900 });
+  recordRunOutputTokens({ ...plain, outputFormat: "svg" }, { output_tokens: 4000 });
+  recordRunOutputTokens({ ...plain, complexity: "low" }, { output_tokens: 80 });
+
+  const usd = (tokens) => tokens * 30 / 1_000_000;
+  const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-9, `${actual} vs ${expected}`);
+  close(estimateSunburstCost({ params: plain, inputImages: 0 }), usd(100));
+  close(estimateSunburstCost({ params: { ...plain, complexity: "high" }, inputImages: 0 }), usd(100));
+  close(estimateSunburstCost({ params: { ...plain, outputFormat: "gif" }, inputImages: 0 }), usd(900));
+  // SVG is always one image, whatever candidates says.
+  close(estimateSunburstCost({ params: { ...plain, outputFormat: "svg", candidates: 4 }, inputImages: 0 }), usd(4000));
+  close(estimateSunburstCost({ params: { ...plain, complexity: "low" }, inputImages: 0 }), usd(80));
+  assert.equal(estimateSunburstCost({ params: { ...plain, complexity: "medium" }, inputImages: 0 }), null);
+  setCalibrationStorageAdapter(null);
+});
+
+test("draft mode keeps a GIF's small size and only lowers its quality", () => {
+  assert.deepEqual(
+    generationDraftOverride({ outputFormat: "gif", size: "512x512", quality: "high", frameCount: 12 }),
+    { outputFormat: "gif", size: "512x512", quality: "low", frameCount: 12 },
+  );
+});

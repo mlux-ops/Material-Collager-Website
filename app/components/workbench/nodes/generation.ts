@@ -4,23 +4,145 @@
 // test runner, so runtime imports carry explicit .ts extensions and nothing
 // here touches the DOM at module scope.
 
-import { clampToValidEditSize, smallestValidEditSize, validateEditSize } from "../../../lib/image-edit.ts";
+import {
+  GIF_FRAME_COUNT_DEFAULT,
+  GIF_FRAME_COUNT_MAX,
+  GIF_FRAME_COUNT_MIN,
+  GIF_FRAME_DURATION_DEFAULT_MS,
+  GIF_FRAME_DURATION_MAX_MS,
+  GIF_FRAME_DURATION_MIN_MS,
+  MARKUP_MAX_BYTES,
+  MARKUP_MAX_PIXELS,
+  clampToValidEditSize,
+  gifFrameParamsError,
+  roundFrameDuration,
+  smallestValidEditSize,
+  validateEditSize,
+  validateGifSize,
+} from "../../../lib/image-edit.ts";
 import { estimateOutputOnlyUsd } from "../cost.ts";
 import {
   SUNBURST_BACKGROUNDS,
+  SUNBURST_COMPLEXITIES,
   SUNBURST_MODEL,
   SUNBURST_QUALITIES,
+  isSunburstComplexity,
+  modelSupports,
   type AllowedImageModel,
   type SunburstBackground,
+  type SunburstComplexity,
   type SunburstQuality,
 } from "../../../lib/sunburst.ts";
 import { estimateRunUsd } from "../cost.ts";
-import type { CostEstimateInput, ImportParamRule, NodeOutputValue, ReferenceItem, WorkbenchParams } from "../types";
+import type {
+  CostEstimateInput,
+  ImageOutputFormat,
+  ImageOutputMimeType,
+  ImportParamRule,
+  NodeOutputValue,
+  ReferenceItem,
+  WorkbenchParams,
+} from "../types";
 
 export const GENERATION_SIZES = ["1024x1024", "1536x1024", "1024x1536", "2048x2048", "2560x1440"] as const;
+// Animated GIF presets. Every frame is rendered, and frames x pixels x n must
+// fit the model's pixel budget, so these stay small (OpenAI's guide uses
+// 512x512); the regular presets above would exceed it at the default 9 frames.
+export const GIF_SIZES = ["512x512", "768x512", "512x768", "768x768"] as const;
+export const GIF_DEFAULT_SIZE = "512x512";
 export const GENERATION_QUALITIES = SUNBURST_QUALITIES;
 export const GENERATION_BACKGROUNDS = SUNBURST_BACKGROUNDS;
+// Raster formats every generation-shaped node offers (edits return only these).
 export const GENERATION_FORMATS = ["png", "webp", "jpeg"] as const;
+// Image Generation alone adds SVG and animated GIF: text-to-image on 2.6
+// only, from /v1/images/generations.
+export const IMAGE_GENERATE_FORMATS = ["png", "webp", "jpeg", "svg", "gif"] as const;
+export const GENERATION_COMPLEXITIES = SUNBURST_COMPLEXITIES;
+export {
+  gifFrameParamsError,
+  GIF_FRAME_COUNT_DEFAULT,
+  GIF_FRAME_COUNT_MAX,
+  GIF_FRAME_COUNT_MIN,
+  GIF_FRAME_DURATION_DEFAULT_MS,
+  GIF_FRAME_DURATION_MAX_MS,
+  GIF_FRAME_DURATION_MIN_MS,
+};
+
+export function isVectorOrAnimatedFormat(format: unknown): format is "svg" | "gif" {
+  return format === "svg" || format === "gif";
+}
+
+const MIME_BY_FORMAT: Record<ImageOutputFormat, ImageOutputMimeType> = {
+  png: "image/png",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+  gif: "image/gif",
+};
+
+export function mimeTypeForFormat(format: ImageOutputFormat): ImageOutputMimeType {
+  return MIME_BY_FORMAT[format];
+}
+
+// File extension for a cached image's MIME type (downloads, uploads).
+export function extensionForMimeType(mimeType: string | undefined): string {
+  if (mimeType === "image/jpeg") return "jpg";
+  if (mimeType === "image/webp") return "webp";
+  if (mimeType === "image/svg+xml") return "svg";
+  if (mimeType === "image/gif") return "gif";
+  return "png";
+}
+
+/**
+ * Why a cached image cannot be sent on to a model, or null when it can.
+ * SVG is never an image-model input (the edit endpoint refuses it), and GIF
+ * input is not documented, so both are refused with the fix spelled out.
+ */
+export function modelInputTypeError(mimeType: string | undefined): string | null {
+  if (mimeType === "image/svg+xml") {
+    return "This input is an SVG. Image and vision models can’t take SVG input, and only View Image, Compare and Export/Download accept it. Set the upstream Image Generation’s output format to PNG or WebP.";
+  }
+  if (mimeType === "image/gif") {
+    return "This input is an animated GIF. Image and vision models don’t document GIF input, and only View Image, Compare and Export/Download accept it. Set the upstream Image Generation’s output format to PNG or WebP.";
+  }
+  return null;
+}
+
+/**
+ * The Markup layer's checks, each applied once its facts are known: a PNG of
+ * at most 50 MB, the same width and height as the first input image, at most
+ * 16,777,216 pixels, and some transparent pixels (OpenAI's documented
+ * requirements). Pure, so the rules are unit-tested; the browser supplies the
+ * decoded dimensions and the transparency scan.
+ */
+export function markupLayerError(facts: {
+  type: string;
+  bytes: number;
+  markupWidth?: number;
+  markupHeight?: number;
+  baseWidth?: number;
+  baseHeight?: number;
+  maxPixels?: number;
+  hasTransparency?: boolean;
+}): string | null {
+  if (facts.type !== "image/png") {
+    return "The Markup input must be a PNG with a transparent background (draw on a transparent layer, then export PNG).";
+  }
+  if (facts.bytes > MARKUP_MAX_BYTES) return "The Markup layer must be 50 MB or smaller.";
+  if (facts.markupWidth !== undefined && facts.markupHeight !== undefined
+    && facts.baseWidth !== undefined && facts.baseHeight !== undefined
+    && (facts.markupWidth !== facts.baseWidth || facts.markupHeight !== facts.baseHeight)) {
+    return `The Markup layer is ${facts.markupWidth}×${facts.markupHeight}, but the input image is ${facts.baseWidth}×${facts.baseHeight}. Export the markup at exactly the input image’s size.`;
+  }
+  if (facts.markupWidth !== undefined && facts.markupHeight !== undefined
+    && facts.markupWidth * facts.markupHeight > (facts.maxPixels ?? MARKUP_MAX_PIXELS)) {
+    return "The Markup layer can be at most 16,777,216 pixels.";
+  }
+  if (facts.hasTransparency === false) {
+    return "The Markup layer has no transparent pixels. Draw the marks on a transparent layer, not over a copy of the photo.";
+  }
+  return null;
+}
 // How params.size is chosen. params.size itself always holds a concrete
 // "WxH" string so cost, draft override, signature and the route keep reading
 // one field:
@@ -49,13 +171,17 @@ export function sizeForInput(width: number, height: number): string {
 }
 
 // Validation message for a typed custom size, or null when it is renderable.
-export function customSizeError(size: unknown): string | null {
+// A GIF follows its own rule (no per-image pixel floor; see validateGifSize).
+export function customSizeError(size: unknown, outputFormat?: unknown): string | null {
   const parsed = parseSize(size);
   if (!parsed) return "Size must look like 1536x1024.";
-  return validateEditSize(`${parsed.width}x${parsed.height}`);
+  const normalized = `${parsed.width}x${parsed.height}`;
+  return outputFormat === "gif" ? validateGifSize(normalized) : validateEditSize(normalized);
 }
 
-// Import-validation rules shared by both generation-shaped nodes.
+// Import-validation rules shared by the generation-shaped 2.6 nodes. The Test
+// node (2.5) removes `complexity` from its copy; Image Generation extends
+// `outputFormat` with svg/gif and adds the GIF frame params.
 export const GENERATION_PARAM_RULES = {
   // Any "WxH" string: presets, input-matched and custom sizes all land here.
   // The edit route re-validates against Sunburst's limits before spending.
@@ -66,6 +192,14 @@ export const GENERATION_PARAM_RULES = {
   model: { type: "enum", optional: true, values: [SUNBURST_MODEL] },
   background: { type: "enum", optional: true, values: GENERATION_BACKGROUNDS },
   outputFormat: { type: "enum", optional: true, values: GENERATION_FORMATS },
+  complexity: { type: "enum", optional: true, values: GENERATION_COMPLEXITIES },
+} satisfies Record<string, ImportParamRule>;
+
+export const IMAGE_GENERATE_PARAM_RULES = {
+  ...GENERATION_PARAM_RULES,
+  outputFormat: { type: "enum", optional: true, values: IMAGE_GENERATE_FORMATS },
+  frameCount: { type: "number", optional: true, integer: true, min: GIF_FRAME_COUNT_MIN, max: GIF_FRAME_COUNT_MAX },
+  frameDurationMs: { type: "number", optional: true, min: GIF_FRAME_DURATION_MIN_MS, max: GIF_FRAME_DURATION_MAX_MS },
 } satisfies Record<string, ImportParamRule>;
 
 export type GenerationPayload = {
@@ -75,8 +209,20 @@ export type GenerationPayload = {
   n: number;
   model: AllowedImageModel;
   background: SunburstBackground;
-  outputFormat: (typeof GENERATION_FORMATS)[number];
+  outputFormat: ImageOutputFormat;
+  // Present only when the node set it and the model takes it.
+  complexity?: SunburstComplexity;
+  // Present only for GIF output.
+  frameCount?: number;
+  frameDurationMs?: number;
 };
+
+// The complexity a node's params ask for, or undefined when nothing should be
+// sent: unset, not one of the enum values, or a model that does not take it
+// (the Test node's 2.5 snapshot).
+export function complexityFor(params: WorkbenchParams, model: AllowedImageModel = SUNBURST_MODEL): SunburstComplexity | undefined {
+  return isSunburstComplexity(params.complexity) && modelSupports(model, "complexity") ? params.complexity : undefined;
+}
 
 export function promptTextsFrom(values: NodeOutputValue[]): string[] {
   return values.map((value) => (value.kind === "text" ? value.text : "")).filter(Boolean);
@@ -86,26 +232,49 @@ export function promptTextsFrom(values: NodeOutputValue[]): string[] {
 // /api/workbench/edit payload from the node's (effective) params. The model is
 // chosen by the node KIND (the caller), never read from params, so only the
 // Test node can ask for TEST_MODEL_2_5.
+//
+// `allowVectorAndAnimated` is set only by Image Generation: SVG/GIF pass
+// through when the model supports them; on any other node (or the Test node)
+// they fall back to PNG, the same as any unknown format. SVG forces n=1, and
+// the GIF frame params ride along only with GIF.
 export function buildGenerationPayload(
   params: WorkbenchParams,
   promptValues: NodeOutputValue[],
   model: AllowedImageModel = SUNBURST_MODEL,
+  options: { allowVectorAndAnimated?: boolean } = {},
 ): GenerationPayload {
   const promptParts = promptTextsFrom(promptValues);
   if (!promptParts.length) throw new Error("Connect a prompt (Text or Prompt Builder) first.");
   const background = params.background || "opaque";
-  const outputFormat = params.outputFormat === "jpeg" || params.outputFormat === "webp" ? params.outputFormat : "png";
+  const requested = params.outputFormat;
+  const outputFormat: ImageOutputFormat = requested === "jpeg" || requested === "webp"
+    ? requested
+    : isVectorOrAnimatedFormat(requested) && options.allowVectorAndAnimated && modelSupports(model, requested)
+      ? requested
+      : "png";
   if (background === "transparent" && outputFormat === "jpeg") {
     throw new Error("Transparent output requires PNG or WebP; choose a compatible format before generating.");
   }
+  const complexity = complexityFor(params, model);
+  let frames: { frameCount?: number; frameDurationMs?: number } = {};
+  if (outputFormat === "gif") {
+    const frameError = gifFrameParamsError(params.frameCount, params.frameDurationMs);
+    if (frameError) throw new Error(frameError);
+    frames = {
+      frameCount: params.frameCount ?? GIF_FRAME_COUNT_DEFAULT,
+      frameDurationMs: roundFrameDuration(params.frameDurationMs ?? GIF_FRAME_DURATION_DEFAULT_MS),
+    };
+  }
   return {
     prompt: promptParts.join("\n"),
-    size: params.size || "1536x1024",
+    size: params.size || (outputFormat === "gif" ? GIF_DEFAULT_SIZE : "1536x1024"),
     quality: (params.quality || "medium") as SunburstQuality,
-    n: params.candidates || 1,
+    n: outputFormat === "svg" ? 1 : params.candidates || 1,
     model,
     background,
     outputFormat,
+    ...(complexity !== undefined ? { complexity } : {}),
+    ...frames,
   };
 }
 
@@ -191,8 +360,16 @@ export function estimateSunburstCost({ params }: CostEstimateInput): number | nu
     model: typeof params.model === "string" ? params.model : undefined,
     size: params.size,
     quality: params.quality,
-    // Variations names its fan-out `n`; the generation nodes call it candidates.
-    candidates: (params.candidates as number | undefined) ?? (params.n as number | undefined) ?? 1,
+    // Complexity has no fee of its own, but SVG/GIF and a non-default
+    // complexity learn under their own table key (outputTokenVariant).
+    complexity: params.complexity,
+    outputFormat: params.outputFormat,
+    frameCount: params.outputFormat === "gif" ? params.frameCount ?? GIF_FRAME_COUNT_DEFAULT : undefined,
+    // Variations names its fan-out `n`; the generation nodes call it
+    // candidates. SVG is always one image.
+    candidates: params.outputFormat === "svg"
+      ? 1
+      : (params.candidates as number | undefined) ?? (params.n as number | undefined) ?? 1,
   });
 }
 
@@ -205,6 +382,10 @@ export function estimateSunburstCost({ params }: CostEstimateInput): number | nu
 // estimateStaleCost -- so signing this size change is automatic, not a
 // separate wiring step.
 export function generationDraftOverride(params: WorkbenchParams): WorkbenchParams {
+  // A GIF is already small (its frames share the pixel budget), and the
+  // smallest valid still size (>= 655,360 px) would be LARGER than its
+  // 512x512 default, so draft mode only lowers its quality.
+  if (params.outputFormat === "gif") return { ...params, quality: "low" };
   const [rawWidth, rawHeight] = (params.size || "1536x1024").split("x").map(Number);
   const small = smallestValidEditSize(rawWidth || 1536, rawHeight || 1024);
   return { ...params, quality: "low", size: `${small.width}x${small.height}` };

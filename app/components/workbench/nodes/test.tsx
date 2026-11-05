@@ -18,7 +18,8 @@ export const Component = memo(function TestNode({ id, data }: WorkbenchNodeProps
   const inputImages = useConnectedImageCount(id, ["references"]);
   return (
     <NodeShell data={data} footer={<RunFooter id={id} data={data} inputImages={inputImages} />}>
-      <GenerationSettings id={id} data={data} inputPortId="size" />
+      {/* No Complexity control: it is a 2.6 setting the 2.5 snapshot does not take. */}
+      <GenerationSettings id={id} data={data} inputPortId="size" showComplexity={false} />
       <p className={styles.hint}>
         Renders on {TEST_MODEL_2_5}, the previous model, not 2.6. Size input: connect an image and choose “Match input image” to render at its exact pixel size; it is never sent to the model. Image Reference inputs guide the render and are billed as input images.
       </p>

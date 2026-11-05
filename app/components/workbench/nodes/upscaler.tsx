@@ -8,9 +8,17 @@ import { putBlob } from "../blob-cache";
 import { useWorkbenchStore } from "../store";
 import styles from "../workbench.module.css";
 import type { ExecuteContext, NodeOutputValue, WorkbenchParams } from "../types";
-import { GENERATION_BACKGROUNDS, GENERATION_FORMATS, GENERATION_QUALITIES, decodeBase64Image } from "./generation";
+import { GENERATION_BACKGROUNDS, GENERATION_FORMATS, GENERATION_QUALITIES, complexityFor, decodeBase64Image } from "./generation";
 import { resolveUpscaleSize, UPSCALE_LONG_RUN_THRESHOLD, UPSCALE_SIZES } from "./upscaler.manifest";
-import { blobFromImageValue, NodeShell, OutputPreview, RunFooter, useConnectedImageCount, type WorkbenchNodeProps } from "./shared";
+import {
+  blobFromImageValue,
+  ComplexityField,
+  NodeShell,
+  OutputPreview,
+  RunFooter,
+  useConnectedImageCount,
+  type WorkbenchNodeProps,
+} from "./shared";
 
 // A neutral, content-preserving upscale instruction — the node has no prompt
 // input; it always asks for a faithful resolution increase, never a restyle.
@@ -75,6 +83,7 @@ export const Component = memo(function UpscalerNode({ id, data }: WorkbenchNodeP
           {GENERATION_FORMATS.map((option) => <option key={option} value={option} disabled={background === "transparent" && option === "jpeg"}>{option.toUpperCase()}</option>)}
         </select>
       </label>
+      <ComplexityField id={id} value={data.params.complexity} />
       {isLongRun && (
         <p className={styles.hint}>
           2K+ buffered runs (200-250s+) may fail on idle-gateway timeouts. Streaming is planned for a later phase.
@@ -107,7 +116,17 @@ export async function execute(ctx: ExecuteContext): Promise<void> {
   if (background === "transparent" && outputFormat === "jpeg") throw new Error("Transparent output requires PNG or WebP; choose a compatible format before generating.");
 
   const form = new FormData();
-  form.append("payload", JSON.stringify({ prompt: UPSCALE_PROMPT, size, quality, n: 1, model: SUNBURST_MODEL, background, outputFormat }));
+  const complexity = complexityFor(ctx.params);
+  form.append("payload", JSON.stringify({
+    prompt: UPSCALE_PROMPT,
+    size,
+    quality,
+    n: 1,
+    model: SUNBURST_MODEL,
+    background,
+    outputFormat,
+    ...(complexity !== undefined ? { complexity } : {}),
+  }));
   form.append("image[]", file, "input.png");
 
   ctx.setProgress(`Upscaling to ${size}… long runs may take several minutes.`);

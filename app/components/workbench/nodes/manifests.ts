@@ -30,6 +30,7 @@ import { noteManifest } from "./note.manifest.ts";
 import { patchManifest } from "./patch.manifest.ts";
 import { photoManifest } from "./photo.manifest.ts";
 import { promptBuilderManifest } from "./promptBuilder.manifest.ts";
+import { promptExpertManifest } from "./promptExpert.manifest.ts";
 import { referenceAnalyzerManifest } from "./referenceAnalyzer.manifest.ts";
 import { referenceFinderManifest } from "./referenceFinder.manifest.ts";
 import { referencesManifest } from "./references.manifest.ts";
@@ -67,6 +68,7 @@ export const MANIFESTS: Record<NodeKind, NodeManifest> = {
   aiAssistant: aiAssistantManifest,
   claudeCli: claudeCliManifest,
   codexCli: codexCliManifest,
+  promptExpert: promptExpertManifest,
   resize: resizeManifest,
   crop: cropManifest,
   patch: patchManifest,

@@ -1,5 +1,5 @@
 import type { NodeManifest } from "../types";
-import { estimateSunburstCost, GENERATION_PARAM_RULES, generationDraftOverride } from "./generation.ts";
+import { estimateSunburstCost, IMAGE_GENERATE_PARAM_RULES, generationDraftOverride } from "./generation.ts";
 import { SUNBURST_MODEL } from "../../../lib/sunburst.ts";
 
 // The execute wrapper lives in imageGenerate.tsx (blob-cache object URLs and
@@ -24,7 +24,9 @@ export const imageGenerateManifest: NodeManifest = {
   },
   defaultParams: { model: SUNBURST_MODEL, size: "1536x1024", quality: "medium", candidates: 1, background: "opaque", outputFormat: "png" },
   importSchema: {
-    paramKeys: { ...GENERATION_PARAM_RULES },
+    // The shared rules plus SVG/GIF output and the GIF frame params, which
+    // only this node offers (text-to-image on 2.6).
+    paramKeys: { ...IMAGE_GENERATE_PARAM_RULES },
     sourceBlobKeys: [],
   },
   estimateCost: estimateSunburstCost,

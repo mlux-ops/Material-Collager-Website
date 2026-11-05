@@ -6,7 +6,8 @@ import type { Edge } from "@xyflow/react";
 // pulled from "./types" below is type-only (`import type`), which Node's type
 // stripping erases entirely, so that one relative import never needs to
 // resolve at runtime and is left extensionless like the rest of the codebase.
-import { ensureThumbnail, getBlob, putBlob, thumbnailKeyFor, totalCachedBytes } from "./blob-cache.ts";
+import { ensureThumbnail, getBlob, putBlob, putSvgBlob, thumbnailKeyFor, totalCachedBytes } from "./blob-cache.ts";
+import { sanitizeSvg } from "../../lib/svg-sanitize.ts";
 import { defaultParams, MANIFESTS } from "./nodes/manifests.ts";
 import { normalizeImageModelParams } from "../../lib/sunburst.ts";
 import type { NodeKind, NodeOutputValue, NodeRun, WorkbenchNode, WorkbenchParams } from "./types";
@@ -826,67 +827,96 @@ export async function loadGraph(graphId: string): Promise<{ nodes: WorkbenchNode
       db.close();
       const record = graphRequest.result as StoredGraph | undefined;
       if (!record) return resolve(null);
-      const nodes: WorkbenchNode[] = record.nodes.map((stored) => {
-        const restoredUrls = new Map<string, string>();
-        const reads = blobRequests.get(stored.id);
-        if (reads) {
-          for (const [key, request] of reads) {
-            const blob = request.result as Blob | undefined;
-            if (blob) restoredUrls.set(key, putBlob(key, blob));
+      void restoreSafeSvgUrls(blobRequests).then((svgUrls) => {
+        const nodes: WorkbenchNode[] = record.nodes.map((stored) => {
+          const restoredUrls = new Map<string, string>();
+          const reads = blobRequests.get(stored.id);
+          if (reads) {
+            for (const [key, request] of reads) {
+              const blob = request.result as Blob | undefined;
+              if (!blob) continue;
+              if (blob.type === "image/svg+xml") {
+                // Re-sanitized and cached under a data: URL; an SVG that fails
+                // is left out, like a missing blob.
+                const url = svgUrls.get(key);
+                if (url) restoredUrls.set(key, url);
+                continue;
+              }
+              restoredUrls.set(key, putBlob(key, blob));
+            }
           }
-        }
 
-        const node: WorkbenchNode = {
-          id: stored.id,
-          type: stored.kind,
-          position: stored.position,
-          data: {
-            kind: stored.kind,
-            // A graph saved before the 2.6 bump stores an image node's model
-            // as "gpt-image-2.5-sunburst" (or older). Normalizing it here
-            // changes the node's signature, so its cached run reads as stale
-            // instead of being served as a current-model result.
-            params: normalizeImageModelParams({ ...defaultParams(stored.kind), ...stored.params }),
-            status: "idle",
-            runs: [],
-            activeRun: 0,
-          },
-        };
+          const node: WorkbenchNode = {
+            id: stored.id,
+            type: stored.kind,
+            position: stored.position,
+            data: {
+              kind: stored.kind,
+              // A graph saved before the 2.6 bump stores an image node's model
+              // as "gpt-image-2.5-sunburst" (or older). Normalizing it here
+              // changes the node's signature, so its cached run reads as stale
+              // instead of being served as a current-model result.
+              params: normalizeImageModelParams({ ...defaultParams(stored.kind), ...stored.params }),
+              status: "idle",
+              runs: [],
+              activeRun: 0,
+            },
+          };
 
-        // Generic active(+pinned) output restore (AC16): reconstructs `runs`
-        // for ANY node kind directly from the persisted run metadata. Only
-        // graphs saved by this code (post-S22) carry `outputs`; older/freshly
-        // migrated records fall through to the legacy paths below unchanged.
-        if (stored.outputs?.length) {
-          const runs = stored.outputs.map((run) => rehydrateRun(run, restoredUrls)).filter((run): run is NodeRun => run !== null);
-          if (runs.length) {
-            node.data.runs = runs;
-            node.data.activeRun = 0;
-            if (stored.pinnedIndex !== undefined && stored.pinnedIndex < runs.length) node.data.pinnedOutput = stored.pinnedIndex;
-            node.data.status = "done";
+          // Generic active(+pinned) output restore (AC16): reconstructs `runs`
+          // for ANY node kind directly from the persisted run metadata. Only
+          // graphs saved by this code (post-S22) carry `outputs`; older/freshly
+          // migrated records fall through to the legacy paths below unchanged.
+          if (stored.outputs?.length) {
+            const runs = stored.outputs.map((run) => rehydrateRun(run, restoredUrls)).filter((run): run is NodeRun => run !== null);
+            if (runs.length) {
+              node.data.runs = runs;
+              node.data.activeRun = 0;
+              if (stored.pinnedIndex !== undefined && stored.pinnedIndex < runs.length) node.data.pinnedOutput = stored.pinnedIndex;
+              node.data.status = "done";
+            }
           }
-        }
 
-        // Legacy fallbacks (pre-S22 saves, or a v1 graph freshly migrated but
-        // not yet re-autosaved in the new format): Photo is the only kind
-        // whose run was reconstructed ad hoc before generic output
-        // persistence existed. Other kinds rebuild their own display state
-        // from params + the now-populated blob cache (see their .tsx module).
-        if (!node.data.runs.length && stored.kind === "photo") {
-          const photoUrl = restoredUrls.get(PHOTO_SOURCE_KEY(stored.id)) ?? legacyPhotoRestoredUrl(legacyPhotoRequests, stored.id);
-          if (photoUrl) {
-            node.data.runs = [
-              buildPhotoRun(stored.id, photoUrl, PHOTO_SOURCE_KEY(stored.id), stored.params.fileFingerprint, record.savedAt),
-            ];
-            node.data.status = "done";
+          // Legacy fallbacks (pre-S22 saves, or a v1 graph freshly migrated but
+          // not yet re-autosaved in the new format): Photo is the only kind
+          // whose run was reconstructed ad hoc before generic output
+          // persistence existed. Other kinds rebuild their own display state
+          // from params + the now-populated blob cache (see their .tsx module).
+          if (!node.data.runs.length && stored.kind === "photo") {
+            const photoUrl = restoredUrls.get(PHOTO_SOURCE_KEY(stored.id)) ?? legacyPhotoRestoredUrl(legacyPhotoRequests, stored.id);
+            if (photoUrl) {
+              node.data.runs = [
+                buildPhotoRun(stored.id, photoUrl, PHOTO_SOURCE_KEY(stored.id), stored.params.fileFingerprint, record.savedAt),
+              ];
+              node.data.status = "done";
+            }
           }
-        }
-        return node;
-      });
-      resolve({ nodes, edges: record.edges as Edge[] });
+          return node;
+        });
+        resolve({ nodes, edges: record.edges as Edge[] });
+      }, reject);
     };
     rejectTransactionFailures(transaction, db, reject, "Could not load the workbench graph.");
   });
+}
+
+// Every restored SVG output goes back through the sanitizer before it gets a
+// URL (it was sanitized when cached, but a graph saved by an earlier build
+// may hold one that was not), and is cached under a data: URL (putSvgBlob).
+async function restoreSafeSvgUrls(blobRequests: Map<string, Map<string, IDBRequest>>): Promise<Map<string, string>> {
+  const urls = new Map<string, string>();
+  for (const reads of blobRequests.values()) {
+    for (const [key, request] of reads) {
+      const blob = request.result as Blob | undefined;
+      if (!blob || blob.type !== "image/svg+xml") continue;
+      try {
+        urls.set(key, putSvgBlob(key, sanitizeSvg(await blob.text())));
+      } catch {
+        // Unparseable or not an SVG: dropped rather than shown.
+      }
+    }
+  }
+  return urls;
 }
 
 function legacyPhotoRestoredUrl(legacyPhotoRequests: Map<string, IDBRequest>, nodeId: string): string | undefined {

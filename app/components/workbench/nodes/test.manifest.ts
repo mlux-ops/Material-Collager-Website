@@ -2,6 +2,12 @@ import type { NodeManifest } from "../types";
 import { estimateSunburstCost, GENERATION_PARAM_RULES, generationDraftOverride } from "./generation.ts";
 import { TEST_MODEL_2_5 } from "../../../lib/sunburst.ts";
 
+// The shared rules without `complexity`: it is a 2.6 setting the 2.5 snapshot
+// does not document, so an imported Test node can never carry one.
+const TEST_PARAM_RULES = Object.fromEntries(
+  Object.entries(GENERATION_PARAM_RULES).filter(([key]) => key !== "complexity"),
+) as Omit<typeof GENERATION_PARAM_RULES, "complexity">;
+
 // "Test": Image Generation on the previous Sunburst (TEST_MODEL_2_5, the dated
 // 2.5 snapshot), for comparing 2.5 against the current 2.6 side by side. It is
 // the only node that renders on 2.5. The model is fixed by this kind
@@ -25,7 +31,7 @@ export const testManifest: NodeManifest = {
   },
   defaultParams: { model: TEST_MODEL_2_5, size: "1536x1024", quality: "medium", candidates: 1, background: "opaque", outputFormat: "png" },
   importSchema: {
-    paramKeys: { ...GENERATION_PARAM_RULES, model: { type: "enum", optional: true, values: [TEST_MODEL_2_5] } },
+    paramKeys: { ...TEST_PARAM_RULES, model: { type: "enum", optional: true, values: [TEST_MODEL_2_5] } },
     sourceBlobKeys: [],
   },
   estimateCost: estimateSunburstCost,

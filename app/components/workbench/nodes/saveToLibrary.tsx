@@ -32,7 +32,12 @@ export const Component = memo(function SaveToLibraryNode({ id, data }: Workbench
 export const execute = async (ctx: ExecuteContext): Promise<void> => {
   const image = ctx.inputs("image");
   if (!image.length) throw new Error("Connect an image to save.");
-  const file = await blobFromImageValue(image[0]);
+  // The Library stores PNG, JPEG and WebP only (the save route sniffs the
+  // bytes), so an SVG or GIF is refused here with the way out named.
+  const file = await blobFromImageValue(image[0], { allowVectorAndAnimated: true });
+  if (file.type === "image/svg+xml" || file.type === "image/gif") {
+    throw new Error(`The Library stores PNG, JPEG or WebP images, not ${file.type === "image/gif" ? "GIF" : "SVG"}. Use Export/Download to keep this file, or render PNG or WebP to save it here.`);
+  }
   const form = new FormData();
   form.append("payload", JSON.stringify(buildSavePayload(ctx.params)));
   form.append("image", file, file.name);

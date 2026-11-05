@@ -81,12 +81,40 @@ export function isSunburstModel(model: string): boolean {
  * gpt-image-2.6-sunburst (current, 2026-11-04) does not document the field at
  * all, so it is never sent: no model this app uses takes it. Reference
  * fidelity is the model's own decision and is not available as a cost or
- * quality lever. (2.6 also adds an optional `complexity` parameter; the app
- * does not send it, so the documented default applies.)
+ * quality lever. (2.6 also adds an optional `complexity` parameter -- see
+ * SUNBURST_COMPLEXITIES below -- which is a different control.)
  *
  * tests/image-efficiency.test.mjs pins that nothing ever puts it on the wire.
  */
 export const SUNBURST_SUPPORTS_INPUT_FIDELITY = false as const;
+
+/**
+ * 2.6-only planning depth: how much the model plans before rendering. OpenAI
+ * documents "high" as the default when the field is omitted (both 2.6
+ * models), and no separate fee. The app sends it ONLY when a node sets it, so
+ * an unset value keeps the API default. Documented for 2.6 only: never sent to
+ * TEST_MODEL_2_5 (see modelSupports).
+ */
+export const SUNBURST_COMPLEXITIES = ["low", "medium", "high"] as const;
+export type SunburstComplexity = (typeof SUNBURST_COMPLEXITIES)[number];
+
+export function isSunburstComplexity(value: unknown): value is SunburstComplexity {
+  return typeof value === "string" && (SUNBURST_COMPLEXITIES as readonly string[]).includes(value);
+}
+
+/**
+ * Features a model may or may not take. `complexity`, SVG and animated GIF
+ * output are documented for gpt-image-2.6-sunburst only; `markup` (an
+ * annotation layer on edits) is documented for both 2.5 and 2.6 Sunburst.
+ * Anything that is not TEST_MODEL_2_5 renders on 2.6 (resolveWireModel), so
+ * it is answered as 2.6.
+ */
+export type SunburstFeature = "complexity" | "svg" | "gif" | "markup";
+
+export function modelSupports(model: unknown, feature: SunburstFeature): boolean {
+  if (feature === "markup") return true;
+  return resolveWireModel(model) !== TEST_MODEL_2_5;
+}
 
 export const SUNBURST_QUALITIES = ["low", "medium", "high", "xhigh", "max", "auto"] as const;
 export type SunburstQuality = (typeof SUNBURST_QUALITIES)[number];

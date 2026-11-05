@@ -22,9 +22,39 @@ const blobs = new Map<string, Blob>();
 const urls = new Map<string, string>();
 
 export function putBlob(key: string, blob: Blob): string {
+  // A raw SVG never gets a same-origin blob: URL. It has to be sanitized and
+  // cached through putSvgBlob below; failing loudly here keeps a future
+  // caller from skipping that by accident.
+  if (blob.type === "image/svg+xml") throw new Error("An SVG must be sanitized and cached with putSvgBlob.");
   releaseBlob(key);
   blobs.set(key, blob);
   const url = URL.createObjectURL(blob);
+  urls.set(key, url);
+  return url;
+}
+
+// UTF-8 text as a base64 data URL, synchronously.
+export function svgDataUrl(svgText: string): string {
+  const bytes = new TextEncoder().encode(svgText);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return `data:image/svg+xml;base64,${btoa(binary)}`;
+}
+
+// Caches an ALREADY-SANITIZED SVG (app/lib/svg-sanitize.ts). Its URL is a
+// data: URL, not a blob: URL. A blob: URL is same-origin, so opening one as
+// a document ("Open image in new tab") would run any script in the app's
+// origin. A data: URL document gets an opaque origin, and browsers refuse
+// top-level navigation to one. It is the second defence behind the
+// sanitizer, for every <img>, lightbox and thumbnail fallback that reads
+// the cached URL.
+export function putSvgBlob(key: string, sanitizedSvg: string): string {
+  releaseBlob(key);
+  blobs.set(key, new Blob([sanitizedSvg], { type: "image/svg+xml" }));
+  const url = svgDataUrl(sanitizedSvg);
   urls.set(key, url);
   return url;
 }
@@ -41,7 +71,7 @@ export function getBlobUrl(key: string): string | undefined {
 
 function releaseUrl(key: string) {
   const url = urls.get(key);
-  if (url) URL.revokeObjectURL(url);
+  if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
   urls.delete(key);
   blobs.delete(key);
 }

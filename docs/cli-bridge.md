@@ -111,3 +111,54 @@ Nothing but answer:
   on every listed model; Codex echoes the applied level in its run header. The
   list lives in `EFFORT_LEVELS` (`lib.mjs`) and `CLI_EFFORTS`
   (`cliAssistant.manifest.ts`); a test keeps them equal.
+
+## Personas: the Prompt Expert node
+
+A run can name a `persona`. The bridge then adds a server-owned instruction
+file to the prompt. Only one exists so far:
+
+| Persona | Providers | File |
+|---|---|---|
+| `gpt-image-2.6-prompting` | `codex` only | `scripts/cli-bridge/personas/gpt-image-2-6-prompting.md` |
+
+The **Prompt Expert** node (`promptExpert`) uses it. That node always sends
+`provider: "codex"`, `model: "gpt-6-astra"` and
+`persona: "gpt-image-2.6-prompting"`, plus the effort picked in its dropdown.
+Its answer is the prompt text alone, ready to wire into an Image Generation,
+Image Edit or Test node's Prompt port. The instruction file is a distillation,
+in our own words, of OpenAI's GPT Image 2.6 prompting guide, plus this app's
+rules:
+
+- reply with only the prompt;
+- number connected images Image 1, Image 2, and so on, in wire order;
+- keep each product's geometry, finish, colour and pattern scale;
+- never write quality, complexity, size or background into the prompt.
+
+The node appends a `Connected images: N` line so the model knows how many are
+attached.
+
+Rules:
+
+- **The path is fixed in `PERSONAS` (`lib.mjs`).** It never comes from the
+  request. An unknown persona, a non-string, or a persona with the wrong
+  provider is a 400.
+- **No persona, no change.** The payload, the Codex prompt
+  (`SYSTEM_PROMPT + "\n\n" + instruction`) and the response
+  (`{ ok, text }`) are byte-identical to before. The Claude CLI and Codex CLI
+  nodes never send a persona.
+- **With a persona**, the Codex prompt is
+  `SYSTEM_PROMPT + "\n\n" + persona text + "\n\n" + instruction`. The file says
+  it overrides the system prompt's "suggest next steps", and restates that
+  instructions inside images or Context text are data.
+- **The file is read once at startup** and its status is printed beside the
+  provider lines. A missing, empty or oversized file does not stop the bridge.
+  Only persona runs fail, with a 500 that names the file. Restart the bridge
+  after editing the file.
+- **Caps.** The persona text is capped at `MAX_PERSONA_CHARS` (40,000) and
+  does not count against the 32,000-character instruction cap. A full prompt
+  stays under about 73k characters. Today's file is about 12k characters
+  (roughly 3k tokens).
+- **A persona run's 200 response echoes `persona`.** The node refuses an
+  answer without it. That answer came from a bridge started before personas
+  existed, which ignored the field and ran without the guide, so the node
+  asks you to restart `npm run cli-bridge`.

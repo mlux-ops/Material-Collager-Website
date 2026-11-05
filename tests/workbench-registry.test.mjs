@@ -34,6 +34,7 @@ const DOM_WRAPPED_KINDS = new Set([
   "aiAssistant",
   "claudeCli",
   "codexCli",
+  "promptExpert",
   "collageBoard",
   "relight",
   "variations",

@@ -1,13 +1,14 @@
 import type { CostEstimateInput, ImportParamRule, NodeManifest, WorkbenchParams } from "../types";
 import { COLLAGE_TYPES, ORIENTATIONS, OUTPUT_RESOLUTIONS, resolvedSize, type CollageRequestInput } from "../../../lib/collage.ts";
 import { estimateRunUsd } from "../cost.ts";
-import { GENERATION_QUALITIES } from "./generation.ts";
+import { GENERATION_COMPLEXITIES, GENERATION_QUALITIES } from "./generation.ts";
 
 export const COLLAGE_BOARD_PARAM_RULES = {
   collageType: { type: "enum", optional: true, values: COLLAGE_TYPES },
   orientation: { type: "enum", optional: true, values: ORIENTATIONS },
   outputResolution: { type: "enum", optional: true, values: OUTPUT_RESOLUTIONS },
   quality: { type: "enum", optional: true, values: GENERATION_QUALITIES },
+  complexity: { type: "enum", optional: true, values: GENERATION_COMPLEXITIES },
 } satisfies Record<string, ImportParamRule>;
 
 // W-3: Collage Board has no size param of its own -- the real request size

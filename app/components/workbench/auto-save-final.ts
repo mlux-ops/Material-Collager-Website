@@ -71,6 +71,11 @@ export async function autoSaveFinalOutputs(nodes: WorkbenchNode[], edges: Edge[]
       result.failures.push(`${output.nodeId}: final image is no longer cached`);
       continue;
     }
+    // The Library (and its save route) holds PNG, JPEG and WebP only.
+    if (blob.type === "image/svg+xml" || blob.type === "image/gif") {
+      result.failures.push(`${output.nodeId}: ${blob.type === "image/gif" ? "GIF" : "SVG"} output can't be saved to the Library; use Export/Download`);
+      continue;
+    }
 
     const safeNodeId = output.nodeId.replace(/[^a-zA-Z0-9_-]+/g, "-").slice(0, 80) || "workbench";
     const filename = `${safeNodeId}-final-${index + 1}.png`;

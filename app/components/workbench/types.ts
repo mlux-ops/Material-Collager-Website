@@ -1,5 +1,12 @@
 import type { Node } from "@xyflow/react";
-import type { SunburstBackground, SunburstQuality } from "../../lib/sunburst";
+import type { SunburstBackground, SunburstComplexity, SunburstQuality } from "../../lib/sunburst";
+
+// Every format an image value can carry. SVG and animated GIF come only from
+// Image Generation (text-to-image on 2.6) and are never valid model inputs:
+// fileFromCacheKey (nodes/shared.tsx) refuses them for any node that sends
+// pixels on, and only View/Compare/Export accept them.
+export type ImageOutputMimeType = "image/png" | "image/jpeg" | "image/webp" | "image/svg+xml" | "image/gif";
+export type ImageOutputFormat = "png" | "jpeg" | "webp" | "svg" | "gif";
 
 // Data kinds carried by connections, color-coded on ports and edges.
 export type PortKind = "image" | "text" | "references" | "mask";
@@ -27,6 +34,7 @@ export type NodeKind =
   | "aiAssistant"
   | "claudeCli"
   | "codexCli"
+  | "promptExpert"
   | "resize"
   | "crop"
   | "patch"
@@ -57,6 +65,10 @@ export type PortSpec = {
   // forces dropping `required` (which would lose the disabled-Run
   // protection when neither the override nor a connection is present).
   satisfiedByParams?: (params: WorkbenchParams) => boolean;
+  // Wired only by dropping on the handle itself: drop-on-card auto-attach
+  // (wiring.ts's autoAttachConnection) skips it. For optional ports whose
+  // input has a special meaning (Image Edit's Markup layer).
+  explicitOnly?: boolean;
 };
 
 export function acceptedKindsFor(port: PortSpec): PortKind[] {
@@ -117,8 +129,8 @@ export type NodeOutputValue =
       // Media metadata travels with the value instead of being reconstructed
       // from a filename/object URL after a reload. This is especially
       // important for transparent Sunburst outputs and WebP/PNG exports.
-      mimeType?: "image/png" | "image/jpeg" | "image/webp";
-      outputFormat?: "png" | "jpeg" | "webp";
+      mimeType?: ImageOutputMimeType;
+      outputFormat?: ImageOutputFormat;
       background?: SunburstBackground;
       model?: string;
       provenance?: string;
@@ -183,8 +195,15 @@ export type WorkbenchParams = {
   sizeMode?: "preset" | "input" | "custom"; // see GENERATION_SIZE_MODES in nodes/generation.ts
   quality?: SunburstQuality;
   background?: SunburstBackground;
-  outputFormat?: "png" | "jpeg" | "webp";
+  // svg/gif are offered by Image Generation only (IMAGE_GENERATE_FORMATS).
+  outputFormat?: ImageOutputFormat;
   candidates?: number;
+  // 2.6 planning depth. Unset = nothing sent (the API default, "high"). Every
+  // 2.6 render node takes it; the Test node (2.5) never does.
+  complexity?: SunburstComplexity;
+  // Image Generation, GIF output only.
+  frameCount?: number;
+  frameDurationMs?: number;
   // saveToLibrary
   filename?: string;
   savedJobId?: string;
