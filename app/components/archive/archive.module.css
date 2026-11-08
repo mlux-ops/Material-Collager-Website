@@ -70,7 +70,7 @@
   margin: 0;
 }
 
-/* An upload's Delete control, overlaid on the plate's top-right corner so
+/* Each plate's Delete control, overlaid on the plate's top-right corner so
    no plate changes size. Hidden until the plate is hovered or something in
    it has keyboard focus (opacity, not display, so Tab still reaches it);
    held visible while it is armed or showing an error (data-active). */
