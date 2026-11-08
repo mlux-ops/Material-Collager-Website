@@ -1,6 +1,7 @@
 import { persistGenerationOutput } from "@/app/lib/generation-jobs";
 import { errorResponse } from "@/app/lib/openai-server";
 import { sniffImageType } from "@/app/lib/autoboard/image-size";
+import { base64FromBytes, safeFilename } from "@/app/lib/image-upload";
 
 export const runtime = "edge";
 
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
     if (!type) throw new Error("Only PNG, JPEG or WebP images can be saved to the library.");
     const stored = await persistGenerationOutput({
       imageBase64: base64FromBytes(bytes),
-      filename: safeFilename(payload.filename, type),
+      filename: safeFilename(payload.filename, type, "workbench-output"),
       format: (payload.format || "").slice(0, 32) || "workbench",
       prompt: (payload.prompt || "Workbench output").slice(0, 32_000),
       payload: { source: "workbench", workflow: payload.workflow || "untitled" },
@@ -47,22 +48,4 @@ export async function POST(request: Request) {
   } catch (error) {
     return errorResponse(error);
   }
-}
-
-function base64FromBytes(bytes: Uint8Array) {
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
-  }
-  return btoa(binary);
-}
-
-const EXTENSION_FOR_TYPE = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" } as const;
-
-// Renaming is not transcoding: "board.png" holding JPEG bytes is stored as
-// "board.jpg", so its name, MIME type and recorded format all agree.
-function safeFilename(value: string | undefined, type: keyof typeof EXTENSION_FOR_TYPE) {
-  const stem = (value?.trim() || "workbench-output").replace(/\.(png|jpe?g|webp)$/i, "");
-  return `${stem}.${EXTENSION_FOR_TYPE[type]}`.replace(/[<>:"/\\|?*]+/g, "_");
 }

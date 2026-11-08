@@ -16,7 +16,18 @@ function aspectRatioOf(row: JobRow): number {
     const payload = JSON.parse(row.payload_json) as {
       orientation?: string;
       collageType?: string;
+      width?: unknown;
+      height?: unknown;
     };
+    // A row that recorded its real pixel size (an uploaded image does, read
+    // from its own header) is served that, not an orientation guess.
+    const { width, height } = payload ?? {};
+    if (
+      typeof width === "number" && typeof height === "number"
+      && Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
+    ) {
+      return width / height;
+    }
     const orientation = payload?.orientation && payload.orientation !== "default"
       ? payload.orientation
       : payload?.collageType === "bathroom_tile_collage"

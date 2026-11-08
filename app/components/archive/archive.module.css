@@ -16,6 +16,29 @@
   padding: 96px 16px 64px;
 }
 
+/* One quiet row above the grid holding the upload link, on the grid's own
+   measure so its right edge lines up with the last column. */
+.toolbar {
+  display: flex;
+  justify-content: flex-end;
+  width: min(1800px, 100%);
+  margin: 0 auto 14px;
+}
+
+.toolbarLink {
+  font-size: 8.4px;
+  font-weight: 500;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+  color: #000;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.toolbarLink:hover {
+  color: #657069;
+}
+
 .notice {
   width: min(1800px, 100%);
   margin: 48px auto;
@@ -43,7 +66,47 @@
 }
 
 .item {
+  position: relative;
   margin: 0;
+}
+
+/* An upload's Delete control, overlaid on the plate's top-right corner so
+   no plate changes size. Hidden until the plate is hovered or something in
+   it has keyboard focus (opacity, not display, so Tab still reaches it);
+   held visible while it is armed or showing an error (data-active). */
+.plateDelete {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  max-width: calc(100% - 12px);
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.item:hover .plateDelete,
+.plateDelete:focus-within,
+.plateDelete[data-active="true"] {
+  opacity: 1;
+}
+
+/* No hover on touch screens: always show it there. */
+@media (hover: none) {
+  .plateDelete {
+    opacity: 1;
+  }
+}
+
+/* Two classes deep so it outranks the control's own module, whichever
+   stylesheet loads last: white chips stay legible over any photo. */
+.plateDelete .plateDeleteButton {
+  background: #fff;
+  border-color: rgb(0 0 0 / 12%);
+  color: #000;
+}
+
+.plateDelete [role="alert"] {
+  padding: 3px 6px;
+  background: #fff;
 }
 
 /* The aspect box: sized from the API's ratio before anything loads, so the
@@ -107,7 +170,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .imageIn {
+  .imageIn,
+  .plateDelete {
     transition: none;
   }
 }
