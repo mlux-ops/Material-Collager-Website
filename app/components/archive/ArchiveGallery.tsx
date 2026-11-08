@@ -30,6 +30,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { RouteReady } from "../RouteReady";
 import { usePrintInLater } from "@/app/hooks/usePrintInLater";
 import { SiteNavigation } from "../SiteNavigation";
+import { TransitionLink } from "../TransitionLink";
+import { DeleteUploadButton } from "../library-upload/DeleteUploadButton";
 import { awaitTransitionSettled } from "@/app/lib/route-ready";
 import { motionReduced, potatoMode } from "@/app/lib/site-settings";
 import styles from "./archive.module.css";
@@ -40,6 +42,8 @@ type ArchiveItem = {
   imageUrl: string;
   /** width / height, served by /api/library so boxes are right before load. */
   aspectRatio?: number;
+  /** "upload" marks an image a person uploaded — the only kind deletable here. */
+  collageType?: string;
 };
 
 /* Column count by viewport. The referenced gallery is three columns at its
@@ -115,10 +119,17 @@ export function ArchiveGallery() {
           archive IS the library's contents, and passing "no active item"
           hid the pill and made this bar the odd one out. */}
       <SiteNavigation active="library" />
+      {/* The way in to the upload page, in the page rather than in the bar:
+          the bar above stays exactly as every other page renders it. */}
+      <div className={styles.toolbar}>
+        <TransitionLink href="/library/upload" className={styles.toolbarLink}>
+          Upload images
+        </TransitionLink>
+      </div>
       {failed ? (
         <p className={styles.notice}>The archive could not be loaded. Refresh to try again.</p>
       ) : items && items.length === 0 ? (
-        <p className={styles.notice}>Nothing in the library yet — generated collages land here.</p>
+        <p className={styles.notice}>Nothing in the library yet — generated collages and uploaded images land here.</p>
       ) : (
         <div ref={gridRef} className={styles.grid} style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}>
           {columns.map((column, index) => (
@@ -127,7 +138,13 @@ export function ArchiveGallery() {
                 // The first row of every column loads eagerly: those are
                 // on screen immediately, and waiting for the lazy scheduler
                 // there is a visible delay on arrival.
-                <ArchivePlate key={item.id} item={item} eager={row === 0} printLater={printLater.has(item.id)} />
+                <ArchivePlate
+                  key={item.id}
+                  item={item}
+                  eager={row === 0}
+                  printLater={printLater.has(item.id)}
+                  onDeleted={(id) => setItems((current) => (current ?? []).filter((entry) => entry.id !== id))}
+                />
               ))}
             </div>
           ))}
@@ -137,7 +154,17 @@ export function ArchiveGallery() {
   );
 }
 
-function ArchivePlate({ item, eager, printLater }: { item: ArchiveItem; eager?: boolean; printLater?: boolean }) {
+function ArchivePlate({
+  item,
+  eager,
+  printLater,
+  onDeleted,
+}: {
+  item: ArchiveItem;
+  eager?: boolean;
+  printLater?: boolean;
+  onDeleted: (id: string) => void;
+}) {
   const ref = useRef<HTMLDivElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const [inView, setInView] = useState(false);
@@ -230,6 +257,18 @@ function ArchivePlate({ item, eager, printLater }: { item: ArchiveItem; eager?: 
           }}
         />
       </div>
+      {/* Uploads only, overlaid so a render's plate is laid out exactly as
+          before. Shown on hover or keyboard focus; the server refuses to
+          delete anything that is not an upload regardless. */}
+      {item.collageType === "upload" ? (
+        <DeleteUploadButton
+          id={item.id}
+          name={item.title}
+          className={styles.plateDelete}
+          buttonClassName={styles.plateDeleteButton}
+          onDeleted={onDeleted}
+        />
+      ) : null}
     </div>
   );
 }

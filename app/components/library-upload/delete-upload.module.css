@@ -1,0 +1,54 @@
+/* The two-step delete control. Type is the site's 8.4px uppercase button
+   step; colours are chrome (black / #657069) except the armed confirm, which
+   takes the danger colour because it is a state. */
+
+.root {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.button {
+  min-height: 24px;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted, #657069);
+  font-size: 8.4px;
+  font-weight: 500;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  color: var(--ink, #000);
+}
+
+.button:focus-visible {
+  outline: 1px solid var(--ink, #000);
+  outline-offset: 2px;
+}
+
+.button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Three classes deep so a caller's colour override (the archive's white
+   chip) never hides the armed state. */
+.root .button.confirm,
+.root .button.confirm:hover:not(:disabled) {
+  color: var(--danger, #a43b34);
+  border-color: var(--danger, #a43b34);
+}
+
+.error {
+  flex-basis: 100%;
+  font-size: 10px;
+  line-height: 1.4;
+  text-align: right;
+  color: var(--danger, #a43b34);
+}

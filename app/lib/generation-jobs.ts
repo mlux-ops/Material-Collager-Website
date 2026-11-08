@@ -72,6 +72,20 @@ type RuntimeEnv = {
 // deletes both the D1 row and its R2 object once it passes, with no backup.
 export const RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
 
+// The expiry stamped on a row that must never be swept: images a person
+// uploaded into the Library are kept until someone deletes them, unlike
+// renders, which follow RETENTION_MS. 9999-12-31T23:59:59.000Z in ms — a
+// valid Date, an exact JS number (< 2^53) and a SQLite/D1 64-bit integer, and
+// still compared with the same `expires_at < now` every sweep uses, so no
+// query needs a special case.
+export const PERMANENT_EXPIRES_AT = Date.UTC(9999, 11, 31, 23, 59, 59);
+
+export type Retention = "standard" | "permanent";
+
+function expiresAtFor(retention: Retention | undefined, now: number) {
+  return retention === "permanent" ? PERMANENT_EXPIRES_AT : now + RETENTION_MS;
+}
+
 export function runtimeStorage() {
   return env as unknown as RuntimeEnv;
 }
@@ -165,8 +179,12 @@ export async function cleanupExpiredJobs() {
   await DB.prepare("DELETE FROM generation_jobs WHERE expires_at < ?").bind(now).run();
 }
 
-export async function persistGenerationOutput(input: {
-  imageBase64: string;
+// The image arrives either as base64 (what the OpenAI routes hold) or as the
+// raw bytes a caller already has. Raw bytes skip a base64 round trip, which
+// for a 25 MB upload is several extra full-size copies inside one isolate.
+type PersistImage = { imageBase64: string; imageBytes?: never } | { imageBytes: Uint8Array; imageBase64?: never };
+
+export async function persistGenerationOutput(input: PersistImage & {
   filename: string;
   format: string;
   prompt: string;
@@ -180,6 +198,10 @@ export async function persistGenerationOutput(input: {
   renderKind: RenderKind;
   collageType: string;
   replaceJobId?: string;
+  /** "permanent" exempts the row from cleanupExpiredJobs; default: RETENTION_MS. */
+  retention?: Retention;
+  /** Stored verbatim when set; otherwise derived from the filename. */
+  title?: string;
 }) {
   const DB = await ensureJobStorage();
   const bucket = runtimeStorage().OUTPUTS;
@@ -190,7 +212,8 @@ export async function persistGenerationOutput(input: {
   const id = existing?.id || crypto.randomUUID();
   const outputKey = existing?.output_key || `generation-outputs/${id}.${outputExtension(input.filename)}`;
   const now = Date.now();
-  const title = outputTitle(input.filename, input.collageType);
+  const title = input.title?.trim() || outputTitle(input.filename, input.collageType);
+  const expiresAt = expiresAtFor(input.retention, now);
   // Unknown stays unknown: D1 refuses to bind undefined, and a Workbench save
   // carries no generation metadata at all. null is the honest value — never a
   // guessed model or quality.
@@ -201,7 +224,8 @@ export async function persistGenerationOutput(input: {
   const costUsd = calculateSunburstUsageCost(input.usage);
   // Never persist the caller's OpenAI API key with the job record.
   const payloadJson = JSON.stringify({ ...input.payload, apiKey: undefined, model, quality, background, outputFormat });
-  await bucket.put(outputKey, base64Bytes(input.imageBase64), { httpMetadata: { contentType: mimeTypeForFilename(input.filename) } });
+  const body = input.imageBytes ?? base64Bytes(input.imageBase64);
+  await bucket.put(outputKey, body, { httpMetadata: { contentType: mimeTypeForFilename(input.filename) } });
 
   if (existing) {
     await DB.prepare(`UPDATE generation_jobs SET
@@ -220,7 +244,7 @@ export async function persistGenerationOutput(input: {
         costUsd,
         input.qa ? JSON.stringify(input.qa) : null,
         now,
-        now + RETENTION_MS,
+        expiresAt,
         input.renderKind,
         input.collageType,
         model,
@@ -258,7 +282,7 @@ export async function persistGenerationOutput(input: {
           costUsd,
           now,
           now,
-          now + RETENTION_MS,
+          expiresAt,
         ).run();
     } catch (error) {
       // The object above is new and only this call knows its key. Without a
@@ -294,12 +318,36 @@ export async function setLibraryVisibility(id: string, visible: boolean) {
     .bind(id).first<JobRow>();
 }
 
+export type DeleteUploadOutcome = "deleted" | "not_found" | "not_upload";
+
+/**
+ * Permanently removes an image a person uploaded into the Library: its D1 row
+ * and its R2 object. Renders are refused ("not_upload") — only uploads can be
+ * deleted. Hidden uploads (library_visible = 0) are deletable too.
+ *
+ * Row first, object second: if the object delete then fails, what is left is
+ * an orphaned R2 object nothing points at — invisible, merely stored. The
+ * other order could leave a row whose image is gone, which every Library
+ * view would show as a broken plate.
+ */
+export async function deleteLibraryUpload(id: string): Promise<DeleteUploadOutcome> {
+  const DB = await ensureJobStorage();
+  const row = await DB.prepare("SELECT id, collage_type, output_key FROM generation_jobs WHERE id = ?")
+    .bind(id).first<Pick<JobRow, "id" | "collage_type" | "output_key">>();
+  if (!row) return "not_found";
+  if (row.collage_type !== "upload") return "not_upload";
+  await DB.prepare("DELETE FROM generation_jobs WHERE id = ? AND collage_type = 'upload'").bind(id).run();
+  const { OUTPUTS } = runtimeStorage();
+  if (row.output_key && OUTPUTS) await OUTPUTS.delete(row.output_key).catch(() => undefined);
+  return "deleted";
+}
+
 export async function listLibraryJobs() {
   const DB = await ensureJobStorage();
   return DB.prepare(`SELECT * FROM generation_jobs
     WHERE library_visible = 1 AND status = 'completed' AND output_key IS NOT NULL
       AND render_kind = 'final' AND expires_at >= ?
-    ORDER BY created_at DESC LIMIT 60`)
+    ORDER BY created_at DESC LIMIT 500`)
     .bind(Date.now()).all<JobRow>();
 }
 
