@@ -318,25 +318,31 @@ export async function setLibraryVisibility(id: string, visible: boolean) {
     .bind(id).first<JobRow>();
 }
 
-export type DeleteUploadOutcome = "deleted" | "not_found" | "not_upload";
+export type DeleteLibraryOutcome = "deleted" | "not_found" | "not_library_item";
+
+// What makes a row a Library item, whether shown or hidden: a completed
+// final with a stored output. Drafts, studio and repair renders never are.
+const LIBRARY_ITEM_WHERE = "render_kind = 'final' AND status = 'completed' AND output_key IS NOT NULL";
 
 /**
- * Permanently removes an image a person uploaded into the Library: its D1 row
- * and its R2 object. Renders are refused ("not_upload") — only uploads can be
- * deleted. Hidden uploads (library_visible = 0) are deletable too.
+ * Permanently removes a Library item — an upload or a render, visible or
+ * hidden: its D1 row (so it leaves the Library and Generator History alike)
+ * and its R2 object. A row that is not a Library item is refused
+ * ("not_library_item"); the Library only ever shows finals.
  *
  * Row first, object second: if the object delete then fails, what is left is
  * an orphaned R2 object nothing points at — invisible, merely stored. The
  * other order could leave a row whose image is gone, which every Library
  * view would show as a broken plate.
  */
-export async function deleteLibraryUpload(id: string): Promise<DeleteUploadOutcome> {
+export async function deleteLibraryItem(id: string): Promise<DeleteLibraryOutcome> {
   const DB = await ensureJobStorage();
-  const row = await DB.prepare("SELECT id, collage_type, output_key FROM generation_jobs WHERE id = ?")
-    .bind(id).first<Pick<JobRow, "id" | "collage_type" | "output_key">>();
+  const row = await DB.prepare(`SELECT id, output_key, (${LIBRARY_ITEM_WHERE}) AS is_library_item
+    FROM generation_jobs WHERE id = ?`)
+    .bind(id).first<{ id: string; output_key: string | null; is_library_item: number }>();
   if (!row) return "not_found";
-  if (row.collage_type !== "upload") return "not_upload";
-  await DB.prepare("DELETE FROM generation_jobs WHERE id = ? AND collage_type = 'upload'").bind(id).run();
+  if (!row.is_library_item) return "not_library_item";
+  await DB.prepare(`DELETE FROM generation_jobs WHERE id = ? AND ${LIBRARY_ITEM_WHERE}`).bind(id).run();
   const { OUTPUTS } = runtimeStorage();
   if (row.output_key && OUTPUTS) await OUTPUTS.delete(row.output_key).catch(() => undefined);
   return "deleted";

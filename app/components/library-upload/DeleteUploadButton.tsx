@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * Two-step delete for an uploaded Library image, shared by /library/upload
- * and /archive. "Delete" turns into "Confirm delete" / "Cancel" for a few
- * seconds (no window.confirm); confirming sends DELETE /api/library/[id].
- * The server refuses anything that is not an upload, so a render can never
- * be removed through this, whatever the caller passes.
+ * Two-step, permanent delete for a Library item (an upload or a render),
+ * shared by /library/upload and /archive. "Delete" turns into the confirm
+ * label / "Cancel" for a few seconds (no window.confirm); confirming sends
+ * DELETE /api/library/[id], which removes the row and its stored image for
+ * good. The server refuses rows that are not Library items (drafts etc.).
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -20,6 +20,7 @@ export function DeleteUploadButton({
   name,
   buttonClassName,
   className,
+  confirmLabel = "Confirm delete",
   onDeleted,
 }: {
   id: string;
@@ -28,6 +29,8 @@ export function DeleteUploadButton({
   /** The caller's button type style (size, colour). */
   buttonClassName?: string;
   className?: string;
+  /** The armed button's text, e.g. "Delete permanently" for a render. */
+  confirmLabel?: string;
   onDeleted: (id: string) => void;
 }) {
   const [phase, setPhase] = useState<Phase>("idle");
@@ -107,9 +110,9 @@ export function DeleteUploadButton({
             type="button"
             className={`${button} ${styles.confirm}`}
             onClick={() => void confirm()}
-            aria-label={`Confirm delete ${name}`}
+            aria-label={`${confirmLabel}: ${name}`}
           >
-            Confirm delete
+            {confirmLabel}
           </button>
           <button
             type="button"

@@ -42,7 +42,7 @@ type ArchiveItem = {
   imageUrl: string;
   /** width / height, served by /api/library so boxes are right before load. */
   aspectRatio?: number;
-  /** "upload" marks an image a person uploaded — the only kind deletable here. */
+  /** "upload" marks an image a person uploaded; anything else is a render. */
   collageType?: string;
 };
 
@@ -257,18 +257,17 @@ function ArchivePlate({
           }}
         />
       </div>
-      {/* Uploads only, overlaid so a render's plate is laid out exactly as
-          before. Shown on hover or keyboard focus; the server refuses to
-          delete anything that is not an upload regardless. */}
-      {item.collageType === "upload" ? (
-        <DeleteUploadButton
-          id={item.id}
-          name={item.title}
-          className={styles.plateDelete}
-          buttonClassName={styles.plateDeleteButton}
-          onDeleted={onDeleted}
-        />
-      ) : null}
+      {/* Every plate, overlaid so no plate's layout changes. Shown on hover
+          or keyboard focus. Deleting is permanent (row and stored image);
+          a render can't be regenerated for free, so its confirm says so. */}
+      <DeleteUploadButton
+        id={item.id}
+        name={item.title}
+        className={styles.plateDelete}
+        buttonClassName={styles.plateDeleteButton}
+        confirmLabel={item.collageType === "upload" ? "Confirm delete" : "Delete permanently"}
+        onDeleted={onDeleted}
+      />
     </div>
   );
 }
