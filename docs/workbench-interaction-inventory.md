@@ -83,7 +83,7 @@ experience are out of scope for this change.
 | Node | Existing interaction |
 | --- | --- |
 | Photo | Upload/replace a PNG, JPEG, or WebP source image. |
-| Text | Edit a reusable text value. |
+| Text | Edit a reusable text value. Text wired to the explicit-only Append port is shown read-only under the textarea and added to the output after a blank line. |
 | Prompt Builder | Compose domain, lighting, style, and extra direction. |
 | Image Generate | Choose size, quality, and candidate count; generate from prompt/references. |
 | Image Edit | Choose size, quality, and candidate count; edit a base image from prompt/references. |
@@ -97,6 +97,7 @@ experience are out of scope for this change.
 | Collage Board | Choose collage type, orientation, resolution, and quality. |
 | Relight | Apply a prompt-driven lighting edit. |
 | Variations | Choose size, quality, and 1–10 candidates; select one candidate for the aggregate output. |
+| Image Markup | Paint freehand marks in six named colours (brush size, undo, clear, zoom/pan) over the input image; type one instruction per colour used. Outputs a transparent PNG of the marks at the input's exact size (for Image Edit's Markup port) and the matching prompt text. Zero API cost. |
 | Masked Edit | Draw rectangle/brush/polygon masks; undo/clear/apply. Runs only on the Sunburst edit path (no engine picker). |
 | Upscaler | Choose an upscale target and run a high-resolution edit. |
 | Accuracy Reviewer | Select a reference subset and emit a structured report. |

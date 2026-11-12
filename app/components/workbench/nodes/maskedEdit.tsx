@@ -107,7 +107,9 @@ export function shapesBounds(shapes: MaskShape[]): NormalizedBox {
 
 // Draw every shape filled/stroked into the context at the given pixel size,
 // using whatever fillStyle/strokeStyle/composite op the caller configured.
-function traceShapesInto(context: CanvasRenderingContext2D, shapes: MaskShape[], width: number, height: number) {
+// Also exported for Image Markup (imageMarkup.tsx), which draws its coloured
+// brush strokes through the same tracer so they match Masked Edit's brush.
+export function traceShapesInto(context: CanvasRenderingContext2D, shapes: MaskShape[], width: number, height: number) {
   const sx = width / 1000;
   const sy = height / 1000;
   context.lineCap = "round";

@@ -9,6 +9,9 @@ import { NodeShell, useConnectedText, type WorkbenchNodeProps } from "./shared";
 export const Component = memo(function TextNode({ id, data }: WorkbenchNodeProps) {
   const updateParams = useWorkbenchStore((state) => state.updateParams);
   const incoming = useConnectedText(id, "text");
+  // Shown read-only under the textarea: it is added to the output after a
+  // blank line, never typed into the node's own text.
+  const appended = useConnectedText(id, "append");
   // Wired, not just "has a value yet": typing into a node whose upstream has
   // not run must still count as an edit, or the first run would overwrite it.
   const connected = useEdges().some((edge) => edge.target === id && edge.targetHandle === "text");
@@ -33,6 +36,12 @@ export const Component = memo(function TextNode({ id, data }: WorkbenchNodeProps
         >
           Reset to incoming text
         </button>
+      )}
+      {appended !== undefined && (
+        <div className={styles.appendedText} aria-label="Appended text">
+          <span className={styles.appendedTextLabel}>Appended</span>
+          <p className={`${styles.appendedTextBody} nodrag nowheel`}>{appended}</p>
+        </div>
       )}
     </NodeShell>
   );

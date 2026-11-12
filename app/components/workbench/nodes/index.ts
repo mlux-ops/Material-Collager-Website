@@ -13,6 +13,7 @@ import { Component as ExportDownloadComponent, execute as exportDownloadExecute 
 import { Component as ImageEditComponent, execute as imageEditExecute } from "./imageEdit";
 import { Component as ImageDescriptionComponent, execute as imageDescriptionExecute } from "./imageDescription";
 import { Component as ImageGenerateComponent, execute as imageGenerateExecute } from "./imageGenerate";
+import { Component as ImageMarkupComponent, execute as imageMarkupExecute } from "./imageMarkup";
 import { Component as LibraryPickComponent, execute as libraryPickExecute } from "./libraryPick";
 import { Component as MaskedEditComponent, execute as maskedEditExecute } from "./maskedEdit";
 import { Component as NoteComponent } from "./note";
@@ -39,6 +40,7 @@ export const NODE_TYPES = {
   imageGenerate: ImageGenerateComponent,
   test: TestComponent,
   imageEdit: ImageEditComponent,
+  imageMarkup: ImageMarkupComponent,
   compare: CompareComponent,
   saveToLibrary: SaveToLibraryComponent,
   note: NoteComponent,
@@ -70,6 +72,7 @@ const DOM_EXECUTES: Partial<Record<NodeKind, NodeExecute>> = {
   imageGenerate: imageGenerateExecute,
   test: testExecute,
   imageEdit: imageEditExecute,
+  imageMarkup: imageMarkupExecute,
   saveToLibrary: saveToLibraryExecute,
   referenceAnalyzer: referenceAnalyzerExecute,
   imageDescription: imageDescriptionExecute,
