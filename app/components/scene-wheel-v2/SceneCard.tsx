@@ -13,7 +13,9 @@ import {
   Texture,
 } from "three";
 import type { SceneLabCollageItem } from "@/app/lib/scene-lab-assets";
+import { motionReduced, potatoMode, subscribeSettings } from "@/app/lib/site-settings";
 import { getSceneWheelPose, SCENE_WHEEL_HOVER_OFFSET } from "./curve-model";
+import { createPrismRim } from "./prism-rim";
 
 type ImageLike = {
   height?: number;
@@ -90,6 +92,16 @@ export const SceneCard = memo(function SceneCard({ count, index, item, onHover, 
 
   const profile = PANE_PROFILES[index % PANE_PROFILES.length];
   const width = CARD_HEIGHT * aspect;
+  const rim = useMemo(() => createPrismRim(aspect), [aspect]);
+  const rimEnabled = useRef(false);
+  useEffect(() => {
+    const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => { rimEnabled.current = !motionReduced() && !potatoMode(); };
+    sync();
+    preference.addEventListener("change", sync);
+    const unsubscribe = subscribeSettings(sync);
+    return () => { preference.removeEventListener("change", sync); unsubscribe(); };
+  }, []);
 
   const configuredTexture = useMemo(() => {
     const next = texture.clone();
@@ -109,7 +121,7 @@ export const SceneCard = memo(function SceneCard({ count, index, item, onHover, 
     onHover({ clientX: nativeEvent.clientX, clientY: nativeEvent.clientY, item });
   };
 
-  useFrame((_, delta) => {
+  useFrame(({ camera, gl }, delta) => {
     const group = groupRef.current;
     const imageMaterial = imageMaterialRef.current;
     const glassMaterial = glassMaterialRef.current;
@@ -124,6 +136,7 @@ export const SceneCard = memo(function SceneCard({ count, index, item, onHover, 
     group.quaternion.copy(pose.quaternion);
     group.scale.setScalar(pose.scale * (1 + hoverValue.current * 0.012));
     group.visible = pose.opacity > 0.002;
+    rim.update(camera.position, group.position, group.quaternion, gl.getPixelRatio(), group.visible && rimEnabled.current);
 
     // One image layer preserves clarity. The independent shell and face layers
     // provide the glass veil without sampling or blurring neighboring texels.
@@ -163,6 +176,7 @@ export const SceneCard = memo(function SceneCard({ count, index, item, onHover, 
           depthTest
           depthWrite={false}
           map={configuredTexture}
+          onBeforeCompile={rim.patchImage}
           opacity={profile.imageOpacity}
           side={DoubleSide}
           toneMapped={false}
