@@ -93,7 +93,7 @@ experience are out of scope for this change.
 | References | Add/reorder/remove reference items and upload images per item. |
 | Reference Analyzer | Identify type/brand/product/finish and emit a search query. |
 | Reference Finder | Search, pause for candidate selection, import a choice, and resume. |
-| Library Pick | Refresh the six-month library and select an image. |
+| Library Pick | Refresh the library and select a saved image by name or open the finish palette atlas. Sample a point on a photograph or pin an extracted swatch. Up to two pinned tones rank images by Oklab color distance. The whole-library scan includes matches beyond the visible images. Choosing a photograph updates the same saved-image selection used by the node’s Run control. |
 | Collage Board | Choose collage type, orientation, resolution, and quality. |
 | Relight | Apply a prompt-driven lighting edit. |
 | Variations | Choose size, quality, and 1–10 candidates; select one candidate for the aggregate output. |

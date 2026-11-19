@@ -1,0 +1,97 @@
+button.trigger {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 28px; height: 28px; padding: 0 8px; white-space: nowrap;
+  font: inherit; font-size: 8.4px; font-weight: 500; line-height: 1; text-transform: uppercase;
+  background: transparent; color: #161816; border: 1px solid #a4aaa4;
+}
+
+dialog.dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100dvh - 36px);
+  overflow: auto;
+  padding: 0;
+  border: 1px solid #393b37;
+  background: #fafaf8;
+  color: #161816;
+  box-sizing: border-box;
+  overscroll-behavior: contain;
+}
+
+.dialog::backdrop { background: rgb(24 24 20 / 58%); }
+.dialog .head, .dialog .footer, .dialog .controlBar, .dialog .samples {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+}
+.dialog .head, .dialog .footer { justify-content: space-between; }
+.dialog .head { padding-bottom: 0; }
+.dialog .head h2 { margin: 0; font: inherit; font-size: 14px; font-weight: 600; }
+.dialog .close { min-height: 28px; padding: 0 7px; background: transparent; border: 0; color: inherit; }
+.dialog .head .close, .dialog .add button {
+  font: inherit; font-size: 9px; font-weight: 600; line-height: 1.1; text-transform: uppercase;
+}
+.dialog .samples { gap: 6px; }
+.dialog .samples button {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 34px; padding: 2px 7px 2px 2px; white-space: normal;
+  font: inherit; font-size: 11px; text-transform: none; text-align: left;
+  color: #161816; background: transparent; border: 1px solid transparent;
+}
+.dialog .samples button[aria-pressed="true"] { border-color: currentColor; }
+.samples img { object-fit: cover; flex-shrink: 0; }
+.dialog .surface {
+  position: relative; overflow: hidden; width: 100%; height: clamp(170px, 43dvh, 400px);
+  background: #e4e2dd;
+}
+.surface[data-state="ready"] { touch-action: none; cursor: crosshair; }
+.surface .still, .surface .canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%; display: block;
+}
+.surface .still { object-fit: cover; transform: scale(1.45); }
+.surface .canvas { visibility: hidden; }
+.surface[data-state="ready"] .canvas { visibility: visible; }
+.dialog .controlBar {
+  min-height: 58px; justify-content: flex-end;
+  color: #40443f; font-size: 11px; border-bottom: 1px solid #d4d5cf;
+}
+.controlBar .hint, .controlBar [role="status"] { margin-right: auto; }
+.dialog .controlBar label {
+  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 0 7px;
+  width: clamp(76px, 20%, 125px); margin: 0;
+  color: #373b37; font-size: 10px; font-weight: 500;
+}
+.controlBar output { font-variant-numeric: tabular-nums; }
+.dialog .controlBar input[type="range"] {
+  grid-column: 1 / -1; width: 100%; height: 20px; min-height: 0; padding: 0; margin: 0;
+  appearance: auto; accent-color: #343b34; cursor: pointer;
+}
+.dialog .credit { display: grid; gap: 3px; font-size: 12px; }
+.dialog .credit a { font-size: 10px; color: #535a52; text-underline-offset: 2px; }
+.dialog .add { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.dialog .add select { max-width: 180px; min-width: 0; min-height: 33px; padding: 4px 6px; font: inherit; font-size: 11px; }
+.dialog .add button {
+  min-height: 33px; padding: 0 10px; white-space: nowrap; color: white; background: #191b19; border: 0;
+}
+.dialog .add button:disabled { opacity: .45; }
+.dialog .error { margin: 0 16px 12px; font-size: 11px; color: #942b18; }
+.dialog :focus-visible { outline: 2px solid #287565; outline-offset: 2px; }
+@media (pointer: coarse) {
+  button.trigger, .dialog .head .close, .dialog .samples button,
+  .dialog .add button, .dialog .add select { min-height: 44px; }
+}
+@media (max-width: 550px) {
+  dialog.dialog { width: calc(100vw - 16px); }
+  .dialog .head, .dialog .samples, .dialog .controlBar, .dialog .footer { padding-inline: 10px; }
+  .dialog .samples { gap: 2px; align-items: stretch; }
+  .dialog .samples button { flex: 1; gap: 4px; font-size: 10px; line-height: 1.2; }
+  .dialog .controlBar { flex-wrap: wrap; gap: 8px 18px; justify-content: flex-start; }
+  .dialog .hint { width: 100%; }
+  .dialog .controlBar label { flex: 1; }
+  .dialog .footer { align-items: stretch; flex-direction: column; gap: 10px; }
+  .dialog .credit { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .dialog .add select { flex: 1; max-width: none; }
+}

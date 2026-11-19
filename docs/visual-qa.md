@@ -933,3 +933,34 @@ because CDP polling lags a busy main thread by hundreds of ms.
   `mask-image` steps run on the main thread, so that run skipped the
   dissolve and the veil vanished in one step, as the old opacity fade would
   not have. Warm loads do not stall. A production build was not measured.
+
+## Material inspection tools · November 18, 2026
+
+Local preview at `http://localhost:5177`. Chromium captures at 1440 × 900, 1280 × 800, 1024 × 768 and 390 × 844 cover each feature. The local D1/R2 preview contains four library images from the repository and one archived Wieland primary-bath fixture board with four original reference photos. No paid generation was necessary.
+
+| Feature | Browser checks and fixes | Evidence |
+| --- | --- | --- |
+| Review Boards → Built boards → Fixture Collage → Inspect sample board | Unpacked the plates with the keyboard, selected a plane, checked its SKU and opened the original photo. Escape restored focus to the drawer. Fixed fallback when WebGL creation fails and checked context loss and reduced motion. The real board has no stored render. The current-versus-stale render branch was exercised using a browser fixture. | [Desktop](../output/playwright/material-features/exploded/unpacked-1440x900.png) · [Mobile](../output/playwright/material-features/exploded/unpacked-390x844.png) · [Reduced motion](../output/playwright/material-features/exploded/reduced-390x844.png) |
+| Generator → Reference tray → Raking light | Moved the light by pointer and keyboard and verified that the rendered pixels changed. Switched among three specimens, imported the image and source credit, and checked focus on close. Matched the trigger to the adjacent toolbar control and verified its 44 px touch height. A failed normal-map load showed the static source. | [Desktop](../output/playwright/material-features/raking/raking-light-1440x900.png) · [Mobile](../output/playwright/material-features/raking/raking-light-390x844.png) · [Fallback](../output/playwright/material-features/raking/raking-light-fallback.png) |
+| Workbench → Library Pick → Open finish palette atlas | Sampled image pixels, pinned two tones, verified reordering and selected an image through the existing node. Fixed focus restoration and scoped the animation to the image grid. A nine-image fixture verified that the whole-library scan brings a match from the second page onto the first. Checked empty and unreadable images. | [Desktop](../output/playwright/material-features/atlas/atlas-1440.png) · [Mobile](../output/playwright/material-features/atlas/atlas-390.png) · [Reordering](../output/playwright/material-features/atlas/atlas-local-transition-1440.png) |
+
+The exploded positions are schematic because generated boards have no per-object masks. Raking light uses local color, normal and roughness maps from Poly Haven to simulate lighting on three scanned materials. The palette atlas initially ranks loaded images and offers an explicit scan for larger libraries. Browser evidence covers Chromium desktop and mobile emulation.
+
+### Implementation files
+
+- Review board files under `app/components/review-boards/` include `BoardWorkflow.tsx`, `SampleBoard.tsx`, `SampleScene.tsx`, `sample-layout.ts` and `sample-board.module.css`. Geometry regression coverage lives in `tests/autoboard-sample-layout.test.mjs`.
+- The generator integration lives in `app/generator/page.tsx`. The viewer uses `app/components/raking-light/RakingLight.tsx`, `surface.ts`, `raking-light.module.css`, `app/lib/raking-light.ts` and the twelve WebP files in `public/raking-light/`. Asset and input checks live in `tests/raking-light.test.mjs`.
+- Workbench node files under `app/components/workbench/nodes/` include `libraryPick.tsx`, `FinishPaletteAtlas.tsx`, `finish-palette.ts` and `finish-palette.module.css`. The color tests live in `tests/workbench-finish-palette.test.mjs`. The behavior is recorded in `docs/workbench-interaction-inventory.md`.
+
+### Local verification
+
+| Command | Result |
+| --- | --- |
+| `npm run dev -- --host localhost --port 5177` | Review Boards, Generator and Workbench served locally |
+| `npm run test:transitions` | Full suite passed, 977 of 977 |
+| `npm run lint -- --ignore-pattern '.claude/worktrees/**'` | Current checkout passed with 10 warnings and zero errors. This excludes 25 unrelated nested checkouts. |
+| `node scripts/typecheck-baseline.mjs` | Passed with the seven existing diagnostics |
+| `npm run build` | Local production build passed |
+| `git diff --check` | Passed |
+
+The screenshots linked above are local QA artifacts. The production bundle contains the feature code and the twelve CC0 material maps and swatches. The two proposed landing interactions are outside this release.

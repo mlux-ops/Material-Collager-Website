@@ -1,0 +1,59 @@
+.dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(820px, calc(100vw - 48px));
+  max-width: none;
+  max-height: min(790px, calc(100dvh - 48px));
+  padding: 0;
+  border: 1px solid #a2a7a1;
+  background: #f7f7f2;
+  color: #20231f;
+  font: inherit;
+}
+.dialog[open] { display: flex; flex-direction: column; }
+.dialog::backdrop { background: rgb(26 29 24 / 46%); }
+.header, .controls, .footer { flex: none; padding-inline: 22px; }
+.header { display: flex; align-items: center; justify-content: space-between; padding-block: 14px 7px; gap: 16px; }
+.header h2 { margin: 0; font: inherit; font-size: 14px; font-weight: 600; }
+.dialog button { font: inherit; cursor: pointer; }
+.dialog button:focus-visible { outline: 2px solid #276858; outline-offset: 2px; }
+.textButton, .more { border: 0; background: transparent; color: inherit; min-height: 32px; padding: 4px 0; }
+.dialog .textButton, .dialog .more { font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
+.controls { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; min-height: 40px; padding-bottom: 10px; }
+.controls p, .empty { margin: 0; color: #555e55; font-size: 12px; line-height: 1.45; }
+.pins { display: flex; gap: 4px; }
+.pin { display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #bec3b9; padding: 3px 7px; background: transparent; color: inherit; min-height: 30px; }
+.dialog .pin { font-size: 10px; font-variant-numeric: tabular-nums; }
+.pin i { width: 13px; height: 13px; border: 1px solid rgb(0 0 0 / 10%); }
+.pin span { font-size: 14px; }
+.scroll { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 2px 22px 16px; }
+.grid { display: grid; contain: layout; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px 8px; }
+.card { min-width: 0; }
+.photo { display: grid; place-items: center; width: 100%; aspect-ratio: 4 / 5; padding: 0; border: none; color: #555e55; background: #e5e5dc; }
+.dialog .photo { cursor: crosshair; font-size: 12px; }
+.photo:disabled { cursor: default; }
+.photo img { width: 100%; height: 100%; min-height: 0; object-fit: cover; }
+.swatches { display: flex; margin-top: 3px; width: 100%; min-height: 24px; }
+.swatches button { position: relative; border: none; padding: 0; min-width: 0; min-height: 24px; flex: 1; }
+.swatches button[aria-pressed="true"]::after { content: ""; position: absolute; inset: 3px; border: 1px solid white; outline: 1px solid #252823; }
+.choose { display: flex; width: 100%; min-height: 34px; align-items: baseline; justify-content: space-between; gap: 8px; text-align: left; padding: 6px 0; background: transparent; border: none; color: inherit; }
+.dialog .choose { font-size: 12px; line-height: 1.3; }
+.choose:hover span:first-child, .choose:focus-visible span:first-child { text-decoration: underline; text-underline-offset: 3px; }
+.more { margin-top: 12px; }
+.actions { display: flex; gap: 18px; }
+.empty { padding-block: 24px; }
+.footer { border-top: 1px solid #d2d5ca; padding-block: 9px; font-size: 10px; color: #555e55; }
+@media (max-width: 640px) {
+  .dialog { width: calc(100vw - 20px); max-height: calc(100dvh - 24px); }
+  .header, .controls, .footer { padding-inline: 14px; }
+  .scroll { padding-inline: 14px; }
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 7px; }
+  .photo { aspect-ratio: 1; }
+  .controls { align-items: flex-start; flex-direction: column; }
+  .pins:not(:empty) { margin-top: 3px; }
+}
+@media (pointer: coarse) {
+  .pin, .choose, .textButton, .more { min-height: 44px; }
+  .swatches, .swatches button { min-height: 32px; }
+}
