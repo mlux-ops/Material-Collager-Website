@@ -39,9 +39,10 @@ export const PROVIDERS = {
   // rest are the models `codex debug models` lists as visible for this
   // ChatGPT plan, each verified to answer under the bridge's flags: the rest
   // 2026-10-08, gpt-6.1-sol 2026-10-10 on codex-cli 0.162.1, the first
-  // version that lists it.
+  // version that lists it; gpt-6.2-sol, gpt-6.2-astra and gpt-6.1-terra
+  // 2026-11-19 on codex-cli 0.166.0.
   codex: {
-    models: ["default", "gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+    models: ["default", "gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
     defaultModel: "default",
   },
 };
