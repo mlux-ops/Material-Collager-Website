@@ -32,6 +32,8 @@ export type DitherTextInProps = {
   cell?: number;
   fontSize?: number;
   letterSpacing?: number;
+  /** Weight for both the dithered raster and the settled text. */
+  fontWeight?: number;
   ink?: string;
   className?: string;
 };
@@ -43,6 +45,7 @@ export function DitherTextIn({
   cell = 1,
   fontSize = 11,
   letterSpacing = 1.6,
+  fontWeight = 750,
   ink = "#000000",
   className,
 }: DitherTextInProps) {
@@ -61,7 +64,7 @@ export function DitherTextIn({
     let cancelled = false;
 
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const font = `750 ${fontSize * dpr}px ${getComputedStyle(document.body).fontFamily}`;
+    const font = `${fontWeight} ${fontSize * dpr}px ${getComputedStyle(document.body).fontFamily}`;
     const cellPx = Math.max(1, Math.round(cell * dpr));
     // The canvas and the final <span> must occupy the exact same block box,
     // or the row jumps when the dither hands off to real text (the same
@@ -167,7 +170,7 @@ export function DitherTextIn({
       window.clearTimeout(timer);
       cancelAnimationFrame(raf);
     };
-  }, [text, delay, duration, cell, fontSize, letterSpacing, ink, done, reduced]);
+  }, [text, delay, duration, cell, fontSize, letterSpacing, fontWeight, ink, done, reduced]);
 
   const boxH = Math.ceil(fontSize * 1.3);
   if (done || reduced) {
@@ -178,7 +181,7 @@ export function DitherTextIn({
           display: "block",
           height: boxH,
           fontSize,
-          fontWeight: 750,
+          fontWeight,
           letterSpacing,
           color: ink,
           lineHeight: `${boxH}px`,

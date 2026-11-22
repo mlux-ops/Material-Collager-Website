@@ -1,0 +1,129 @@
+/* CompareStage (app/components/CompareStage.tsx).
+ *
+ * Fills its stage: the Generator's .result-stage and the Review Boards
+ * .previewStage are both position: relative with overflow: hidden and a size
+ * of their own (aspect-ratio), so this sits in the slot DitherReveal uses
+ * without changing the stage's dimensions.
+ *
+ * Positions (the new image's clip-path, the divider's and grab area's left)
+ * are written inline from one number by CompareStage's applySplit(); nothing
+ * here animates, so there is no keyframe to localize and nothing to drift. */
+
+.root {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #fff;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Both images share one box and one fit, so the split lines up whatever
+ * their aspect ratios. The white fill is opaque on the new image so the
+ * previous image never shows through its letterbox bands. These agree with
+ * the global `.result-stage.has-result img` rule (globals.css) rather than
+ * fight it. */
+.image {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #fff;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.current {
+  clip-path: inset(0 100% 0 0);
+}
+
+/* The 1px divider. Always inside the frame: dividerLeft() runs from 0px at
+ * split 0 to calc(100% - 1px) at rest. */
+.line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: #000;
+  pointer-events: none;
+}
+
+/* The grab area: 38px, centred on the divider, clamped inside the frame by
+ * handleLeft() so it is still reachable at the right-edge rest position. */
+.handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 38px;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+
+/* Keyboard and assistive-technology control only: stretched over the stage
+ * so it reads as the stage's control, invisible, and transparent to the
+ * pointer (the grab area owns pointer input; a pointer-live range here would
+ * jump the split on any click on the image). */
+.range {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+}
+
+/* The range's focus ring, drawn on the frame. Same stroke as the global
+ * :focus-visible rule (globals.css), but inset: the stages clip anything
+ * outside them with overflow: hidden. */
+.focusRing {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.range:focus-visible ~ .focusRing {
+  outline: 3px solid rgba(52, 95, 128, 0.28);
+  outline-offset: -3px;
+}
+
+/* Status-pill metrics, as rendered in .generator-shell .status-pill. */
+.label {
+  position: absolute;
+  top: 8px;
+  z-index: 1;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 4px 7px;
+  border: 1px solid #000;
+  border-radius: 0;
+  background: #fff;
+  color: #000;
+  font-size: 8.4px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.1575px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.labelNew {
+  left: 8px;
+}
+
+.labelPrevious {
+  right: 8px;
+}

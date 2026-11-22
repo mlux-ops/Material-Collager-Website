@@ -1,0 +1,45 @@
+/* SlotDrop (SlotDrop.tsx) — armed and over states for a Generator reference
+   card. These classes go on the CARD (article.material-item); they restyle
+   its dashed drop box, `.reference-dropzone`, from the outside.
+
+   Specificity: the box's dashed style comes from `.reference-dropzone`
+   (0,1,0), its colour from `.generator-shell .reference-dropzone` (0,2,0),
+   and its hover from `.generator-shell .reference-dropzone:hover` (0,3,0).
+   Every rule here is (0,3,0) — a doubled local class plus the global one —
+   so it beats the base rules regardless of stylesheet order and ties the
+   hover rule, which sets the same black border anyway.
+
+   border-style does not interpolate: dashed -> solid flips at once and the
+   colour eases over the app's quick duration and easing (motion-tokens.css
+   --duration-quick, --ease-smooth-out). */
+
+.slot.slot :global(.reference-dropzone) {
+  transition:
+    border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* A file drag is over the page and this card can take a photo. */
+.armed.armed :global(.reference-dropzone) {
+  border-color: #000;
+  border-style: solid;
+}
+
+/* The pointer is over this card: the box whitens like its hover state, and
+   the upload label reads "DROP TO SET 03" (set in JSX, so colour is not the
+   only cue). */
+.over.over :global(.reference-dropzone) {
+  background-color: #fff;
+  border-color: #000;
+  border-style: solid;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slot.slot :global(.reference-dropzone) {
+    transition: none;
+  }
+}
+
+:global(html[data-reduce-motion="1"]) .slot.slot :global(.reference-dropzone) {
+  transition: none;
+}

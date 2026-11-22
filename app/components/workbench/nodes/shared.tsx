@@ -14,9 +14,11 @@ import {
   useUpdateNodeInternals,
   type NodeProps,
 } from "@xyflow/react";
-import { memo, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { RenderClockTime, useRenderClock } from "@/app/components/RenderClock";
 import { readApiResponse } from "@/app/lib/api-client";
+import { renderClockKey } from "@/app/lib/render-clock";
 import { MARKUP_MAX_PIXELS, validateEditSize } from "@/app/lib/image-edit";
 import { classifySize } from "@/app/lib/image-model-limits";
 import { optimizeReferencesForTransport } from "@/app/lib/image-transport";
@@ -104,6 +106,51 @@ const STATUS_LABEL: Record<WorkbenchNodeData["status"], string> = {
   stale: "Stale",
   "needs-selection": "Needs Selection",
 };
+
+// The node header's status badge. While the node is running it reads
+// "Running 0:42" (app/components/RenderClock.tsx). Its own component so the
+// once-a-second tick re-renders only the badge, never the whole card.
+//
+// The store keeps no run start time, so the badge times the run itself: it
+// starts on the transition INTO "running" that it observed, records the
+// duration under workbench:<kind>:<quality> on running -> done, and stops
+// without recording on any other exit (error, cancel back to idle, a parked
+// needs-selection). A badge that mounts while its node is already running saw
+// no start, so it shows plain "Running" and records nothing rather than a
+// short, wrong duration. Cache hits and pinned nodes never pass through
+// "running" (executor.ts), so they record nothing either.
+function NodeStatusBadge({
+  status,
+  kind,
+  quality,
+}: {
+  status: WorkbenchNodeData["status"];
+  kind: NodeKind;
+  quality: WorkbenchParams["quality"];
+}) {
+  const { startedAt, start, finish, stop } = useRenderClock();
+  const previousStatus = useRef(status);
+  const clockKey = renderClockKey("workbench", kind, quality);
+  useEffect(() => {
+    const previous = previousStatus.current;
+    previousStatus.current = status;
+    if (previous === status) return;
+    if (status === "running") start(clockKey);
+    else if (previous === "running" && status === "done") finish();
+    else if (previous === "running") stop();
+  }, [status, clockKey, start, finish, stop]);
+  return (
+    <span className={`${styles.status} ${styles[`status_${status}`]}`}>
+      {STATUS_LABEL[status]}
+      {status === "running" && startedAt !== null ? (
+        <>
+          {" "}
+          <RenderClockTime startedAt={startedAt} />
+        </>
+      ) : null}
+    </span>
+  );
+}
 
 // --- Wire-drag state -------------------------------------------------------
 // While a wire is being dragged every card answers one question: could this
@@ -435,7 +482,7 @@ export function NodeShell({
           {data.pinnedOutput !== undefined && data.pinnedOutput !== null && (
             <span className={styles.pinBadge} title="This output is pinned: it will not re-run or re-bill.">Pinned</span>
           )}
-          <span className={`${styles.status} ${styles[`status_${data.status}`]}`}>{STATUS_LABEL[data.status]}</span>
+          <NodeStatusBadge status={data.status} kind={data.kind} quality={data.params.quality} />
         </span>
       </header>
       <PortStrip nodeId={nodeId} kind={data.kind} visibleOutputIds={visibleOutputIds} drag={drag} />

@@ -1,0 +1,54 @@
+/* Render clock (RenderClock.tsx). House values only: black or #657069 text,
+   10px sub text, no radius, no accent colour. */
+
+/* The readout inherits the size, weight and case of wherever it sits (the
+   8.4px uppercase pill, a button label, the 11px progress line); it only pins
+   the figures to a fixed width so the container never jitters per second. */
+.time {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.clock {
+  align-items: baseline;
+  display: inline-flex;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.note {
+  color: #657069;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+/* Progress against the typical duration, on the stage's top edge. One tick
+   per second, eased linearly over that second so it reads as continuous. */
+.rule {
+  background: #000;
+  height: 1px;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  top: 0;
+  transform-origin: left center;
+  transition: transform 1000ms linear;
+  z-index: 3;
+}
+
+/* Reduced motion (the OS setting or the site's own toggle): no transition,
+   the rule simply steps once a second. */
+@media (prefers-reduced-motion: reduce) {
+  .rule {
+    transition: none;
+  }
+}
+
+:global(html[data-reduce-motion="1"]) .rule {
+  transition: none;
+}
