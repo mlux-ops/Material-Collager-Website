@@ -6,13 +6,14 @@ import { useWorkbenchStore } from "../store";
 import styles from "../workbench.module.css";
 import type { ExecuteContext } from "../types";
 import { NodeShell, OutputPreview, RunFooter, type WorkbenchNodeProps } from "./shared";
+import { FinishPaletteAtlas, type AtlasItem } from "./FinishPaletteAtlas";
 
-type LibraryItem = { id: string; title?: string; filename?: string; createdAt?: number; imageUrl: string };
-type LibraryListResponse = { ok: boolean; error?: string; items?: LibraryItem[] };
+type LibraryListResponse = { ok: boolean; error?: string; items?: AtlasItem[] };
 
 export const Component = memo(function LibraryPickNode({ id, data }: WorkbenchNodeProps) {
   const updateParams = useWorkbenchStore((state) => state.updateParams);
-  const [items, setItems] = useState<LibraryItem[]>([]);
+  const [items, setItems] = useState<AtlasItem[]>([]);
+  const [atlasOpen, setAtlasOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
@@ -33,7 +34,6 @@ export const Component = memo(function LibraryPickNode({ id, data }: WorkbenchNo
 
   useEffect(() => {
     void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -53,6 +53,16 @@ export const Component = memo(function LibraryPickNode({ id, data }: WorkbenchNo
           {items.map((item) => <option key={item.id} value={item.id}>{item.title || item.filename || item.id}</option>)}
         </select>
       </label>
+      <button type="button" className={`nodrag ${styles.smallButton}`} onClick={() => setAtlasOpen(true)}
+        aria-haspopup="dialog" disabled={loading || (!!error && !items.length)}>
+        Open finish palette atlas
+      </button>
+      {atlasOpen && <FinishPaletteAtlas items={items} selectedId={data.params.selectedLibraryId}
+        onClose={() => setAtlasOpen(false)} onChoose={(selectedLibraryId) => {
+          updateParams(id, { selectedLibraryId });
+          setAtlasOpen(false);
+        }}
+      />}
       <OutputPreview id={id} data={data} />
     </NodeShell>
   );

@@ -1,0 +1,114 @@
+.fan {
+  --fan-open: 0;
+  --leaf-width: clamp(108px, 10.1vw, 152px);
+  --leaf-height: clamp(35px, 3.45vw, 48px);
+  --pin-offset: 14px;
+  position: absolute;
+  right: max(-6px, calc(env(safe-area-inset-right) - 6px));
+  bottom: max(59px, calc(env(safe-area-inset-bottom) + 59px));
+  z-index: 12;
+  width: var(--leaf-width);
+  height: max(44px, var(--leaf-height));
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  appearance: none;
+  background: transparent;
+  color: #292923;
+  font: inherit;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
+  cursor: grab;
+  transform: translateX(calc(-25px * var(--fan-open)));
+  transition: transform 370ms cubic-bezier(.2,.75,.22,1);
+}
+
+.fan:focus-visible { outline: none; }
+.fan:focus-visible .pin { outline: 2px solid #232520; outline-offset: 2px; }
+.fan:active { cursor: grabbing; }
+
+.leaf {
+  position: absolute;
+  width: 100%;
+  height: var(--leaf-height);
+  right: 0;
+  top: 50%;
+  box-sizing: border-box;
+  margin-top: calc(var(--leaf-height) * -.5);
+  background-color: var(--sample-edge);
+  background-position: center;
+  background-size: cover;
+  border: 1px solid var(--sample-edge);
+  border-bottom-width: 2px;
+  border-radius: 1px 2px 2px 1px;
+  transform-origin: calc(100% - var(--pin-offset)) 50%;
+  transform: rotate(calc(var(--fan-rest) + var(--fan-open) * var(--fan-turn)));
+  transition: transform 430ms cubic-bezier(.19,.8,.22,1) var(--fan-lag);
+}
+
+.ticket {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  background: #f3f0e7;
+  color: #24241f;
+  padding: 1px 3px 2px;
+  font-size: 8px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: .04em;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 90ms ease-out;
+}
+
+.fan[data-open] .ticket { opacity: 1; transition-delay: 100ms; }
+
+.fan .pin {
+  position: absolute;
+  right: var(--pin-offset);
+  top: 50%;
+  transform: translate(50%, -50%);
+  width: 10px;
+  height: 10px;
+  /* The site's square-chrome reset is important; this part is a metal rivet. */
+  border-radius: 50% !important;
+  box-sizing: border-box;
+  border: 1px solid #795e35;
+  background: #b19763;
+  pointer-events: none;
+}
+
+.pin::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border: 1px solid #d1bc8b;
+  border-right-color: #998254;
+  border-bottom-color: #998254;
+  border-radius: 50% !important;
+}
+
+.fan[data-dragging], .fan[data-dragging] .leaf { transition: none; }
+
+@media (max-width: 640px) {
+  .fan {
+    --leaf-width: 102px;
+    --leaf-height: 33px;
+    bottom: max(63px, calc(env(safe-area-inset-bottom) + 63px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fan, .fan .leaf, .fan .ticket { transition: none; }
+}
+
+:global(html[data-reduce-motion="1"]) .fan,
+:global(html[data-reduce-motion="1"]) .fan *,
+:global(html[data-potato="1"]) .fan,
+:global(html[data-potato="1"]) .fan * { transition: none; }

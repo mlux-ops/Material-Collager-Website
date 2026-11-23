@@ -24,6 +24,7 @@ import {
 import { isFileDrag } from "@/app/lib/slot-drop";
 import { CompareStage } from "../components/CompareStage";
 import { ReferenceLoupe } from "../components/ReferenceLoupe";
+import { RakingLight } from "../components/raking-light/RakingLight";
 import { usePrintInLater } from "../hooks/usePrintInLater";
 import { printInClass } from "@/app/lib/print-in";
 import { SiteNavigation } from "../components/SiteNavigation";
@@ -81,7 +82,7 @@ type UiReference = {
   primary?: boolean;
   sourceUrl?: string;
   sourceLabel?: string;
-  provenance?: "upload" | "investigation";
+  provenance?: "upload" | "investigation" | "sample";
 };
 
 type AnalysisField = { value: string; confidence: number };
@@ -1910,6 +1911,22 @@ export default function Home() {
               <h2>Reference tray</h2>
             </div>
             <div className="reference-heading-actions">
+              <RakingLight
+                items={items}
+                full={totalReferences + Number(Boolean(layoutMaster)) >= MAX_REFERENCE_IMAGES}
+                onAdd={(itemKey, sample, file) => {
+                  const reference = createReference(file, {
+                    primary: !items.find(item => item.uiKey === itemKey)?.references.length,
+                    sourceLabel: "Poly Haven",
+                    sourceUrl: `https://polyhaven.com/a/${sample.id}`,
+                    provenance: "sample",
+                  });
+                  setItems(current => current.map(item => item.uiKey === itemKey
+                    ? { ...item, references: [...item.references, reference] }
+                    : item));
+                  setPanelText(`${sample.name} added to the reference tray.`);
+                }}
+              />
               <span
                 className={hasFiles ? "status-pill ready" : "status-pill"}
                 title={layoutMaster ? "The layout reference occupies one of the 16 image slots." : undefined}

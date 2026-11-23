@@ -28,6 +28,7 @@ import { collageRenderCostBasis, estimateCollageRenderCost } from "@/app/lib/col
 import { describeCostEstimate, formatCostSplit } from "@/app/lib/image-cost";
 import type { CollageType, Quality } from "@/app/lib/collage";
 import styles from "./review-boards.module.css";
+import { SampleBoard } from "./SampleBoard";
 
 // extractBrand pulls the brand out of the item name but leaves the name intact,
 // so rendering both prints "Kohler Kohler Purist Basin Faucet". The brand is
@@ -76,7 +77,7 @@ export type BuiltBoard = {
   unitType: string;
   roomLabel: string;
   // rowId is null for an item injected from the tile schedule rather than a row.
-  items: { slotId: string; role: string; name: string; brand: string; images: string[]; rowId: string | null }[];
+  items: { slotId: string; role: string; name: string; brand: string; sku?: string; images: string[]; rowId: string | null }[];
   state: BoardState;
   selectionHash: string;
   renderOptions: { quality: string; background: string };
@@ -534,6 +535,8 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
             <ReceiptStamp key={visibleStageReceipt.key} variant="stage" receipt={visibleStageReceipt.receipt} />
           ) : null}
         </div>
+
+        <SampleBoard board={board} composed={latestRender && !isStale(latestRender) ? latestRender.imageUrl : undefined} />
 
         <div className={styles.workflowRow}>
           {/* One button per board style (A/B/C: DEFAULT_VARIANTS in

@@ -38,6 +38,7 @@ export type NodeKind =
   | "resize"
   | "crop"
   | "patch"
+  | "imageMarkup"
   | "exportDownload"
   | "viewImage"
   | "test";
@@ -257,6 +258,12 @@ export type WorkbenchParams = {
   patchFit?: "auto" | "aligned" | "region";
   patchFeather?: number;
   patchColorMatch?: boolean;
+  // imageMarkup -- `strokes` is a JSON MarkupStroke[] (colour name, brush
+  // radius and points, normalized 0-1000 like maskShapes); `instructions` is
+  // a JSON object of colour name -> instruction, keyed by colour so undo or
+  // clear never loses typed text. See nodes/imageMarkup.manifest.ts.
+  strokes?: string;
+  instructions?: string;
   // aiAssistant, claudeCli, codexCli
   instruction?: string;
   model?: string;

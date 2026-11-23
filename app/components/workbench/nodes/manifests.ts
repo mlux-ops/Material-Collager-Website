@@ -23,6 +23,7 @@ import { cropManifest } from "./crop.manifest.ts";
 import { exportDownloadManifest } from "./exportDownload.manifest.ts";
 import { imageEditManifest } from "./imageEdit.manifest.ts";
 import { imageGenerateManifest } from "./imageGenerate.manifest.ts";
+import { imageMarkupManifest } from "./imageMarkup.manifest.ts";
 import { imageDescriptionManifest } from "./imageDescription.manifest.ts";
 import { libraryPickManifest } from "./libraryPick.manifest.ts";
 import { maskedEditManifest } from "./maskedEdit.manifest.ts";
@@ -51,6 +52,7 @@ export const MANIFESTS: Record<NodeKind, NodeManifest> = {
   imageGenerate: imageGenerateManifest,
   test: testManifest,
   imageEdit: imageEditManifest,
+  imageMarkup: imageMarkupManifest,
   compare: compareManifest,
   saveToLibrary: saveToLibraryManifest,
   note: noteManifest,

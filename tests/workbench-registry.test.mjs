@@ -23,6 +23,7 @@ const DOM_WRAPPED_KINDS = new Set([
   "imageGenerate",
   "test",
   "imageEdit",
+  "imageMarkup",
   "saveToLibrary",
   "referenceAnalyzer",
   "imageDescription",

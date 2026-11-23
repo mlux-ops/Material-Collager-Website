@@ -1,0 +1,59 @@
+.trigger {
+  position: relative;
+  align-self: center;
+  display: block;
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+/* Extend the 42px mark's hit area without shifting the navigation. */
+.trigger::before { content: ""; position: absolute; inset: -2px 0; }
+.trigger:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }
+.mark {
+  display: block;
+  position: relative;
+  pointer-events: none;
+}
+.mark svg { position: relative; }
+
+.trigger[data-pose="tilt"] .mark { animation: turn 820ms cubic-bezier(.22,.68,.2,1); }
+@keyframes turn {
+  0%, 100% { transform: perspective(160px) rotateY(0) rotateX(0); }
+  32%, 47% { transform: perspective(160px) rotateY(-32deg) rotateX(9deg); }
+}
+
+/* Several impressions of the approved outline make one continuous side face.
+   The front SVG covers their common area; only the revealed edge shows ink. */
+.walls {
+  --outline: url("../../references/maxlux-logo-final.svg");
+  position: absolute;
+  inset: 0 -5px -3px 0;
+  background: url("./ui/menu-dither-still.webp") left top repeat;
+  mask-image: var(--outline), var(--outline), var(--outline), var(--outline);
+  mask-size: calc(100% - 5px) calc(100% - 3px);
+  mask-repeat: no-repeat;
+  mask-position: 1px .5px, 2px 1px, 3px 1.5px, 4px 2px;
+}
+.trigger[data-pose="tilt"] .walls { animation: expose-wall 820ms cubic-bezier(.22,.68,.2,1); }
+@keyframes expose-wall {
+  0%, 100% { mask-position: 0 0, 0 0, 0 0, 0 0; }
+  32%, 47% { mask-position: 1px .5px, 2px 1px, 3px 1.5px, 4px 2px; }
+}
+
+/* Reduced motion retains a still print sampled from the same menu shader. */
+@keyframes hold-ink { from, to { opacity: 1; } }
+.trigger[data-pose="ink"] .mark,
+:global(html[data-reduce-motion="1"]) .trigger[data-pose] .mark,
+:global(html[data-potato="1"]) .trigger[data-pose] .mark { animation: hold-ink 420ms step-end; }
+:global(html[data-reduce-motion="1"]) .trigger .walls,
+:global(html[data-potato="1"]) .trigger .walls { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .trigger[data-pose] .mark { animation: hold-ink 420ms step-end; }
+  .trigger[data-pose] .walls { animation: none; }
+}

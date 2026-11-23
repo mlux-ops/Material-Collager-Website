@@ -12,6 +12,7 @@ import {
 } from "@/app/lib/scene-lab-assets";
 import type { SceneCardOrigin, SceneWheelHoverState } from "./SceneCard";
 import { useNativeScrollProgress } from "./useNativeScrollProgress";
+import { PocketSwatchFan } from "./PocketSwatchFan";
 import { SiteNavigation } from "../SiteNavigation";
 import { RouteReady } from "../RouteReady";
 import { DitherReveal } from "../DitherReveal";
@@ -638,7 +639,8 @@ export default function SceneWheelV2() {
             ) : null}
           </div>
 
-          <SiteNavigation active="library" className={styles.chrome} />
+          <SiteNavigation active="library" className={styles.chrome} dimensionalLogo />
+          {veilGone && !selectedItem ? <PocketSwatchFan /> : null}
 
           <div className={styles.caption}>
             <p>

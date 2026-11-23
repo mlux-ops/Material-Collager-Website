@@ -934,6 +934,66 @@ because CDP polling lags a busy main thread by hundreds of ms.
   dissolve and the veil vanished in one step, as the old opacity fade would
   not have. Warm loads do not stall. A production build was not measured.
 
+## Material inspection tools · November 18, 2026
+
+Local preview at `http://localhost:5177`. Chromium captures at 1440 × 900, 1280 × 800, 1024 × 768 and 390 × 844 cover each feature. The local D1/R2 preview contains four library images from the repository and one archived Wieland primary-bath fixture board with four original reference photos. No paid generation was necessary.
+
+| Feature | Browser checks and fixes | Evidence |
+| --- | --- | --- |
+| Review Boards → Built boards → Fixture Collage → Inspect sample board | Unpacked the plates with the keyboard, selected a plane, checked its SKU and opened the original photo. Escape restored focus to the drawer. Fixed fallback when WebGL creation fails and checked context loss and reduced motion. The real board has no stored render. The current-versus-stale render branch was exercised using a browser fixture. | [Desktop](../output/playwright/material-features/exploded/unpacked-1440x900.png) · [Mobile](../output/playwright/material-features/exploded/unpacked-390x844.png) · [Reduced motion](../output/playwright/material-features/exploded/reduced-390x844.png) |
+| Generator → Reference tray → Raking light | Moved the light by pointer and keyboard and verified that the rendered pixels changed. Switched among three specimens, imported the image and source credit, and checked focus on close. Matched the trigger to the adjacent toolbar control and verified its 44 px touch height. A failed normal-map load showed the static source. | [Desktop](../output/playwright/material-features/raking/raking-light-1440x900.png) · [Mobile](../output/playwright/material-features/raking/raking-light-390x844.png) · [Fallback](../output/playwright/material-features/raking/raking-light-fallback.png) |
+| Workbench → Library Pick → Open finish palette atlas | Sampled image pixels, pinned two tones, verified reordering and selected an image through the existing node. Fixed focus restoration and scoped the animation to the image grid. A nine-image fixture verified that the whole-library scan brings a match from the second page onto the first. Checked empty and unreadable images. | [Desktop](../output/playwright/material-features/atlas/atlas-1440.png) · [Mobile](../output/playwright/material-features/atlas/atlas-390.png) · [Reordering](../output/playwright/material-features/atlas/atlas-local-transition-1440.png) |
+
+The exploded positions are schematic because generated boards have no per-object masks. Raking light uses local color, normal and roughness maps from Poly Haven to simulate lighting on three scanned materials. The palette atlas initially ranks loaded images and offers an explicit scan for larger libraries. Browser evidence covers Chromium desktop and mobile emulation.
+
+### Implementation files
+
+- Review board files under `app/components/review-boards/` include `BoardWorkflow.tsx`, `SampleBoard.tsx`, `SampleScene.tsx`, `sample-layout.ts` and `sample-board.module.css`. Geometry regression coverage lives in `tests/autoboard-sample-layout.test.mjs`.
+- The generator integration lives in `app/generator/page.tsx`. The viewer uses `app/components/raking-light/RakingLight.tsx`, `surface.ts`, `raking-light.module.css`, `app/lib/raking-light.ts` and the twelve WebP files in `public/raking-light/`. Asset and input checks live in `tests/raking-light.test.mjs`.
+- Workbench node files under `app/components/workbench/nodes/` include `libraryPick.tsx`, `FinishPaletteAtlas.tsx`, `finish-palette.ts` and `finish-palette.module.css`. The color tests live in `tests/workbench-finish-palette.test.mjs`. The behavior is recorded in `docs/workbench-interaction-inventory.md`.
+
+### Local verification
+
+| Command | Result |
+| --- | --- |
+| `npm run dev -- --host localhost --port 5177` | Review Boards, Generator and Workbench served locally |
+| `npm run test:transitions` | Full suite passed, 977 of 977 |
+| `npm run lint -- --ignore-pattern '.claude/worktrees/**'` | Current checkout passed with 10 warnings and zero errors. This excludes 25 unrelated nested checkouts. |
+| `node scripts/typecheck-baseline.mjs` | Passed with the seven existing diagnostics |
+| `npm run build` | Local production build passed |
+| `git diff --check` | Passed |
+
+The screenshots linked above are local QA artifacts. The production bundle contains the feature code and the twelve CC0 material maps and swatches. The two proposed landing interactions are outside this release.
+
+## Landing swatch fan, glass edges and MAX LUX mark · local review
+
+Preview at `http://localhost:5177/`. The approved recording, extracted frames, and reference contact sheets were available. Chrome also opened the [live Unveil reference](https://unveil.fr/?ref=siteinspire). Captures use the existing local Library photographs, native scroll, and the shipped panel poses as the baseline for these three additions.
+
+| Interaction | Browser result |
+| --- | --- |
+| Pocket swatch fan | Dragging left or up opens five photographic leaves around a brass pivot. A flick opens them fully before they settle. Tap or keyboard activation holds the fan open for inspection. The compact control sits above the scroll cue. A local CSS override keeps the pin round under the site's square-corner reset. |
+| Prismatic edges | The existing panel image shader colors a narrow segment of the leading edge according to its signed angle to the camera. The frozen 1440 × 900 comparison isolated 1,305 pixels changing by more than 12 channel levels between normal and reduced motion. The reduced-motion canvas region matched its prior capture within one channel level. |
+| Dimensional monogram | Hover, touch, Enter and Space expose side faces painted by the dropdown’s Velaris shader. The SHB Studio Portal row supplies its palette, seed and fine one-pixel dither. Desktop and mobile rest crops matched the original mark pixel for pixel after correcting a one-pixel clip. Reduced motion produces a stationary ink accent. The Generator retains its static mark. |
+
+### Browser evidence
+
+The 24-state matrix covers progress 0.00, 0.20, 0.40, 0.60, 0.80 and 1.00 at 1440 × 900, 1280 × 800, 1024 × 768 and 390 × 844. Compared panel distribution, crop, alpha, chrome placement, and typography against the current landing baseline and the overview reference. The added fan is the intentional difference in the resting composition. The local catalog repeats four available artworks across the rail, and its application navigation differs from the reference site. Chrome desktop and mobile emulation were used for visual verification.
+
+- [Interactive-state screenshot](../output/playwright/landing-details/landing-preview.png), [mobile fan](../output/playwright/landing-details/fan-open-390.png), and [24-state matrix](../output/playwright/landing-details/scene-matrix.jpg)
+- [Original desktop landing](../output/playwright/landing-details/before-1440-p40.png), [live reference capture](../output/playwright/landing-details/reference.png), and [isolated glint comparison](../output/playwright/landing-details/glint/glint-difference-1440-p40.png)
+- [Monogram at rest](../output/playwright/monogram-dither/rest-1440.png), [tilted detail](../output/playwright/monogram-dither/dither-detail.png) and [actual menu reference](../output/playwright/monogram-dither/menu.png)
+
+### Files and checks
+
+- `app/components/scene-wheel-v2/` contains the updated `SceneWheelV2.tsx` and `SceneCard.tsx`, plus `PocketSwatchFan.tsx`, `pocket-swatch-fan.module.css`, `swatch-fan-gesture.ts`, and `prism-rim.ts`. The five photographic crops live in `public/swatch-fan/`.
+- `app/components/SiteNavigation.tsx` opts the Library into `MaxLuxMark.tsx` and `max-lux-mark.module.css`. The approved vector is shared with the static mark.
+- Regression files are `tests/pocket-swatch-fan.test.mjs`, `tests/scene-wheel-prism-rim.test.mjs`, and `tests/max-lux-mark.test.mjs`.
+- Commands for this local review include `npm run dev -- --host localhost --port 5177`, `npm run test:transitions`, `npm run lint -- --ignore-pattern '.claude/worktrees/**'`, `node scripts/typecheck-baseline.mjs`, `npm run build`, and `git diff --check`. Browser captures and combined pointer, keyboard, touch and reversible-scroll checks used Playwright in local Chrome.
+
+The final build passed all 1,013 tests. Lint returned zero errors and ten existing warnings, and the TypeScript gate stayed at its seven-diagnostic baseline. The browser matrix reported zero runtime errors. Moving the fan labels to the exposed tips and widening its spread kept all five labels readable at each viewport.
+
+The owner approved publishing the landing with the menu-colored dither replacing the initial solid vermilion. Chrome verified visible chromatic pixels on the tilted side faces at all four widths, pixel-identical resting artwork at desktop and mobile, keyboard and touch activation, and the stationary reduced-motion response. The menu and mark share presets in `app/components/ui/menu-dither.ts`. The static fallback uses `menu-dither-still.webp`, a lossless sample of the same menu shader.
+
 # Visual QA - Render clock, live cost, receipt stamp, slot drop, compare split
 
 Date: 2026-11-11
