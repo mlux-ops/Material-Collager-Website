@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   dropLabel,
   isDragOver,
+  isExternalFileDrag,
   isFileDrag,
   nextDragDepth,
   slotNumber,
@@ -121,4 +122,29 @@ test("isDragOver is true only for a positive finite depth", () => {
   assert.equal(isDragOver(0), false);
   assert.equal(isDragOver(-1), false);
   assert.equal(isDragOver(Number.NaN), false);
+});
+
+// An <img> dragged off the page carries the same types Chrome reported in
+// headless Chrome for a tray thumbnail: text/uri-list, text/html and Files.
+const PAGE_IMAGE_DRAG = ["text/uri-list", "text/html", "Files"];
+
+test("isExternalFileDrag accepts files dragged in from outside the page", () => {
+  assert.equal(isExternalFileDrag(["Files"], false), true);
+  assert.equal(isExternalFileDrag(["Files", "text/plain"], false), true);
+});
+
+test("isExternalFileDrag refuses an image dragged off the page, though it carries Files", () => {
+  assert.equal(isFileDrag(PAGE_IMAGE_DRAG), true);
+  assert.equal(isExternalFileDrag(PAGE_IMAGE_DRAG, true), false);
+  assert.equal(isExternalFileDrag(["Files"], true), false);
+});
+
+test("isExternalFileDrag is false for any drag without files, wherever it started", () => {
+  for (const startedOnPage of [false, true]) {
+    assert.equal(isExternalFileDrag(["text/plain"], startedOnPage), false);
+    assert.equal(isExternalFileDrag(["text/uri-list", "text/html"], startedOnPage), false);
+    assert.equal(isExternalFileDrag([], startedOnPage), false);
+    assert.equal(isExternalFileDrag(null, startedOnPage), false);
+    assert.equal(isExternalFileDrag(undefined, startedOnPage), false);
+  }
 });

@@ -14,6 +14,7 @@ import { describeCostEstimate, formatCostSplit, recordUsageCalibration } from "@
 import { ReceiptStamp, receiptAnnouncement } from "../components/ReceiptStamp";
 import type { RenderReceiptInput } from "@/app/lib/render-receipt";
 import {
+  acceptsFileDrag,
   developClassName,
   developHandlers,
   dropLabel,
@@ -21,7 +22,6 @@ import {
   slotDropClassName,
   useSlotDropTargets,
 } from "../components/SlotDrop";
-import { isFileDrag } from "@/app/lib/slot-drop";
 import { CompareStage } from "../components/CompareStage";
 import { ReferenceLoupe } from "../components/ReferenceLoupe";
 import { RakingLight } from "../components/raking-light/RakingLight";
@@ -1862,14 +1862,16 @@ export default function Home() {
                 // Its file input is display: none, so a dropped file never
                 // reached it; the page now refuses stray file drops
                 // (SlotDrop.tsx), so this box claims its own and passes the
-                // file to the same chooser the picker uses.
+                // file to the same chooser the picker uses. Like the cards,
+                // it takes only files from outside the page, never an image
+                // dragged off the page itself.
                 onDragOver={(event) => {
-                  if (!isFileDrag(Array.from(event.dataTransfer.types))) return;
+                  if (!acceptsFileDrag(event.dataTransfer)) return;
                   event.preventDefault();
                   event.dataTransfer.dropEffect = "copy";
                 }}
                 onDrop={(event) => {
-                  if (!isFileDrag(Array.from(event.dataTransfer.types))) return;
+                  if (!acceptsFileDrag(event.dataTransfer)) return;
                   event.preventDefault();
                   chooseLayoutMaster(event.dataTransfer.files[0]);
                 }}

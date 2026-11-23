@@ -21,10 +21,17 @@
  * event no target has already claimed (`defaultPrevented`): a file dropped
  * outside every card is refused (dropEffect "none") instead of making the
  * browser navigate away to the file.
+ *
+ * Only files dragged in from OUTSIDE the page count. Chrome puts "Files" on
+ * a drag of any <img> on the page (a tray thumbnail, the render on the
+ * stage), so without this a thumbnail picked up and dropped on another card
+ * would add a copy of itself there. A drag that starts on this page fires
+ * dragstart in this document and one from outside never does, so
+ * trackPageDrags flags the former and acceptsFileDrag ignores it.
  */
 
 import { useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEvent } from "react";
-import { type DragDepthEvent, isDragOver, isFileDrag, nextDragDepth } from "@/app/lib/slot-drop";
+import { type DragDepthEvent, isDragOver, isExternalFileDrag, nextDragDepth } from "@/app/lib/slot-drop";
 import { motionReduced, potatoMode } from "@/app/lib/site-settings";
 import styles from "./SlotDrop.module.css";
 
@@ -42,6 +49,59 @@ function dragTypes(transfer: DataTransfer | null | undefined): string[] {
   return transfer ? Array.from(transfer.types) : [];
 }
 
+/* ---------------------------------------------------------------------------
+ * Page-drag tracking, shared by every drop target on the page.
+ *
+ * Set on dragstart (it only fires for a drag that starts in this document).
+ * Cleared on dragend, which the source fires however the drag ends. If the
+ * source left the DOM mid-drag its dragend never reaches window, so the next
+ * pointerdown or pointermove clears it too: browsers send no pointer events
+ * while a drag is in progress, so the first one means the drag is over.
+ * Reference-counted so the listeners live exactly as long as some hook needs
+ * them.
+ * ------------------------------------------------------------------------- */
+
+let pageDragActive = false;
+let pageDragUsers = 0;
+
+const onPageDragStart = () => {
+  pageDragActive = true;
+};
+const clearPageDrag = () => {
+  pageDragActive = false;
+};
+
+function trackPageDrags(): () => void {
+  if (typeof window === "undefined") return () => undefined;
+  pageDragUsers += 1;
+  if (pageDragUsers === 1) {
+    window.addEventListener("dragstart", onPageDragStart, true);
+    window.addEventListener("dragend", clearPageDrag, true);
+    window.addEventListener("pointerdown", clearPageDrag, true);
+    window.addEventListener("pointermove", clearPageDrag, true);
+  }
+  return () => {
+    pageDragUsers -= 1;
+    if (pageDragUsers > 0) return;
+    window.removeEventListener("dragstart", onPageDragStart, true);
+    window.removeEventListener("dragend", clearPageDrag, true);
+    window.removeEventListener("pointerdown", clearPageDrag, true);
+    window.removeEventListener("pointermove", clearPageDrag, true);
+    pageDragActive = false;
+  };
+}
+
+/**
+ * Whether a drag should count as photos coming in: it carries files and did
+ * not start on this page. Every drop target on the Generator uses this, the
+ * reference cards and the layout-reference box alike; it relies on
+ * useFileDragActive (mounted by useSlotDropTargets) to keep the page-drag
+ * flag current.
+ */
+export function acceptsFileDrag(transfer: DataTransfer | null | undefined): boolean {
+  return isExternalFileDrag(dragTypes(transfer), pageDragActive);
+}
+
 export type FileDragActiveOptions = {
   /** Called once each time an active file drag ends (drop, dragend, leaving the window, watchdog). */
   onDragEnd?: () => void;
@@ -52,7 +112,10 @@ export type FileDragActiveOptions = {
   preventStrayDrop?: boolean;
 };
 
-/** True while a file drag is over the window. Ignores every non-file drag. */
+/**
+ * True while a file drag from outside the page is over the window. Ignores
+ * every non-file drag, and every drag that started on the page.
+ */
 export function useFileDragActive(options: FileDragActiveOptions = {}): boolean {
   const { onDragEnd, preventStrayDrop = true } = options;
   const [active, setActive] = useState(false);
@@ -63,6 +126,7 @@ export function useFileDragActive(options: FileDragActiveOptions = {}): boolean 
   }, [onDragEnd]);
 
   useEffect(() => {
+    const untrackPageDrags = trackPageDrags();
     let depth = 0;
     let on = false;
     let watchdog: ReturnType<typeof setTimeout> | null = null;
@@ -94,23 +158,23 @@ export function useFileDragActive(options: FileDragActiveOptions = {}): boolean 
 
     // Capture phase: state only, never preventDefault.
     const onEnterCapture = (event: DragEvent) => {
-      if (!isFileDrag(dragTypes(event.dataTransfer))) return;
+      if (!acceptsFileDrag(event.dataTransfer)) return;
       step("enter");
       start();
     };
     const onOverCapture = (event: DragEvent) => {
-      if (!isFileDrag(dragTypes(event.dataTransfer))) return;
+      if (!acceptsFileDrag(event.dataTransfer)) return;
       // Also heals a missed dragenter (depth undercount): any dragover with
       // files means a file drag is in progress.
       start();
     };
     const onLeaveCapture = (event: DragEvent) => {
-      if (!isFileDrag(dragTypes(event.dataTransfer))) return;
+      if (!acceptsFileDrag(event.dataTransfer)) return;
       step("leave");
       if (!isDragOver(depth)) end();
     };
     const onDropCapture = (event: DragEvent) => {
-      if (!isFileDrag(dragTypes(event.dataTransfer))) return;
+      if (!acceptsFileDrag(event.dataTransfer)) return;
       end();
     };
     const onDragEndCapture = () => {
@@ -122,13 +186,13 @@ export function useFileDragActive(options: FileDragActiveOptions = {}): boolean 
     // event reaches window, so it is left alone.
     const onOverBubble = (event: DragEvent) => {
       if (!preventStrayDrop || event.defaultPrevented) return;
-      if (!isFileDrag(dragTypes(event.dataTransfer))) return;
+      if (!acceptsFileDrag(event.dataTransfer)) return;
       event.preventDefault();
       if (event.dataTransfer) event.dataTransfer.dropEffect = "none";
     };
     const onDropBubble = (event: DragEvent) => {
       if (!preventStrayDrop || event.defaultPrevented) return;
-      if (!isFileDrag(dragTypes(event.dataTransfer))) return;
+      if (!acceptsFileDrag(event.dataTransfer)) return;
       event.preventDefault();
     };
 
@@ -148,6 +212,7 @@ export function useFileDragActive(options: FileDragActiveOptions = {}): boolean 
       window.removeEventListener("dragover", onOverBubble);
       window.removeEventListener("drop", onDropBubble);
       clearWatchdog();
+      untrackPageDrags();
     };
   }, [preventStrayDrop]);
 
@@ -203,7 +268,7 @@ export function useSlotDropTargets(): SlotDropTargets {
       return next;
     };
     const clearOver = () => setOverKey((current) => (current === key ? null : current));
-    const accepts = (event: ReactDragEvent<HTMLElement>) => !disabled && isFileDrag(dragTypes(event.dataTransfer));
+    const accepts = (event: ReactDragEvent<HTMLElement>) => !disabled && acceptsFileDrag(event.dataTransfer);
 
     return {
       onDragEnter: (event) => {
@@ -225,7 +290,7 @@ export function useSlotDropTargets(): SlotDropTargets {
         if (!isDragOver(step("leave"))) clearOver();
       },
       onDrop: (event) => {
-        if (!isFileDrag(dragTypes(event.dataTransfer))) return;
+        if (!acceptsFileDrag(event.dataTransfer)) return;
         step("drop");
         clearOver();
         if (disabled) return;

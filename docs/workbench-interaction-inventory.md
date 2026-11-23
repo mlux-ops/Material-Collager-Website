@@ -140,7 +140,10 @@ experience are out of scope for this change.
   button reads `DROP TO SET 03`. A drop anywhere on a card adds to that card
   only (through `addReferences`, so the 16-image limit message still appears
   on a full board). The dashed box no longer has its own drop handler. A file
-  dropped outside every card is refused instead of opening in the tab.
+  dropped outside every card is refused instead of opening in the tab. Only
+  files dragged in from outside the page count: an image picked up off the
+  page (a tray thumbnail, the render on the stage) carries files too in
+  Chrome, and is ignored by the cards and by "Upload a previous collage".
 - "Upload a previous collage" now also takes a dropped image (same checks as
   its picker). Before, its input was hidden and a drop opened the file in the
   tab.

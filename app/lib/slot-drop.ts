@@ -2,8 +2,15 @@
  * Slot drop — the pure rules behind the Generator's reference-card drop
  * targets (app/components/SlotDrop.tsx).
  *
- * - isFileDrag: a drag only arms the cards when it carries files; a dragged
- *   link, text selection or in-page element never does.
+ * - isFileDrag: whether a drag carries files at all. A dragged link or text
+ *   selection does not, but a dragged <img> on the page DOES: Chrome puts
+ *   "Files" (and the image itself) on an image drag so it can be dropped on
+ *   the desktop, so this alone cannot tell a photo coming from outside from a
+ *   thumbnail or render picked up off the page.
+ * - isExternalFileDrag: the rule the cards use. A file drag counts only when
+ *   it did not start on this page; SlotDrop.tsx knows that because a drag
+ *   that starts here fires dragstart in this document and one from outside
+ *   never does.
  * - dropLabel: the over-state caption, "DROP TO SET 03", numbered the way the
  *   card's own `.item-number` badge is (two digits, 1-based).
  * - nextDragDepth: dragenter/dragleave fire for every child element the
@@ -19,6 +26,15 @@ export function isFileDrag(types: readonly string[] | null | undefined): boolean
   if (!types || types.length === 0) return false;
   for (const type of types) if (type === "Files") return true;
   return false;
+}
+
+/**
+ * True for files dragged in from outside the page: a file drag that did not
+ * start on the page. An image dragged off the page carries "Files" too, and
+ * must neither arm the cards nor drop a copy of itself into one.
+ */
+export function isExternalFileDrag(types: readonly string[] | null | undefined, startedOnPage: boolean): boolean {
+  return !startedOnPage && isFileDrag(types);
 }
 
 /**

@@ -1039,6 +1039,7 @@ in the Workbench:
 | Whole-card drop fills only that card; armed on all cards; label on the hovered card | Passed (synthetic drag events) |
 | File dropped outside a card is refused, not opened by the browser | Passed |
 | Text drag does not arm the cards | Passed |
+| Image dragged off the page (a tray thumbnail, the stage render) does not arm the cards, add a copy, or reach the layout box | Passed after fix (synthetic events; headless Chrome confirmed an image drag carries `Files`) |
 | Second render shows the split; range input drives the clip and divider | Passed |
 | "Review prompt" after a compare does not replay the wipe or the receipt | Passed after fix |
 | No horizontal overflow, no label/figure overlap at 1440, 1280, 1024, 390 | Passed after fix (Final button at 390) |
@@ -1064,6 +1065,14 @@ in the Workbench:
   `aria-valuetext`.
 - Review Boards announced a failure twice, and stamped `FAILED` for an OK
   response whose body could not be read.
+- Chrome puts `Files` on a drag of any `<img>` on the page, so dragging a
+  tray thumbnail or the stage render armed every card and dropped a copy of
+  itself into the card under the pointer. Found after the merge with main,
+  fixed in the same PR: a drag that starts on the page (it fires
+  `dragstart` in this document; one from outside never does) is now
+  ignored by the cards, the stray-drop guard and the layout-reference box.
+  Not checked with a real mouse drag: the in-app pane was hidden and
+  headless Chrome's drag replay drops the file.
 
 ## Remaining known deviations
 
