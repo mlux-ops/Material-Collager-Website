@@ -3043,6 +3043,12 @@ button.site-wordmark {
   color: var(--mono-white);
 }
 
+/* The Final button is a flex row: its label and the split line beside it
+   need the house 8px gap, or they read as one run of text. */
+.generator-shell .final-now-button {
+  column-gap: 8px;
+}
+
 .generator-shell .draft-button,
 .generator-shell .secondary-button,
 .generator-shell .download-button,

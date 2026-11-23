@@ -70,6 +70,19 @@ experience are out of scope for this change.
 
 - Status, error, progress, paid/cached cost, required-input state, and
   run/cancel controls.
+- While a node runs, its status badge reads `Running m:ss` (the shared render
+  clock, `app/components/RenderClock.tsx`); a run that ends in Done records its
+  duration in this browser under `workbench:<kind>:<quality>`
+  (`mc.renderDurations.v1`). The Generator and Review Boards use the same clock.
+- The Run button's cost label comes from `app/lib/image-cost.ts`
+  (`workbench/cost.ts` re-exports it unchanged; same localStorage keys). The
+  Generator's Generate Collage / Quick Draft / Final Render Now and Review
+  Boards' Render A/B/C now show a live estimate from that same estimator
+  (`app/components/CostEstimate.tsx`, basis in `app/lib/collage-cost.ts`):
+  `~$0.07` inside the button, `N references · input $X + output $Y` under it,
+  `usage-based` for xhigh/max/auto. The Generator records each successful
+  render's usage into the shared calibration; regression checks are in
+  `tests/image-cost-breakdown.test.mjs`.
 - Typed input/output ports, shape-coded by kind, with black wires told apart by
   dash pattern.
 - Full-resolution preview lightbox backed by cached thumbnails.
@@ -77,6 +90,66 @@ experience are out of scope for this change.
   frozen to it.
 - Persist graph structure, source blobs, output blobs, masks, run history,
   and pins through the split IndexedDB autosave path.
+
+### Generator result stage and reference tray (`/generator`)
+
+- Receipt: when a Quick Draft, Generate Collage or Final Render Now lands, a
+  strip on the result stage's bottom edge (`app/components/ReceiptStamp.tsx`,
+  line from `app/lib/render-receipt.ts`) reads e.g.
+  `DRAFT · LOW · 0:48 · 6 REFS · $0.07`: the quality sent, the clock's elapsed
+  time, the images actually uploaded, and the `costUsd` the route returned.
+  Unknown parts are left out, never estimated. A failed render shows
+  `FAILED · <quality> · <elapsed>`, plus the cost when a billed reply came
+  back without an image, but only once the request was sent: an error raised
+  before the `fetch` (validation, reference optimisation, the Final's size
+  check) shows its message in the activity log and no receipt. A cancel shows
+  nothing. The strip clears when a render
+  starts, on Reset, on a board type change and on draft restore. Its arrival
+  (dither-in, dollar count-up) plays once per receipt: after a prompt review
+  it reappears settled. The activity
+  log announces it once (`receiptAnnouncement`), in place of the Final's old
+  `Usage cost: $…` sentence, as its own sentence after the message before it.
+  The isolation test sets no receipt.
+- While a render's post-render bookkeeping runs (draft save, history refresh)
+  the pill, the work-progress clock and the stage's top rule hold that
+  render's final time, still, until the work ends.
+- Cost split lines count what the reference counter counts:
+  `N references · …` under Generate Collage and Quick Draft
+  (`N references + layout · …` when a layout master is sent), and
+  `N references + draft · …` beside Final Render Now, 8px from its label. The
+  dollar terms price every image sent.
+- History rows print the same line inline (kind, quality, cost; `FAILED` for a
+  failed job) with the four-decimal cost as its tooltip, then model and
+  background; `Generation cost unavailable` stays when no cost was recorded.
+- Compare: a result that lands over a previous one (a new draft or studio
+  render over the last result, or a Final over its draft) arrives through
+  `app/components/CompareStage.tsx` instead of the dither reveal: the new
+  image wipes in over the previous one and leaves a draggable divider
+  (keyboard: the stage's range control). The first result after load, reset or
+  type change has no previous and still uses the dither reveal. The wipe plays
+  once per result; after a prompt review or a cancelled or failed Final the
+  same comparison returns settled. The range announces e.g.
+  `63% new render shown`. The isolation test's image is shown on its own,
+  never compared, and never becomes the previous image: the next real render
+  is compared with the last real one. The completion sweep (`.is-lifted`) is not
+  shown over the compare frame. The previous image's blob URL is held until a
+  newer previous replaces it, the result is cleared, or the page unmounts.
+- Whole-card drop (`app/components/SlotDrop.tsx`): while a file is dragged
+  over the window every reference card that can still take a photo turns its
+  dashed box solid black; the card under the pointer whitens it and its upload
+  button reads `DROP TO SET 03`. A drop anywhere on a card adds to that card
+  only (through `addReferences`, so the 16-image limit message still appears
+  on a full board). The dashed box no longer has its own drop handler. A file
+  dropped outside every card is refused instead of opening in the tab. Only
+  files dragged in from outside the page count: an image picked up off the
+  page (a tray thumbnail, the render on the stage) carries files too in
+  Chrome, and is ignored by the cards and by "Upload a previous collage".
+- "Upload a previous collage" now also takes a dropped image (same checks as
+  its picker). Before, its input was hidden and a drop opened the file in the
+  tab.
+- A photo added by drop or by the picker resolves in once with the Bayer
+  dissolve (`archive-image-dither`); photos restored from a saved draft keep
+  the print-in classes. Reduced motion and potato mode skip the dissolve.
 
 ### Node-specific behavior
 

@@ -6,6 +6,23 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { DropdownSelect } from "../components/DropdownSelect";
 import { DitherReveal } from "../components/DitherReveal";
 import { WorkingField } from "../components/WorkingField";
+import { RenderClock, RenderClockRule, RenderClockTime, useRenderClock } from "../components/RenderClock";
+import { renderClockKey } from "@/app/lib/render-clock";
+import { CostFigure, CostSplit, CostStack, costHostClassName, costRowNeighbourClassName } from "../components/CostEstimate";
+import { collageRenderCostBasis, estimateCollageRenderCost } from "@/app/lib/collage-cost";
+import { describeCostEstimate, formatCostSplit, recordUsageCalibration } from "@/app/lib/image-cost";
+import { ReceiptStamp, receiptAnnouncement } from "../components/ReceiptStamp";
+import type { RenderReceiptInput } from "@/app/lib/render-receipt";
+import {
+  acceptsFileDrag,
+  developClassName,
+  developHandlers,
+  dropLabel,
+  markDeveloping,
+  slotDropClassName,
+  useSlotDropTargets,
+} from "../components/SlotDrop";
+import { CompareStage } from "../components/CompareStage";
 import { ReferenceLoupe } from "../components/ReferenceLoupe";
 import { RakingLight } from "../components/raking-light/RakingLight";
 import { usePrintInLater } from "../hooks/usePrintInLater";
@@ -164,6 +181,9 @@ type GenerateResponse = {
   background?: Background;
   outputFormat?: string;
   costUsd?: number | null;
+  // OpenAI's usage block, passed through by the route; read only to calibrate
+  // the paid buttons' estimates (recordUsageCalibration).
+  usage?: Record<string, unknown>;
 };
 
 type GenerationJob = {
@@ -199,12 +219,40 @@ function finalSizeFor(format: FinalFormat, collageType: CollageType) {
   return resolvedSize({ collageType, orientation: format, quality: "high", outputResolution: "final", items: [] });
 }
 
+// What a Quick Draft forces over the board's settings. generate()'s
+// renderPayload sends exactly this, and the Quick Draft cost estimate prices
+// exactly this, so the two cannot drift apart.
+const QUICK_DRAFT_OVERRIDES = { quality: "low", outputResolution: "standard" } as const satisfies Partial<CollageRequestInput>;
+
+// A Final keeps an explicit xhigh/max and otherwise runs at high. Shared by
+// finalizeDraft and the Final button's cost estimate.
+function finalRenderQuality(quality: Quality): Quality {
+  return quality === "xhigh" || quality === "max" ? quality : "high";
+}
+
+// Joins activity-log messages with a blank line between them. Line breaks
+// can collapse (and a screen reader reads straight through them), so a part
+// that does not already end a sentence gets a full stop: "Generation failed:
+// Stubbed failure. Draft failed after 0:02, low quality." Empty parts drop.
+function joinLogSentences(parts: Array<string | null | undefined | false>): string {
+  const kept = parts.map((part) => (part ? part.trim() : "")).filter(Boolean);
+  return kept
+    .map((part, index) => (index < kept.length - 1 && !/[.!?…]["'”’)\]]*$/.test(part) ? `${part}.` : part))
+    .join("\n\n");
+}
+
 type ResultState = {
   dataUrl: string;
   filename: string;
   kind: "draft" | "studio" | "final";
   jobId?: string;
   libraryVisible: boolean;
+  /**
+   * The isolation test's output: shown on its own, never compared against
+   * the board render, and never kept as the "previous" image a later render
+   * is compared with.
+   */
+  diagnostic?: boolean;
 };
 
 type GenerationDiagnostics = {
@@ -484,23 +532,102 @@ export default function Home() {
 
   const [workingStage, setWorkingStage] = useState("");
   const [overallProgress, setOverallProgress] = useState(0);
+  // Elapsed time of the paid render in flight (app/components/RenderClock.tsx).
+  // Separate from isWorking: the prompt review (dryRun) also sets isWorking
+  // but is not a render, so it shows no clock and records nothing.
+  // renderClock.lastElapsedMs holds the duration of the render that last
+  // finished successfully.
+  const renderClock = useRenderClock();
+  // The receipt of the render that last landed or failed (ReceiptStamp.tsx),
+  // pinned to the stage's bottom edge. Null until a render ends, so nothing
+  // renders on the server. `id` changes per receipt and keys the stamp, which
+  // replays its arrival on mount. Cleared when a render starts and whenever
+  // the result is cleared (board reset, type change, draft restore).
+  const [lastReceipt, setLastReceipt] = useState<{ id: number; input: RenderReceiptInput } | null>(null);
+  const receiptIdRef = useRef(0);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [result, setResult] = useState<ResultState | null>(null);
+  // Which result's compare wipe, and which receipt's arrival, have already
+  // played. The stage hides both while working, so whatever is still set
+  // when work starts (a prompt review, a Final that is then cancelled or
+  // fails) has been on screen; marking it on that rising edge (adjusting
+  // state during render, not in an effect) makes its re-mount settled -- no
+  // second wipe, dither-in or count-up. Marked only while unmounted, so a
+  // stage on screen never sees its playArrival flip (CompareStage would
+  // snap a drag made during the wipe back to rest). A newly landed result
+  // or receipt has a new identity and arrives once.
+  const [compareSettledFor, setCompareSettledFor] = useState<string | null>(null);
+  const [settledReceiptId, setSettledReceiptId] = useState<number | null>(null);
+  const [arrivalWasWorking, setArrivalWasWorking] = useState(isWorking);
+  if (isWorking !== arrivalWasWorking) {
+    setArrivalWasWorking(isWorking);
+    if (isWorking && result && compareSettledFor !== result.dataUrl) setCompareSettledFor(result.dataUrl);
+    if (isWorking && lastReceipt && settledReceiptId !== lastReceipt.id) setSettledReceiptId(lastReceipt.id);
+  }
   const resultUrlRef = useRef<string | null>(null);
+  // The result image a new render displaced, shown under it by CompareStage.
+  // The ref owns the blob URL (revoked only when a newer previous displaces
+  // it, when the result is cleared, and on unmount); the state drives render.
+  const previousUrlRef = useRef<string | null>(null);
+  const [previousResultUrl, setPreviousResultUrl] = useState<string | null>(null);
+  const replacePreviousUrl = (url: string | null) => {
+    if (previousUrlRef.current && previousUrlRef.current !== url) URL.revokeObjectURL(previousUrlRef.current);
+    previousUrlRef.current = url;
+    setPreviousResultUrl(url);
+  };
   // Store the generated image as an object URL, not a multi-MB base64 string
   // held in React state and diffed into DOM attributes on every re-render.
+  // A new result keeps the outgoing one as the "previous" image; clearing
+  // (next === null) revokes both and drops the receipt.
+  // True while the image resultUrlRef owns is an isolation-test output
+  // (ResultState.diagnostic). Such an image is revoked when displaced, never
+  // kept as the previous one, so the last real render stays the comparison.
+  const resultIsDiagnosticRef = useRef(false);
   const commitResult = (next: ResultState | null) => {
-    if (resultUrlRef.current && resultUrlRef.current !== next?.dataUrl) {
-      URL.revokeObjectURL(resultUrlRef.current);
+    const outgoing = resultUrlRef.current;
+    if (!next) {
+      replacePreviousUrl(null);
+      if (outgoing) URL.revokeObjectURL(outgoing);
+      resultUrlRef.current = null;
+      setLastReceipt(null);
+    } else if (outgoing && outgoing !== next.dataUrl) {
+      if (resultIsDiagnosticRef.current) URL.revokeObjectURL(outgoing);
+      else replacePreviousUrl(outgoing);
       resultUrlRef.current = null;
     }
     if (next?.dataUrl.startsWith("blob:")) resultUrlRef.current = next.dataUrl;
+    resultIsDiagnosticRef.current = Boolean(next?.diagnostic);
     setResult(next);
     if (next) {
       // Hold the new image as ink for a beat, then let the dither resolve it.
       setRevealProgress(0);
       window.setTimeout(() => setRevealProgress(1), 80);
     }
+  };
+  // generate() empties the stage while it renders (no Download or Finalize
+  // for the image being replaced). Unlike commitResult(null), the outgoing
+  // image is kept as the previous one, so the new render can be compared
+  // against it when it lands. A failed or cancelled render leaves it held
+  // (not displayed) until it is displaced, cleared or the page unmounts.
+  const setAsideResultForCompare = () => {
+    const outgoing = resultUrlRef.current;
+    if (outgoing) {
+      // An isolation-test image is dropped, not compared against: the
+      // previous real render (if any) stays the comparison.
+      if (resultIsDiagnosticRef.current) URL.revokeObjectURL(outgoing);
+      else replacePreviousUrl(outgoing);
+      resultUrlRef.current = null;
+    }
+    resultIsDiagnosticRef.current = false;
+    setResult(null);
+    setLastReceipt(null);
+  };
+  // Shows a render's receipt on the stage and returns the sentence the
+  // activity log announces for it (once, with the completion message).
+  const landReceipt = (input: RenderReceiptInput): string => {
+    receiptIdRef.current += 1;
+    setLastReceipt({ id: receiptIdRef.current, input });
+    return receiptAnnouncement(input);
   };
   const [finalFormat, setFinalFormat] = useState<FinalFormat>("landscape");
   const [jobs, setJobs] = useState<GenerationJob[]>([]);
@@ -520,10 +647,45 @@ export default function Home() {
     [items],
   );
   const hasFiles = totalReferences > 0;
+  // Whole-card drop targets for the reference tray (SlotDrop.tsx). A full
+  // board still takes the drop (addReferences then shows its limit message);
+  // it is only never shown armed.
+  const slotDrop = useSlotDropTargets();
+  const canAccept = totalReferences < (layoutMaster ? MAX_REFERENCE_IMAGES - 1 : MAX_REFERENCE_IMAGES);
   const heroOptions = useMemo(() => items.filter((item) => item.references.length > 0), [items]);
   const [previewWidth, previewHeight] = resolvedSize({ collageType, orientation, quality, outputResolution, items: [] })
     .split("x")
     .map(Number);
+
+  // Bumped after a render's usage is recorded, so the estimates below re-read
+  // the calibration that render just taught (it lives in localStorage, which
+  // no other dependency here tracks).
+  const [costCalibrationRevision, setCostCalibrationRevision] = useState(0);
+  // Live estimates for the three paid buttons (app/lib/collage-cost.ts). Each
+  // basis -- canvas, quality, images uploaded -- is built from the same
+  // settings and overrides its action sends, and is what that action records
+  // calibration against once the render succeeds. breakdown is null when the
+  // estimator has no honest figure (xhigh/max/auto), shown as "usage-based".
+  const renderCostEstimates = useMemo(() => {
+    const board: CollageRequestInput = { collageType, orientation, quality, outputResolution, items: [] };
+    // generate() uploads the layout master ahead of the references, for the
+    // studio render and the quick draft alike.
+    const boardImages = totalReferences + (layoutMaster ? 1 : 0);
+    const studio = collageRenderCostBasis({ ...board, renderKind: "studio" }, boardImages);
+    const draft = collageRenderCostBasis({ ...board, ...QUICK_DRAFT_OVERRIDES, renderKind: "draft" }, boardImages);
+    // finalizeDraft uploads the approved draft as Image 1 plus every product
+    // reference; the board's layout master is not sent with a Final.
+    const final = collageRenderCostBasis(
+      { ...board, orientation: finalFormat, quality: finalRenderQuality(quality), outputResolution: "final", renderKind: "final" },
+      totalReferences + 1,
+    );
+    return {
+      calibrationRevision: costCalibrationRevision,
+      studio: { basis: studio, breakdown: estimateCollageRenderCost(studio) },
+      draft: { basis: draft, breakdown: estimateCollageRenderCost(draft) },
+      final: { basis: final, breakdown: estimateCollageRenderCost(final) },
+    };
+  }, [collageType, orientation, quality, outputResolution, finalFormat, totalReferences, layoutMaster, costCalibrationRevision]);
 
   useEffect(() => {
     let cancelled = false;
@@ -559,6 +721,7 @@ export default function Home() {
 
   useEffect(() => () => {
     if (resultUrlRef.current) URL.revokeObjectURL(resultUrlRef.current);
+    if (previousUrlRef.current) URL.revokeObjectURL(previousUrlRef.current);
   }, []);
 
   useEffect(() => {
@@ -781,7 +944,7 @@ export default function Home() {
     if (heroItemId === item.id) setHeroItemId("");
   }
 
-  function addReferences(itemKey: string, fileList: FileList | null) {
+  function addReferences(itemKey: string, fileList: FileList | File[] | null) {
     const files = Array.from(fileList ?? []);
     if (!files.length) return;
     if (totalReferences + files.length > MAX_REFERENCE_IMAGES) {
@@ -1068,8 +1231,19 @@ export default function Home() {
     abortRef.current = controller;
     setIsWorking(true);
     setOverallProgress(0);
+    setLastReceipt(null);
     let transportFilesForReport: File[] | undefined;
-    const finalQuality: Quality = quality === "xhigh" || quality === "max" ? quality : "high";
+    // Set immediately before the fetch: an error thrown earlier (validation,
+    // optimisation, the size check) never left the browser and lands no
+    // failure receipt. The parsed response is kept so a failure after a
+    // billed reply (no image) still carries the cost it reported.
+    let sent = false;
+    let finalResponse: GenerateResponse | undefined;
+    const finalQuality: Quality = finalRenderQuality(quality);
+    renderClock.start(renderClockKey("generator", "final", finalQuality));
+    // renderClock.startedAt is React state, still stale inside this closure;
+    // the failure receipt measures from this local copy of the start instead.
+    const renderStartedAt = Date.now();
     try {
       const layoutFile = await dataUrlFile(result.dataUrl, "approved-draft.png");
 
@@ -1124,8 +1298,10 @@ export default function Home() {
       form.append("image[]", layoutTransport, layoutTransport.name);
       for (const file of transportFiles) form.append("image[]", file, file.name);
       setOverallProgress(100);
+      sent = true;
       const response = await fetch("/api/generate", { method: "POST", signal: controller.signal, body: form })
         .then((value) => readApiResponse<GenerateResponse>(value));
+      finalResponse = response;
       if (!response.imageBase64) throw new Error("Final rendering completed without an image.");
       const dataUrl = base64ImageToObjectUrl(response.imageBase64, response.mimeType || "image/png");
       commitResult({
@@ -1135,24 +1311,42 @@ export default function Home() {
         jobId: response.jobId,
         libraryVisible: response.libraryVisible ?? true,
       });
+      // Success: record the render's duration before the job-list refresh
+      // below, so the bookkeeping is not counted as render time.
+      const finalElapsedMs = renderClock.finish();
+      // Teach the Final button's estimate what this render really cost: the
+      // approved draft plus every product reference went up.
+      const finalCostBasis = collageRenderCostBasis(payload, transportFiles.length + 1);
+      recordUsageCalibration(finalCostBasis.size, finalCostBasis.quality, response.usage, finalCostBasis.inputImages);
+      setCostCalibrationRevision((revision) => revision + 1);
       setPromptPreview(response.prompt || "");
       setDiagnostics(response.diagnostics ?? null);
       // Only assert the max resolution when the server did not fall back; a
       // notice means it downgraded, so show that instead of a false size.
       const finalSizeLabel = finalSizeFor(finalFormat, collageType);
-      const costMessage = typeof response.costUsd === "number" && Number.isFinite(response.costUsd)
-        ? `Usage cost: $${response.costUsd.toFixed(4)} based on completed usage.`
-        : "Generation cost unavailable because completed usage was not returned.";
+      const hasCost = typeof response.costUsd === "number" && Number.isFinite(response.costUsd);
+      // The receipt's announcement replaces the old "Usage cost" sentence;
+      // it carries the cost whenever the route returned one.
+      const receiptMessage = landReceipt({
+        kind: "final",
+        quality: finalCostBasis.quality,
+        elapsedMs: finalElapsedMs,
+        references: finalCostBasis.inputImages,
+        costUsd: response.costUsd,
+      });
+      const costMessage = hasCost
+        ? receiptMessage
+        : `${receiptMessage} Generation cost unavailable because completed usage was not returned.`;
       // Only claim full quality when every product reference went out untouched.
       const compressed = compressedReferenceCount(productFiles, transportFiles);
       const referenceNote = compressed === 0
         ? "Full-quality product references were used."
         : `${compressed} of ${productFiles.length} product references were compressed to fit this request's size limit, so their finest detail and any transparency may be reduced.`;
-      setPanelText([
+      setPanelText(joinLogSentences([
         `Final ${finalFormat} render complete${response.notice ? "" : ` at ${finalSizeLabel}`}. ${referenceNote}`,
         costMessage,
         response.notice,
-      ].filter(Boolean).join("\n\n"));
+      ]));
       await refreshJobs();
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
@@ -1197,9 +1391,25 @@ export default function Home() {
             }],
           });
         }
-        setPanelText(`Final rendering failed: ${error instanceof Error ? error.message : "Unknown error."}`);
+        // Only a request that left the browser gets a failure receipt.
+        const failureCost = finalResponse?.costUsd;
+        const failureMessage = sent
+          ? landReceipt({
+              kind: "final",
+              quality: finalQuality,
+              elapsedMs: Date.now() - renderStartedAt,
+              failed: true,
+              ...(typeof failureCost === "number" && Number.isFinite(failureCost) ? { costUsd: failureCost } : {}),
+            })
+          : "";
+        setPanelText(joinLogSentences([
+          `Final rendering failed: ${error instanceof Error ? error.message : "Unknown error."}`,
+          failureMessage,
+        ]));
       }
     } finally {
+      // Cancel or failure: stop without recording (a no-op after finish()).
+      renderClock.stop();
       setIsWorking(false);
       setWorkingStage("");
       abortRef.current = null;
@@ -1241,11 +1451,36 @@ export default function Home() {
     const controller = new AbortController();
     abortRef.current = controller;
     setIsWorking(true);
-    commitResult(null);
+    // Empties the stage as commitResult(null) did, but keeps the outgoing
+    // image as the previous one for CompareStage, and drops the old receipt.
+    // The isolation test is a diagnostic, not a board render: it leaves the
+    // board render (and its receipt) in place, so a failed or cancelled test
+    // returns to it and nothing is set aside for a comparison.
+    if (!diagnosticMode) setAsideResultForCompare();
     setPromptPreview("");
     setOverallProgress(0);
     setWorkingStage(renderPreset === "draft" ? "Preparing quick draft" : "Checking references");
     let transportFilesForReport: File[] | null = null;
+    // Set immediately before the fetch, as in finalizeDraft: a pre-flight
+    // error lands no failure receipt, and a failure after a billed reply
+    // keeps the cost that reply reported.
+    let sent = false;
+    let renderResponse: GenerateResponse | undefined;
+    // Each kind of render learns its own typical duration: a quick draft is
+    // always low quality, and the isolation test (a deliberately minimal
+    // request, run at low quality) keys by its reference count so it never
+    // skews the studio or draft figures.
+    renderClock.start(
+      diagnosticMode
+        ? renderClockKey("generator", `isolation-${diagnosticCount}`, "low")
+        : renderPreset === "draft"
+          ? renderClockKey("generator", "draft", "low")
+          : renderClockKey("generator", "studio", quality),
+    );
+    // renderClock.startedAt is React state, still stale inside this closure;
+    // the failure receipt measures from this local copy of the start instead.
+    const renderStartedAt = Date.now();
+    const receiptKind = renderPreset === "draft" ? "draft" : "studio";
 
     try {
       // The isolation test deliberately sends a bare minimum request, and the
@@ -1254,7 +1489,7 @@ export default function Home() {
       const sendLayoutMaster = Boolean(layoutMaster) && !diagnosticMode;
       const renderPayload = (payload: CollageRequestInput): CollageRequestInput => ({
         ...payload,
-        ...(renderPreset === "draft" ? { quality: "low" as const, outputResolution: "standard" as const } : {}),
+        ...(renderPreset === "draft" ? QUICK_DRAFT_OVERRIDES : {}),
         ...(sendLayoutMaster ? {} : { layoutReference: undefined, layoutReferenceMode: undefined }),
         renderKind: renderPreset === "draft" ? "draft" : "studio",
       });
@@ -1284,20 +1519,27 @@ export default function Home() {
       }
       for (const file of transportFiles) form.append("image[]", file, file.name);
       setWorkingStage("Composing collage");
+      sent = true;
       const response = await fetch(diagnosticMode ? `/api/generate?diagnostic=isolation&count=${diagnosticCount}` : "/api/generate", {
         method: "POST",
         signal: controller.signal,
         body: form,
       }).then((value) => readApiResponse<GenerateResponse>(value));
+      renderResponse = response;
 
       if (diagnosticMode && response.diagnosticComplete) {
+        renderClock.finish();
         setDiagnostics(response.diagnostics ?? null);
         if (response.imageBase64) {
+          // Shown on its own (no comparison, no receipt); the board render it
+          // displaces stays the previous image for the next real render.
+          setLastReceipt(null);
           commitResult({
             dataUrl: base64ImageToObjectUrl(response.imageBase64, response.mimeType || "image/png"),
             filename: response.filename || "isolation-test.png",
             kind: "studio",
             libraryVisible: false,
+            diagnostic: true,
           });
         }
         const resultText = (response.isolationResults ?? [])
@@ -1316,13 +1558,39 @@ export default function Home() {
         kind: renderPreset === "draft" ? "draft" : "studio",
         jobId: response.jobId,
         libraryVisible: response.libraryVisible ?? false,
+        // An isolation reply without diagnosticComplete still lands here; it
+        // stays a diagnostic image (never compared, never the previous one).
+        diagnostic: diagnosticMode,
       });
+      // Success: record before saveDraft below, which is bookkeeping, not render.
+      const renderElapsedMs = renderClock.finish();
+      // Teach the studio / quick draft estimate what this render really cost,
+      // counting every image that went up (the layout master included).
+      const renderCostBasis = collageRenderCostBasis(payload, transportFiles.length + (sendLayoutMaster ? 1 : 0));
+      recordUsageCalibration(renderCostBasis.size, renderCostBasis.quality, response.usage, renderCostBasis.inputImages);
+      setCostCalibrationRevision((revision) => revision + 1);
       setPromptPreview(response.prompt || "");
       // Start the final-render switch on the shape the approved draft was
       // actually composed in, so finalizing a portrait draft doesn't silently
       // re-crop it to landscape.
       if (renderPreset === "draft") setFinalFormat(resolvedOrientation(payload));
-      setPanelText(`${renderPreset === "draft" ? "Draft ready. Review the composition, then render the final below." : response.summary || "Collage generated."}${response.notice ? `\n\n${response.notice}` : ""}`);
+      // The isolation test is a diagnostic, not a board render: no receipt,
+      // and the board render's receipt does not stay under its image.
+      if (diagnosticMode) setLastReceipt(null);
+      const receiptMessage = diagnosticMode
+        ? ""
+        : landReceipt({
+            kind: receiptKind,
+            quality: renderCostBasis.quality,
+            elapsedMs: renderElapsedMs,
+            references: renderCostBasis.inputImages,
+            costUsd: response.costUsd,
+          });
+      setPanelText(joinLogSentences([
+        renderPreset === "draft" ? "Draft ready. Review the composition, then render the final below." : response.summary || "Collage generated.",
+        receiptMessage,
+        response.notice,
+      ]));
       setDiagnostics(response.diagnostics ?? null);
       await saveDraft(false);
     } catch (error) {
@@ -1370,9 +1638,25 @@ export default function Home() {
             }],
           });
         }
-        setPanelText(`${diagnosticMode ? "Isolation test" : "Generation"} failed: ${error instanceof Error ? error.message : "Unknown error."}`);
+        // Only a request that left the browser gets a failure receipt.
+        const failureCost = renderResponse?.costUsd;
+        const failureMessage = diagnosticMode || !sent
+          ? ""
+          : landReceipt({
+              kind: receiptKind,
+              quality: renderPreset === "draft" ? QUICK_DRAFT_OVERRIDES.quality : quality,
+              elapsedMs: Date.now() - renderStartedAt,
+              failed: true,
+              ...(typeof failureCost === "number" && Number.isFinite(failureCost) ? { costUsd: failureCost } : {}),
+            });
+        setPanelText(joinLogSentences([
+          `${diagnosticMode ? "Isolation test" : "Generation"} failed: ${error instanceof Error ? error.message : "Unknown error."}`,
+          failureMessage,
+        ]));
       }
     } finally {
+      // Cancel or failure: stop without recording (a no-op after finish()).
+      renderClock.stop();
       setIsWorking(false);
       setWorkingStage("");
       abortRef.current = null;
@@ -1382,6 +1666,18 @@ export default function Home() {
   function cancelWork() {
     abortRef.current?.abort();
   }
+
+  // A landed result over a previous one arrives as a compare split
+  // (CompareStage) instead of the dither reveal. An isolation-test image is
+  // a diagnostic and is never compared.
+  const showCompare = Boolean(result && previousResultUrl && !result.diagnostic);
+  // finish() ends the clock before post-render bookkeeping (draft save,
+  // job-list refresh); until isWorking clears, the readouts hold that
+  // render's final time, still, instead of dropping to a bare WORKING.
+  const heldRun = isWorking && renderClock.startedAt === null ? renderClock.finished : null;
+  const clockStartedAt = renderClock.startedAt ?? heldRun?.startedAt ?? null;
+  const clockTypicalMs = renderClock.startedAt !== null ? renderClock.typicalMs : heldRun?.typicalMs ?? null;
+  const clockFrozenMs = heldRun?.elapsedMs;
 
   return (
     <main className="app-shell generator-shell">
@@ -1561,7 +1857,25 @@ export default function Home() {
                 </div>
               </div>
             ) : (
-              <label className="layout-master-drop">
+              <label
+                className="layout-master-drop"
+                // Its file input is display: none, so a dropped file never
+                // reached it; the page now refuses stray file drops
+                // (SlotDrop.tsx), so this box claims its own and passes the
+                // file to the same chooser the picker uses. Like the cards,
+                // it takes only files from outside the page, never an image
+                // dragged off the page itself.
+                onDragOver={(event) => {
+                  if (!acceptsFileDrag(event.dataTransfer)) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "copy";
+                }}
+                onDrop={(event) => {
+                  if (!acceptsFileDrag(event.dataTransfer)) return;
+                  event.preventDefault();
+                  chooseLayoutMaster(event.dataTransfer.files[0]);
+                }}
+              >
                 <span>Upload a previous collage</span>
                 <small>Its layout and organization become the sole source of truth for the next render.</small>
                 <input
@@ -1627,7 +1941,19 @@ export default function Home() {
 
           <div ref={itemsListRef} className="items-list">
             {items.map((item, index) => (
-              <article className="material-item" key={item.uiKey}>
+              <article
+                className={`material-item ${slotDropClassName({
+                  armed: slotDrop.armed && canAccept,
+                  over: canAccept && slotDrop.overKey === item.uiKey,
+                })}`}
+                key={item.uiKey}
+                {...slotDrop.targetProps(item.uiKey, {
+                  onFiles: (files) => {
+                    markDeveloping(files);
+                    addReferences(item.uiKey, files);
+                  },
+                })}
+              >
                 <div className="item-row-head">
                   <div className="item-title-group">
                     <span className="item-number">{String(index + 1).padStart(2, "0")}</span>
@@ -1654,7 +1980,11 @@ export default function Home() {
                         <figure className="reference-tile" key={reference.uiKey}>
                           <div className="reference-image-wrap">
                             <img
-                              className={`mc-print-in ${printInClass(referencePrintLater, reference.uiKey)}`}
+                              className={developClassName(
+                                reference.file,
+                                `mc-print-in ${printInClass(referencePrintLater, reference.uiKey)}`,
+                              )}
+                              {...developHandlers(reference.file)}
                               data-print-id={reference.uiKey}
                               src={reference.preview}
                               alt={`${item.id || item.role} reference ${referenceIndex + 1}`}
@@ -1697,24 +2027,24 @@ export default function Home() {
                   </div>
                 )}
 
-                <div
-                  className="reference-dropzone"
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    addReferences(item.uiKey, event.dataTransfer.files);
-                  }}
-                >
+                {/* The whole card (article above) takes a dropped file; this box
+                    keeps only the click / keyboard picker, so a drop is handled once. */}
+                <div className="reference-dropzone">
                   <label>
                     <input
                       type="file"
                       accept="image/png,image/jpeg,image/webp"
                       onChange={(event) => {
+                        markDeveloping(Array.from(event.target.files ?? []));
                         addReferences(item.uiKey, event.target.files);
                         event.currentTarget.value = "";
                       }}
                     />
-                    <span>{item.references.length ? "Add another view" : "Upload primary image"}</span>
+                    <span>
+                      {canAccept && slotDrop.overKey === item.uiKey
+                        ? dropLabel(index + 1)
+                        : item.references.length ? "Add another view" : "Upload primary image"}
+                    </span>
                   </label>
                   <span>Drop a photo here / original preserved</span>
                 </div>
@@ -1818,12 +2148,27 @@ export default function Home() {
               </div>
               <span className={isWorking ? "status-pill working" : result ? "status-pill ready" : "status-pill"}>
                 {isWorking && <WorkingField variant="pill" />}
-                {isWorking ? "Working" : result ? "Complete" : "Ready"}
+                {isWorking ? (
+                  // One inline span so the space before the time survives the
+                  // pill's inline-flex layout.
+                  <span>
+                    Working
+                    {clockStartedAt !== null ? (
+                      <>
+                        {" "}
+                        <RenderClockTime startedAt={clockStartedAt} frozenMs={clockFrozenMs} />
+                      </>
+                    ) : null}
+                  </span>
+                ) : result ? "Complete" : "Ready"}
               </span>
             </div>
 
             <div
-              className={`result-stage ${result ? "has-result" : ""}${result && !isWorking && liftedFor === result.dataUrl ? " is-lifted" : ""}`}
+              // The lifted state is still recorded while CompareStage shows,
+              // but its sweep class is withheld: the wipe is that arrival's
+              // motion, and the opaque compare frame would hide the sweep.
+              className={`result-stage ${result ? "has-result" : ""}${result && !isWorking && !showCompare && liftedFor === result.dataUrl ? " is-lifted" : ""}`}
               style={result ? { aspectRatio: `${previewWidth} / ${previewHeight}` } : undefined}
             >
               {isWorking ? (
@@ -1832,6 +2177,20 @@ export default function Home() {
                   style={{ height: "100%" }}
                   src={result?.dataUrl ?? "/sample-collage.png"}
                   alt="Rendering the collage"
+                />
+              ) : result && previousResultUrl && showCompare ? (
+                <CompareStage
+                  previous={{ src: previousResultUrl, alt: "Previous material collage" }}
+                  current={{ src: result.dataUrl, alt: "Generated material collage" }}
+                  arrivalKey={result.dataUrl}
+                  // Wipes in once per result; re-mounted after a prompt review
+                  // or a cancelled / failed Final it is shown settled.
+                  playArrival={compareSettledFor !== result.dataUrl}
+                  onSettled={() => {
+                    if (sweptResultRef.current === result.dataUrl) return;
+                    sweptResultRef.current = result.dataUrl;
+                    setLiftedFor(result.dataUrl);
+                  }}
                 />
               ) : result ? (
                 <DitherReveal
@@ -1850,13 +2209,33 @@ export default function Home() {
               ) : (
                 <img src="/sample-collage.png" alt="Sample material collage" />
               )}
+              {clockStartedAt !== null && (
+                <RenderClockRule startedAt={clockStartedAt} typicalMs={clockTypicalMs} frozenMs={clockFrozenMs} />
+              )}
+              {/* Bottom edge only: the clock rule (top edge) shows only while a
+                  render runs, when no receipt is set, and CompareStage's chips
+                  sit in the top corners. */}
+              {lastReceipt && !isWorking && (
+                <ReceiptStamp
+                  key={lastReceipt.id}
+                  variant="stage"
+                  receipt={lastReceipt.input}
+                  playArrival={settledReceiptId !== lastReceipt.id}
+                />
+              )}
             </div>
 
             {isWorking && (
-              <div className="work-progress" aria-live="polite">
+              // Only the stage label is a live region: the clock beside it
+              // ticks every second and must not be announced each time.
+              <div className="work-progress">
                 <div>
-                  <span>{workingStage}</span>
-                  <strong>{overallProgress > 0 && overallProgress < 100 ? `${overallProgress}%` : ""}</strong>
+                  <span aria-live="polite">{workingStage}</span>
+                  {clockStartedAt !== null ? (
+                    <RenderClock startedAt={clockStartedAt} typicalMs={clockTypicalMs} frozenMs={clockFrozenMs} />
+                  ) : (
+                    <strong>{overallProgress > 0 && overallProgress < 100 ? `${overallProgress}%` : ""}</strong>
+                  )}
                 </div>
                 <div className="progress-track">
                   <span style={{ width: `${overallProgress}%` }}>
@@ -1870,14 +2249,51 @@ export default function Home() {
               {isWorking ? (
                 <button type="button" className="cancel-button" onClick={cancelWork}>Cancel</button>
               ) : (
-                <button type="button" className="primary-button" onClick={() => void generate(false)} disabled={!hasFiles} title="Renders immediately using the selected quality, resolution, and styling settings.">
-                  Generate Collage
-                </button>
+                // The live estimate (CostEstimate.tsx) shows only once there
+                // is a reference to price; until then the button is disabled
+                // and carries no figure.
+                <CostStack span="full">
+                  <button
+                    type="button"
+                    className={`primary-button ${costHostClassName}`}
+                    onClick={() => void generate(false)}
+                    disabled={!hasFiles}
+                    title="Renders immediately using the selected quality, resolution, and styling settings."
+                    aria-label={hasFiles ? `Generate Collage, ${describeCostEstimate(renderCostEstimates.studio.breakdown?.totalUsd ?? null)}` : undefined}
+                  >
+                    Generate Collage
+                    {hasFiles && <CostFigure usd={renderCostEstimates.studio.breakdown?.totalUsd ?? null} />}
+                  </button>
+                  {hasFiles && renderCostEstimates.studio.breakdown && (
+                    <CostSplit
+                      references={totalReferences}
+                      extra={layoutMaster ? "layout" : undefined}
+                      breakdown={renderCostEstimates.studio.breakdown}
+                    />
+                  )}
+                </CostStack>
               )}
-              <button type="button" className="draft-button" onClick={() => void generate(false, 1, "draft")} disabled={isWorking || !hasFiles} title="Creates a low-cost preview for composition and placement.">
-                Quick Draft
-              </button>
-              <button type="button" className="secondary-button" onClick={dryRun} disabled={isWorking}>
+              <CostStack>
+                <button
+                  type="button"
+                  className={`draft-button ${costHostClassName}`}
+                  onClick={() => void generate(false, 1, "draft")}
+                  disabled={isWorking || !hasFiles}
+                  title="Creates a low-cost preview for composition and placement."
+                  aria-label={hasFiles ? `Quick Draft, ${describeCostEstimate(renderCostEstimates.draft.breakdown?.totalUsd ?? null)}` : undefined}
+                >
+                  Quick Draft
+                  {hasFiles && <CostFigure usd={renderCostEstimates.draft.breakdown?.totalUsd ?? null} />}
+                </button>
+                {hasFiles && renderCostEstimates.draft.breakdown && (
+                  <CostSplit
+                    references={totalReferences}
+                    extra={layoutMaster ? "layout" : undefined}
+                    breakdown={renderCostEstimates.draft.breakdown}
+                  />
+                )}
+              </CostStack>
+              <button type="button" className={`secondary-button ${costRowNeighbourClassName}`} onClick={dryRun} disabled={isWorking}>
                 Review prompt
               </button>
               {result && (
@@ -1915,9 +2331,21 @@ export default function Home() {
                   })}
                 </div>
                 <div className="final-actions">
-                  <button type="button" className="final-now-button" onClick={() => void finalizeDraft()} disabled={isWorking} title="Starts the selected-quality final render immediately; usage-based cost is shown after completion.">
+                  <button
+                    type="button"
+                    className={`final-now-button ${costHostClassName}`}
+                    onClick={() => void finalizeDraft()}
+                    disabled={isWorking}
+                    title="Starts the selected-quality final render immediately; usage-based cost is shown after completion."
+                    aria-label={hasFiles ? `Final Render Now, ${describeCostEstimate(renderCostEstimates.final.breakdown?.totalUsd ?? null)}` : undefined}
+                  >
                     Final Render Now
-                    <small>Usage-based cost shown after completion + references</small>
+                    <small>
+                      {hasFiles && renderCostEstimates.final.breakdown
+                        ? formatCostSplit(totalReferences, renderCostEstimates.final.breakdown, { extra: "draft" })
+                        : "Usage-based cost shown after completion + references"}
+                    </small>
+                    {hasFiles && <CostFigure usd={renderCostEstimates.final.breakdown?.totalUsd ?? null} placement="inset-tight" />}
                   </button>
                 </div>
               </section>
@@ -1975,11 +2403,27 @@ export default function Home() {
                         <a href={`/api/jobs/${job.id}/output`} download={job.filename}>Open {(job.outputFormat || "png").toUpperCase()}</a>
                       )}
                       <small>
+                        {/* The receipt already carries the quality, so the
+                            separate quality suffix is not repeated after it.
+                            The four-decimal cost stays available as its title. */}
+                        <ReceiptStamp
+                          variant="inline"
+                          receipt={{
+                            kind: job.renderKind,
+                            quality: job.quality,
+                            costUsd: job.costUsd,
+                            failed: job.status === "failed",
+                          }}
+                          title={
+                            typeof job.costUsd === "number" && Number.isFinite(job.costUsd)
+                              ? `Cost $${job.costUsd.toFixed(4)} from completed usage`
+                              : undefined
+                          }
+                        />
                         {typeof job.costUsd === "number" && Number.isFinite(job.costUsd)
-                          ? `Cost $${job.costUsd.toFixed(4)} from completed usage`
-                          : "Generation cost unavailable"}
+                          ? ""
+                          : " · Generation cost unavailable"}
                         {job.model ? ` · ${job.model}` : ""}
-                        {job.quality ? ` · ${job.quality}` : ""}
                         {job.background ? ` · ${job.background}` : ""}
                       </small>
                       {job.error && <p>{job.error}</p>}

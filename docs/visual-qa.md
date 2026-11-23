@@ -993,3 +993,108 @@ The 24-state matrix covers progress 0.00, 0.20, 0.40, 0.60, 0.80 and 1.00 at 144
 The final build passed all 1,013 tests. Lint returned zero errors and ten existing warnings, and the TypeScript gate stayed at its seven-diagnostic baseline. The browser matrix reported zero runtime errors. Moving the fan labels to the exposed tips and widening its spread kept all five labels readable at each viewport.
 
 The owner approved publishing the landing with the menu-colored dither replacing the initial solid vermilion. Chrome verified visible chromatic pixels on the tilted side faces at all four widths, pixel-identical resting artwork at desktop and mobile, keyboard and touch activation, and the stationary reduced-motion response. The menu and mark share presets in `app/components/ui/menu-dither.ts`. The static fallback uses `menu-dither-still.webp`, a lossless sample of the same menu shader.
+
+# Visual QA - Render clock, live cost, receipt stamp, slot drop, compare split
+
+Date: 2026-11-11
+Status: **PASSED WITH GAPS - LOCAL ONLY** (not deployed, not committed; the
+in-app Browser pane against `npm run dev` on port 3000, with every render
+answered by a stubbed `fetch` - no OpenAI key is present in this worktree and
+no paid call was made)
+
+## Scope
+
+Five elements added to the Generator and Review Boards, with one of them also
+in the Workbench:
+
+- **Render clock.** Elapsed `m:ss` beside the working label, `usually m:ss`
+  once this browser has a median for the same surface, kind and quality, and
+  a 1px rule along the stage's top edge. Generator pill and progress block,
+  Review Boards busy button and stage, Workbench Running badge.
+- **Live cost.** A pre-render estimate inside Generate, Quick Draft and Final
+  Render Now, and inside Render A/B/C, from the Workbench's estimator (now
+  `app/lib/image-cost.ts`), with an input/output split line.
+- **Receipt stamp.** `DRAFT · LOW · 0:05 · 9 REFS · $0.07` on the stage's
+  bottom edge when a render lands, and inline in Generator history rows and
+  Review Board render cells.
+- **Slot arm-and-develop** (Generator only). The whole reference card is the
+  drop target, with armed and over states, and a one-time dissolve on a newly
+  added photo.
+- **Compare split.** A second render wipes in over the first and leaves a
+  draggable divider backed by a native range input.
+
+## Checks
+
+| Check | Result |
+| --- | --- |
+| Typecheck gate (`node scripts/typecheck-baseline.mjs`) | 7 errors, baseline allows 7 |
+| Lint | 0 errors, 11 warnings (none from this change) |
+| Full suite (`npm run test:transitions`) | 1,066 passed, 0 failed |
+| Clock ticks from a start timestamp, `role="timer"`, not in a live region | Passed (Generator and Review Boards) |
+| `usually` note and rule appear only once a typical time exists | Passed |
+| Estimate on all paid buttons, in the accessible name, moves with references | Passed |
+| Receipt on landing; announced once in the polite log | Passed |
+| Failure line only for a request that was sent | Passed after fix |
+| Cancel leaves no receipt | Passed |
+| Whole-card drop fills only that card; armed on all cards; label on the hovered card | Passed (synthetic drag events) |
+| File dropped outside a card is refused, not opened by the browser | Passed |
+| Text drag does not arm the cards | Passed |
+| Image dragged off the page (a tray thumbnail, the stage render) does not arm the cards, add a copy, or reach the layout box | Passed after fix (synthetic events, plus a real mouse drag in headless Chrome; see below) |
+| Second render shows the split; range input drives the clip and divider | Passed |
+| "Review prompt" after a compare does not replay the wipe or the receipt | Passed after fix |
+| No horizontal overflow, no label/figure overlap at 1440, 1280, 1024, 390 | Passed after fix (Final button at 390) |
+| New text at or under 14px, black or `#657069`, no radius | Passed after fix (Final button figure was 16px) |
+| Review Boards stage receipt, cell receipts, compare, polite status | Passed (blank local project, stubbed render injected into the renders list) |
+
+## Discrepancies found and fixed
+
+- A validation error raised before the request was sent stamped
+  `FAILED · LOW · 0:00` on the stage. A failure receipt now needs a sent
+  request, in both the draft/studio and the final path.
+- "Review prompt", a cancelled Final and a failed Final replayed the compare
+  wipe and the receipt's arrival for a render already on screen.
+- A billed response that came back without an image lost its cost in the
+  failure line.
+- The isolation test's image became the comparison's "previous" image.
+- The Final button's split line ran into its label, counted the approved
+  draft as a reference (`11 references` against a `10/16` counter), ran under
+  the figure at 390px, and its figure inherited the button's 16px.
+- The activity log joined two sentences without a full stop.
+- The pill lost its time between a render finishing and its draft saving.
+- The compare slider announced a bare number; it now carries
+  `aria-valuetext`.
+- Review Boards announced a failure twice, and stamped `FAILED` for an OK
+  response whose body could not be read.
+- Chrome puts `Files` on a drag of any `<img>` on the page (headless Chrome
+  reported `text/uri-list,text/html,Files` and one file at `dragstart` for a
+  tray thumbnail), so dragging a thumbnail or the stage render would have
+  armed every card and dropped a copy of itself into the card under the
+  pointer. Inferred from those types, not seen end to end. Found after the
+  merge with main and fixed in the same PR: a drag that starts on the page
+  (it fires `dragstart` in this document; one from outside never does) is
+  now ignored by the cards, the stray-drop guard and the layout-reference
+  box. A real mouse drag in headless Chrome showed that only
+  `pointercancel` reaches the page after `dragstart`, so the flag, which
+  `pointermove` and `pointerdown` clear, holds for the whole drag: a file
+  drag probed mid-drag armed no card, and one after the drag armed all nine.
+  A full drop carrying the image's own file could not be replayed (the
+  replay drops the file).
+
+## Remaining known deviations
+
+- No real render was made. The wait, landing, failure and second-render
+  states were exercised only against a stubbed response.
+- `prefers-reduced-motion` was not emulated in the browser for these
+  elements; the reduced-motion branches were checked by reading the code.
+- No frame capture was taken for the 620ms dissolve or the 700ms wipe, so the
+  "no worse than the landing morph" comparison is not made.
+- The Workbench Running badge's clock was not exercised in the browser.
+- The pre-render estimate reads high. The shared estimator prices reference
+  images at the output rate by design (and the Workbench tests assert it),
+  so after calibration the input share is about 3.7 times the real cost; the
+  receipt then shows a lower real figure. Left as it was.
+- The clock's rule sits directly under the stage's 1px top border, so it can
+  read as that border thickening from the left.
+- The `0/16` counts update but do not animate.
+- The slot element is not in Review Boards: `SlotPhotos.tsx` has no
+  drag-and-drop to extend.

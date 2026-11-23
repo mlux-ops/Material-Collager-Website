@@ -1,0 +1,80 @@
+/* Receipt stamp (ReceiptStamp.tsx). House values only: 8.4px/500 uppercase
+   label type, letter-spacing 0.1575px, black text, 1px rgba(0,0,0,0.2)
+   border, no radius, no accent colour. The failure line uses the same strip
+   and the same black text.
+
+   No animation is defined here: the arrival is DitherTextIn (text) and
+   CountUp (dollars), both of which render their final state at once under
+   reduced motion. */
+
+/* Pinned inside the bottom edge of the positioned result stage. */
+.stage {
+  background: #fff;
+  border-top: 1px solid rgba(0, 0, 0, 0.2);
+  bottom: 0;
+  box-sizing: border-box;
+  color: #000;
+  font-size: 8.4px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  left: 0;
+  letter-spacing: 0.1575px;
+  line-height: 11px;
+  padding: 8px 9px;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  text-transform: uppercase;
+  z-index: 2;
+}
+
+/* One row: the dithered lead text, the separator, the counting dollars. All
+   three share DitherTextIn's 11px block box so nothing shifts at hand-off. */
+.line {
+  align-items: center;
+  display: flex;
+  height: 11px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* The weight (500) is passed to DitherTextIn as a prop, so its canvas raster
+   and its settled text agree and nothing jumps at hand-off. */
+.dither {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.separator {
+  flex: none;
+  line-height: 11px;
+  white-space: pre;
+}
+
+.cost {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  line-height: 11px;
+  white-space: nowrap;
+}
+
+/* History rows and render cells: the bare line in the surrounding font. */
+.inline {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.visuallyHidden {
+  border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}

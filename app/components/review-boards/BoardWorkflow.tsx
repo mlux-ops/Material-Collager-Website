@@ -16,7 +16,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createBoardSaveQueue } from "@/app/lib/board-save-queue";
 import { DitherReveal } from "../DitherReveal";
+import { CompareStage } from "../CompareStage";
+import { RenderClockNote, RenderClockRule, RenderClockTime, useRenderClock } from "../RenderClock";
+import { CostFigure } from "../CostEstimate";
+import { ReceiptStamp } from "../ReceiptStamp";
+import { receiptAnnouncement } from "@/app/lib/render-receipt";
+import type { RenderReceiptInput } from "@/app/lib/render-receipt";
 import { DEFAULT_VARIANTS } from "@/app/lib/autoboard/variants";
+import { formatElapsed, renderClockKey } from "@/app/lib/render-clock";
+import { collageRenderCostBasis, estimateCollageRenderCost } from "@/app/lib/collage-cost";
+import { describeCostEstimate, formatCostSplit } from "@/app/lib/image-cost";
+import type { CollageType, Quality } from "@/app/lib/collage";
 import styles from "./review-boards.module.css";
 import { SampleBoard } from "./SampleBoard";
 
@@ -76,6 +86,18 @@ export type BuiltBoard = {
   referenceCount: number;
 };
 
+// The receipt on the preview stage (ReceiptStamp variant="stage") for a render
+// that landed -- or failed -- in this session. boardId ties it to the board it
+// was made on (this component is reused when the drawer switches boards);
+// renderId is the landed render's id, null for a failure; key re-mounts the
+// stamp so each new receipt replays its arrival.
+type StageReceipt = {
+  boardId: string;
+  key: string;
+  renderId: string | null;
+  receipt: RenderReceiptInput;
+};
+
 const QUALITIES = ["low", "medium", "high", "xhigh", "max", "auto"];
 const BACKGROUNDS = ["opaque", "transparent"];
 
@@ -100,6 +122,18 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [renderingVariant, setRenderingVariant] = useState<string | null>(null);
+  // Elapsed time of the draft render in flight (app/components/RenderClock.tsx).
+  // renderClock.lastElapsedMs holds the duration of the render that last
+  // finished successfully; renderDraft's finish() also returns it.
+  const renderClock = useRenderClock();
+  const { start: startRenderClock, finish: finishRenderClock, stop: stopRenderClock } = renderClock;
+  // Null until a render lands or fails in this session; cleared when the next
+  // render starts. A saved render merely on display gets no stage receipt.
+  const [stageReceipt, setStageReceipt] = useState<StageReceipt | null>(null);
+  // The receipt's sentence for screen readers, in the polite status element
+  // below. Emptied when a render starts so a repeat sentence is announced again.
+  const [receiptNotice, setReceiptNotice] = useState("");
+  const failedReceiptCountRef = useRef(0);
   const onSavedRef = useRef(onSaved);
   useEffect(() => {
     onSavedRef.current = onSaved;
@@ -160,15 +194,76 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
   const isStale = (render: BoardRender) =>
     render.selectionHash !== board.selectionHash || render.renderOptionsHash !== board.renderOptionsHash;
 
-  // The preview stage shows one image: whichever render is newest, or (before
-  // any render exists) the board's own hero reference so the stage is never
-  // simply blank.
+  // The preview stage shows whichever render is newest (split against the one
+  // before it once there are two), or (before any render exists) the board's
+  // own hero reference so the stage is never simply blank.
   const latestRender = renders.length ? renders.reduce((a, b) => (a.createdAt >= b.createdAt ? a : b)) : null;
   const heroImage = board.items[0]?.images[0];
+  // The render the latest one replaced, for the compare split: the newest of
+  // the rest. Null with fewer than two renders.
+  const previousRender = latestRender
+    ? renders
+        .filter((render) => render.id !== latestRender.id)
+        .reduce<BoardRender | null>((a, b) => (a === null || b.createdAt > a.createdAt ? b : a), null)
+    : null;
+  // The stage receipt belongs to this board, and a landed one only while the
+  // render it describes is the one on the stage (not after it was deleted).
+  const ownStageReceipt = stageReceipt !== null && stageReceipt.boardId === board.id ? stageReceipt : null;
+  const visibleStageReceipt =
+    ownStageReceipt !== null && (ownStageReceipt.renderId === null || ownStageReceipt.renderId === latestRender?.id)
+      ? ownStageReceipt
+      : null;
+  // The compare wipe plays only for a render that landed in this session; a
+  // board opened on saved renders shows the comparison at rest.
+  const latestLandedHere =
+    latestRender !== null && ownStageReceipt !== null && ownStageReceipt.renderId === latestRender.id;
+
+  // Live estimate for one Render A/B/C (app/lib/collage-cost.ts). Every board
+  // render is a draft, and renderBoardDraft (app/lib/autoboard-renders.ts)
+  // sends it through boardPayload with orientation "default" and
+  // outputResolution "standard" -- mirrored here, since that server module
+  // cannot be imported into the browser. renderOptions.quality is already the
+  // effective tier (resolveRenderOptions), and every image of every item goes
+  // up, which is what referenceCount counts. breakdown is null for
+  // xhigh/max/auto, shown as "usage-based".
+  const draftCost = useMemo(() => {
+    const basis = collageRenderCostBasis(
+      {
+        collageType: board.collageType as CollageType,
+        orientation: "default",
+        quality: board.renderOptions.quality as Quality,
+        outputResolution: "standard",
+        renderKind: "draft",
+        items: [],
+      },
+      board.referenceCount,
+    );
+    return { basis, breakdown: estimateCollageRenderCost(basis) };
+  }, [board.collageType, board.renderOptions.quality, board.referenceCount]);
+  const draftCostUsd = draftCost.breakdown?.totalUsd ?? null;
 
   const renderDraft = useCallback(async (variantKey: string) => {
     setRenderingVariant(variantKey);
     setError("");
+    setStageReceipt(null);
+    setReceiptNotice("");
+    const boardId = board.id;
+    const references = board.referenceCount;
+    // renderOptions.quality is already the effective one (the board's own
+    // choice folded over the draft stage default by resolveRenderOptions).
+    startRenderClock(renderClockKey("review", "draft", board.renderOptions.quality));
+    // The clock's own startedAt is state, stale inside this closure; a failed
+    // receipt's elapsed time is measured from here instead.
+    const startedAt = Date.now();
+    // sent: the render request went out (the save succeeded). landed: the
+    // render is stored. Only a sent-but-not-landed render gets a FAILED
+    // receipt -- a failed save sent nothing, so it bills nothing.
+    let sent = false;
+    let landed = false;
+    // An OK response whose body could not be read: the render may well be
+    // stored and billed, so it is not stamped FAILED (and no cost is
+    // guessed); the parent still reloads so a stored render appears.
+    let unreadableOk = false;
     try {
       // The render route builds the prompt from what D1 holds, so an unsaved
       // note or instruction would be missing from a render the reviewer pays
@@ -178,19 +273,67 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
       } catch (cause) {
         throw new Error(`Not rendered: your latest changes could not be saved (${(cause as Error).message}).`);
       }
+      sent = true;
       const response = await fetch(
         `/api/autoboard/projects/${encodeURIComponent(projectId)}/boards/${encodeURIComponent(board.id)}/renders`,
         { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ variant: variantKey }) },
       );
-      const payload = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      const payload = (await response.json().catch(() => null)) as
+        | { ok?: boolean; error?: string; render?: BoardRender }
+        | null;
+      unreadableOk = response.ok && payload === null;
       if (!response.ok || !payload?.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      landed = true;
+      // The render is stored: record its duration now, before the reload
+      // below, so the list refresh is not counted as render time.
+      const elapsedMs = finishRenderClock();
+      // The stored record as the route returned it. Without one there is
+      // nothing true to stamp, so no receipt rather than a guessed one.
+      const render = payload.render;
+      if (render && typeof render.id === "string") {
+        const receipt: RenderReceiptInput = {
+          kind: render.kind,
+          variant: render.variant,
+          quality: render.quality,
+          costUsd: render.costUsd,
+          elapsedMs,
+          references,
+        };
+        setStageReceipt({ boardId, key: render.id, renderId: render.id, receipt });
+        setReceiptNotice(receiptAnnouncement(receipt));
+      }
       await onSaved();
     } catch (cause) {
       setError((cause as Error).message);
+      if (unreadableOk) {
+        // Refresh so a render that was stored shows up; a failed reload
+        // leaves the error above in place rather than replacing it.
+        await Promise.resolve(onSaved()).catch(() => {});
+      } else if (sent && !landed) {
+        // The role="alert" error above announces the failure; the polite
+        // receipt notice stays empty so it is not announced twice. The
+        // visible FAILED strip still lands on the stage.
+        const receipt: RenderReceiptInput = { failed: true, elapsedMs: Date.now() - startedAt, references };
+        failedReceiptCountRef.current += 1;
+        setStageReceipt({ boardId, key: `failed-${failedReceiptCountRef.current}`, renderId: null, receipt });
+      }
     } finally {
+      // A failed save, a failed render or a thrown fetch: stop without
+      // recording (a no-op once finish() has run).
+      stopRenderClock();
       setRenderingVariant(null);
     }
-  }, [projectId, board.id, onSaved, queue]);
+  }, [
+    projectId,
+    board.id,
+    board.referenceCount,
+    board.renderOptions.quality,
+    onSaved,
+    queue,
+    startRenderClock,
+    finishRenderClock,
+    stopRenderClock,
+  ]);
 
   const setRenderStatus = useCallback(
     async (renderId: string, status: string) => {
@@ -210,6 +353,21 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
     },
     [onSaved],
   );
+
+  // The clicked render button's label while it is busy: "Rendering 0:42",
+  // ticking. Between finish() and the end of the reload that follows it, the
+  // finished time holds still rather than dropping back to a bare label.
+  const renderingLabel = () => {
+    if (renderClock.startedAt !== null) {
+      return (
+        <>
+          Rendering <RenderClockTime startedAt={renderClock.startedAt} />
+        </>
+      );
+    }
+    if (renderClock.lastElapsedMs !== null) return `Rendering ${formatElapsed(renderClock.lastElapsedMs)}`;
+    return "Rendering…";
+  };
 
   return (
     <div className={styles.workflowGrid}>
@@ -340,20 +498,42 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
               alt="Rendering the board"
             />
           ) : latestRender ? (
-            <DitherReveal
-              key={latestRender.id}
-              className={styles.previewDither}
-              style={{ height: "100%" }}
-              src={latestRender.imageUrl}
-              alt={`${board.title} render`}
-              progress={1}
-            />
+            previousRender ? (
+              // Two or more renders: the newest over the one it replaced. The
+              // wipe plays only for a render that landed in this session.
+              <CompareStage
+                previous={{
+                  src: previousRender.imageUrl,
+                  alt: `${board.title} previous render, style ${previousRender.variant}`,
+                }}
+                current={{ src: latestRender.imageUrl, alt: `${board.title} render, style ${latestRender.variant}` }}
+                arrivalKey={latestRender.id}
+                playArrival={latestLandedHere}
+              />
+            ) : (
+              <DitherReveal
+                key={latestRender.id}
+                className={styles.previewDither}
+                style={{ height: "100%" }}
+                src={latestRender.imageUrl}
+                alt={`${board.title} render`}
+                progress={1}
+              />
+            )
           ) : heroImage ? (
             // eslint-disable-next-line @next/next/no-img-element -- see SlotPhotos
             <img className={styles.previewImage} src={heroImage} alt="" />
           ) : (
             <span className={styles.previewEmpty}>No reference photo yet</span>
           )}
+          {renderClock.startedAt !== null ? (
+            <RenderClockRule startedAt={renderClock.startedAt} typicalMs={renderClock.typicalMs} />
+          ) : null}
+          {/* Bottom edge, above the image (z-index 2 in ReceiptStamp.module.css);
+              the compare chips sit in the top corners. */}
+          {visibleStageReceipt ? (
+            <ReceiptStamp key={visibleStageReceipt.key} variant="stage" receipt={visibleStageReceipt.receipt} />
+          ) : null}
         </div>
 
         <SampleBoard board={board} composed={latestRender && !isStale(latestRender) ? latestRender.imageUrl : undefined} />
@@ -366,23 +546,46 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
               own paid render, so a render already in flight disables all
               three (no accidental concurrent spend) — the clicked one reads
               "Rendering…", the other two just go inert. */}
-          {DEFAULT_VARIANTS.map((variant) => (
-            <button
-              key={variant.key}
-              type="button"
-              className={styles.primary}
-              disabled={Boolean(renderingVariant) || !board.referenceCount}
-              onClick={() => void renderDraft(variant.key)}
-              title={`${variant.composition}, ${variant.density} spacing`}
-            >
-              {renderingVariant === variant.key ? "Rendering…" : `Render ${variant.key}`}
-            </button>
-          ))}
+          {DEFAULT_VARIANTS.map((variant) => {
+            const busy = renderingVariant === variant.key;
+            // The figure follows the label in the flow (these buttons size to
+            // their content). The busy button drops it, and its aria-label,
+            // so "Rendering 0:42" is what it shows and what it is called.
+            const showCost = !busy && board.referenceCount > 0;
+            return (
+              <button
+                key={variant.key}
+                type="button"
+                className={styles.primary}
+                disabled={Boolean(renderingVariant) || !board.referenceCount}
+                onClick={() => void renderDraft(variant.key)}
+                title={`${variant.composition}, ${variant.density} spacing`}
+                aria-label={showCost ? `Render ${variant.key}, ${describeCostEstimate(draftCostUsd)}` : undefined}
+              >
+                {busy ? renderingLabel() : `Render ${variant.key}`}
+                {showCost ? <CostFigure usd={draftCostUsd} placement="inline" /> : null}
+              </button>
+            );
+          })}
           {/* Named plainly rather than buried: this is the one control on the
               page that costs money, and a draft's bill is dominated by its
-              reference count, not its quality tier (CLAUDE.md). */}
+              reference count, not its quality tier (CLAUDE.md). Outside a
+              render it carries the estimate's input/output split; while one
+              runs it goes back to the plain count beside the clock's note. */}
           <span className={styles.workflowMeta}>
-            spends on {board.referenceCount} reference{board.referenceCount === 1 ? "" : "s"} per style
+            {renderClock.startedAt === null && draftCost.breakdown && board.referenceCount > 0 ? (
+              formatCostSplit(board.referenceCount, draftCost.breakdown, { perStyle: true })
+            ) : (
+              <>
+                spends on {board.referenceCount} reference{board.referenceCount === 1 ? "" : "s"} per style
+              </>
+            )}
+            {renderClock.startedAt !== null && renderClock.typicalMs !== null ? (
+              <>
+                {" · "}
+                <RenderClockNote startedAt={renderClock.startedAt} typicalMs={renderClock.typicalMs} />
+              </>
+            ) : null}
           </span>
         </div>
 
@@ -415,7 +618,16 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
                   {/* eslint-disable-next-line @next/next/no-img-element -- see SlotPhotos */}
                   <img className={styles.renderImage} src={render.imageUrl} alt="" loading="lazy" />
                   <span className={styles.photoMeta}>
-                    {render.kind} {render.variant} · {render.quality}
+                    <ReceiptStamp
+                      variant="inline"
+                      className={styles.renderReceipt}
+                      receipt={{
+                        kind: render.kind,
+                        variant: render.variant,
+                        quality: render.quality,
+                        costUsd: render.costUsd,
+                      }}
+                    />
                     {isStale(render) ? <span className={styles.photoWarn}> stale</span> : null}
                     {render.status === "picked" ? " · picked" : ""}
                     {render.status === "approved" ? " · approved" : ""}
@@ -444,6 +656,11 @@ export function BoardWorkflow({ projectId, board, renders, onSaved, onRemoveRow 
             {error}
           </p>
         ) : null}
+        {/* Always mounted, so the receipt sentence is announced when it is
+            set; holds no clock readout (those are role="timer"). */}
+        <p className={styles.visuallyHidden} role="status" aria-live="polite">
+          {receiptNotice}
+        </p>
       </div>
     </div>
   );
