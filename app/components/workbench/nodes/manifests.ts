@@ -27,6 +27,7 @@ import { imageMarkupManifest } from "./imageMarkup.manifest.ts";
 import { imageDescriptionManifest } from "./imageDescription.manifest.ts";
 import { libraryPickManifest } from "./libraryPick.manifest.ts";
 import { maskedEditManifest } from "./maskedEdit.manifest.ts";
+import { multiRunManifest } from "./multiRun.manifest.ts";
 import { noteManifest } from "./note.manifest.ts";
 import { patchManifest } from "./patch.manifest.ts";
 import { photoManifest } from "./photo.manifest.ts";
@@ -65,6 +66,7 @@ export const MANIFESTS: Record<NodeKind, NodeManifest> = {
   collageBoard: collageBoardManifest,
   relight: relightManifest,
   variations: variationsManifest,
+  multiRun: multiRunManifest,
   maskedEdit: maskedEditManifest,
   upscaler: upscalerManifest,
   aiAssistant: aiAssistantManifest,

@@ -777,8 +777,10 @@ export async function saveGraph(graphId: string, nodes: WorkbenchNode[], edges: 
 // -- so they're kept as-is once their blob's presence is confirmed). A value
 // whose blob didn't survive is dropped; a run left with no candidates on its
 // primary output port is dropped entirely rather than restored as a "done"
-// node with nothing to show.
-function rehydrateRun(run: NodeRun, restoredUrls: Map<string, string>): NodeRun | null {
+// node with nothing to show. Every other run field rides along unchanged --
+// Multi-Run's `target` included, so a partial run reloads as partial.
+// Exported for tests (Node has no IndexedDB to drive loadGraph).
+export function rehydrateRun(run: NodeRun, restoredUrls: Map<string, string>): NodeRun | null {
   const values = run.values.map((candidates) =>
     candidates
       .map((value): NodeOutputValue | null => {

@@ -33,6 +33,18 @@ export function activeRunOf(node: WorkbenchNode): NodeRun | undefined {
   return node.data.runs[node.data.activeRun] ?? node.data.runs[0];
 }
 
+// Whether a run holds everything it was meant to. Only Multi-Run sets
+// `target`; a run without one is complete by definition, so every other node
+// is unaffected. A partial Multi-Run (a stopped, failed or aborted burst that
+// kept the images it paid for) is NOT a cache hit even when its signature
+// matches: the executor must re-execute it so the node renders only the
+// remainder. The executor's cache-hit checks and the "Cached — no charge"
+// badge all go through this one predicate so they can never disagree.
+export function runIsComplete(run: NodeRun): boolean {
+  if (run.target === undefined) return true;
+  return (run.values[0]?.length ?? 0) >= run.target;
+}
+
 export type SignatureContext = {
   incoming: Map<string, Edge[]>; // keyed by target node id
   // Fresh node lookup (the store's current state): signatures computed late

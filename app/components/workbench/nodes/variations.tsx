@@ -8,7 +8,7 @@ import { putBlob } from "../blob-cache";
 import { useWorkbenchStore } from "../store";
 import { useModalDismiss } from "../useModalDismiss";
 import styles from "../workbench.module.css";
-import type { ExecuteContext, NodeOutputValue } from "../types";
+import type { ExecuteContext, NodeOutputValue, WorkbenchNodeData } from "../types";
 import { buildGenerationPayload, decodeBase64Image } from "./generation";
 import { activeVariationOutputIds } from "./variations.manifest";
 import {
@@ -32,15 +32,15 @@ function candidateIndex(cacheKey: string): number {
   return Number(parts[parts.length - 1]) || 0;
 }
 
-export const Component = memo(function VariationsNode({ id, data }: WorkbenchNodeProps) {
-  const updateParams = useWorkbenchStore((state) => state.updateParams);
-  const updatePresentationParams = useWorkbenchStore((state) => state.updatePresentationParams);
+// Candidate picking over a run whose primary port holds several images,
+// shared by Variations and Multi-Run. The value propagated downstream is
+// always whatever sits at values[0][0] (the executor's inputValues() always
+// resolves candidates[0]); selecting a different candidate reorders it there
+// under a fresh runId, so the pick propagates and downstream signatures
+// invalidate -- without a new paid run.
+export function useCandidatePicker(id: string, data: WorkbenchNodeData) {
   const applyRun = useWorkbenchStore((state) => state.applyRun);
   const setPinned = useWorkbenchStore((state) => state.setPinned);
-  const inputImages = useConnectedImageCount(id, ["image"]);
-  const [lightboxOpen, setLightboxOpen] = useState(false);
-  const edges = useEdges();
-  const { closing: lightboxClosing, requestClose: requestLightboxClose } = useModalDismiss(() => setLightboxOpen(false));
   const run = data.runs[data.activeRun];
   const candidates = useMemo(() => run?.values[0] ?? [], [run]);
   const orderedCandidates = useMemo(
@@ -56,15 +56,6 @@ export const Component = memo(function VariationsNode({ id, data }: WorkbenchNod
   // (not always index 0) propagates and downstream signatures invalidate.
   const activeValue = candidates[0];
   const selectedCacheKey = activeValue && activeValue.kind === "image" ? activeValue.cacheKey : undefined;
-  const visibleOutputIds = useMemo(() => {
-    const ids = new Set(activeVariationOutputIds(data.params));
-    // Never remove a handle that already owns a wire. Turning the toggle off
-    // hides unused handles but keeps existing branches connected and valid.
-    for (const edge of edges) {
-      if (edge.source === id && edge.sourceHandle?.startsWith("variation-")) ids.add(edge.sourceHandle);
-    }
-    return [...ids];
-  }, [data.params, edges, id]);
 
   function selectCandidate(cacheKey: string) {
     if (!run || cacheKey === selectedCacheKey) return;
@@ -83,7 +74,11 @@ export const Component = memo(function VariationsNode({ id, data }: WorkbenchNod
     const pinnedElsewhereRunId =
       !pinWasOnThisRun && pinnedIndex !== undefined && pinnedIndex !== null ? data.runs[pinnedIndex]?.runId : undefined;
 
+    // Spread the run first so fields beyond the basic shape survive the
+    // reorder -- Multi-Run's `target`, without which picking a candidate in a
+    // partial run would make it read as complete and lose its resume.
     applyRun(id, {
+      ...run,
       runId: createSelectionRunId(),
       signature: run.signature,
       at: Date.now(),
@@ -112,6 +107,28 @@ export const Component = memo(function VariationsNode({ id, data }: WorkbenchNod
       if (shiftedIndex >= 0) setPinned(id, shiftedIndex, { browse: false });
     }
   }
+
+  return { run, candidates, orderedCandidates, activeValue, selectedCacheKey, selectCandidate };
+}
+
+export const Component = memo(function VariationsNode({ id, data }: WorkbenchNodeProps) {
+  const updateParams = useWorkbenchStore((state) => state.updateParams);
+  const updatePresentationParams = useWorkbenchStore((state) => state.updatePresentationParams);
+  const setPinned = useWorkbenchStore((state) => state.setPinned);
+  const inputImages = useConnectedImageCount(id, ["image"]);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const edges = useEdges();
+  const { closing: lightboxClosing, requestClose: requestLightboxClose } = useModalDismiss(() => setLightboxOpen(false));
+  const { run, orderedCandidates, activeValue, selectedCacheKey, selectCandidate } = useCandidatePicker(id, data);
+  const visibleOutputIds = useMemo(() => {
+    const ids = new Set(activeVariationOutputIds(data.params));
+    // Never remove a handle that already owns a wire. Turning the toggle off
+    // hides unused handles but keeps existing branches connected and valid.
+    for (const edge of edges) {
+      if (edge.source === id && edge.sourceHandle?.startsWith("variation-")) ids.add(edge.sourceHandle);
+    }
+    return [...ids];
+  }, [data.params, edges, id]);
 
   return (
     <NodeShell

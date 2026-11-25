@@ -29,6 +29,7 @@ export type NodeKind =
   | "collageBoard"
   | "relight"
   | "variations"
+  | "multiRun"
   | "maskedEdit"
   | "upscaler"
   | "aiAssistant"
@@ -149,6 +150,12 @@ export type NodeRun = {
   at: number;
   values: NodeOutputValue[][]; // one array per output port, candidates within
   usage?: Record<string, unknown>;
+  // Multi-Run only: how many images this run is meant to hold. A run with
+  // fewer images on its primary port than `target` is PARTIAL (a stopped or
+  // aborted burst kept what it paid for): signature.ts's runIsComplete says
+  // so, and the executor re-executes it to render only the remainder instead
+  // of treating it as a cache hit. Undefined on every other node's runs.
+  target?: number;
 };
 
 // Masked Edit mask geometry. Coordinates are normalized 0-1000 against the
@@ -225,6 +232,11 @@ export type WorkbenchParams = {
   // variations
   n?: number;
   separateOutputs?: boolean;
+  // multiRun -- images per press (1-150), images per API call (n, 1-10) and
+  // the images-per-minute cap shared by every Multi-Run node (1-150).
+  total?: number;
+  perCall?: number;
+  ipm?: number;
   // maskedEdit — maskShapes is the source of truth: a JSON-serialized
   // MaskShape[] (rects, polygons, brush strokes; coordinates normalized
   // 0-1000 like NormalizedBox). maskRegion* is the derived union bounding

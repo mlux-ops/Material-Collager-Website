@@ -28,7 +28,7 @@ import { ensureThumbnail, getBlob, getBlobUrl, putBlob, putSvgBlob } from "../bl
 import { confirmHighCost, formatOutputUsd } from "../cost";
 import { cancelExecution, estimateStaleCost, retryFrom, runNodes } from "../executor";
 import { MAX_IMAGE_BYTES } from "../export-import";
-import { activeRunOf, signatureFor, type SignatureContext } from "../signature";
+import { activeRunOf, runIsComplete, signatureFor, type SignatureContext } from "../signature";
 import { useWorkbenchStore } from "../store";
 import { useModalDismiss } from "../useModalDismiss";
 import styles from "../workbench.module.css";
@@ -515,7 +515,9 @@ export function useCacheHit(id: string): boolean {
       };
       const signature = signatureFor(context, node);
       const active = activeRunOf(node);
-      return Boolean(active && active.signature === signature);
+      // A partial Multi-Run is not cached: the next press renders (and bills)
+      // its remainder.
+      return Boolean(active && active.signature === signature && runIsComplete(active));
     }),
   );
 }
@@ -1274,6 +1276,20 @@ async function validateMarkupLayer(markup: File, base: File): Promise<void> {
   }
 }
 
+// The reference images arriving on a node's "references" port, read from the
+// cache and prepared for upload. Each plain image contributes one file; a
+// references value expands to its ordered image cacheKeys. fileFromCacheKey
+// refuses SVG/GIF here, BEFORE the transport step, which would otherwise
+// re-encode a GIF into a still and let it through. Supporting references share
+// the same transport budget the generator uses (a base image, which callers
+// add themselves, travels at full quality). Multi-Run calls this once per
+// press and builds every chunk's request from the same files.
+export async function gatherReferenceFiles(references: NodeOutputValue[]): Promise<File[]> {
+  if (!references.length) return [];
+  const rawReferences = references.flatMap(imageCacheKeysFromValue).map((key) => fileFromCacheKey(key));
+  return optimizeReferencesForTransport(rawReferences);
+}
+
 // DOM-touching generation executor composing generation.ts's pure core:
 // gathers cached input files, posts the request, and caches the returned
 // images as object URLs.
@@ -1315,18 +1331,7 @@ export async function executeGeneration(
   // Image Generation's "size" port is deliberately NOT read here: it only
   // drives params.size via "Match input image" (GenerationSettings) and is
   // never sent to the model, so it costs no image-input tokens.
-  const references = ctx.inputs("references");
-  if (references.length) {
-    // Each plain image contributes one file; a references value expands to
-    // its ordered image cacheKeys. fileFromCacheKey refuses SVG/GIF here,
-    // BEFORE the transport step, which would otherwise re-encode a GIF into
-    // a still and let it through.
-    const rawReferences = references.flatMap(imageCacheKeysFromValue).map((key) => fileFromCacheKey(key));
-    // The base image travels at full quality; supporting references share
-    // the same transport budget the generator uses.
-    const optimized = await optimizeReferencesForTransport(rawReferences);
-    files.push(...optimized);
-  }
+  files.push(...(await gatherReferenceFiles(ctx.inputs("references"))));
   if (files.length > 16) throw new Error("A node can send at most 16 images.");
   if (isVectorOrAnimatedFormat(payload.outputFormat) && files.length) {
     throw new Error(`${payload.outputFormat.toUpperCase()} output is text-to-image only; disconnect the Image Reference inputs or choose PNG or WebP.`);

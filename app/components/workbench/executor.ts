@@ -3,7 +3,7 @@ import { recordRunOutputTokens } from "./cost.ts";
 import { imageCacheKeysFromValue } from "./nodes/generation";
 import { executeMap, isExecutable } from "./nodes/index";
 import { alwaysExecuteMap, draftOverrideMap, estimateCostMap, outputValuesFor, paidMap } from "./nodes/manifests";
-import { activeRunOf, isPinned, signatureFor, type SignatureContext } from "./signature";
+import { activeRunOf, isPinned, runIsComplete, signatureFor, type SignatureContext } from "./signature";
 import { downstreamOf, useWorkbenchStore } from "./store";
 import { acceptedKindsFor, specFor, type ExecuteContext, type NodeOutputValue, type WorkbenchNode } from "./types";
 
@@ -237,7 +237,10 @@ export async function runNodes(targetIds: string[], options: RunNodesOptions = {
       // RunNodesOptions.explicitSingleNode above.
       const forceExecute =
         alwaysExecuteMap[node.data.kind] === true && explicitSingleNode && targetIds.length === 1 && targetIds[0] === id;
-      if (!forceExecute && cached && cached.signature === signature && node.data.status !== "error") {
+      // runIsComplete: a partial Multi-Run (fewer images than its target,
+      // kept after a stop or an abort that left the node idle) must still
+      // execute so it renders the remainder; every other run is complete.
+      if (!forceExecute && cached && cached.signature === signature && node.data.status !== "error" && runIsComplete(cached)) {
         if (node.data.status !== "done") useWorkbenchStore.getState().setStatus(id, "done");
         continue; // cache hit — no re-run, no re-bill
       }
@@ -322,7 +325,7 @@ export function estimateStaleCost(targetIds: string[]): { totalUsd: number | nul
     // (Export/Download) as force-stale here; it is a genuine cache hit like
     // any other memoized node when nothing changed, matching what a Run
     // Workflow press will actually do.
-    if (cached && cached.signature === signature && node.data.status !== "error") continue; // cache hit — no charge
+    if (cached && cached.signature === signature && node.data.status !== "error" && runIsComplete(cached)) continue; // cache hit — no charge
     staleCount += 1;
     const estimateCost = estimateCostMap[node.data.kind];
     if (!estimateCost) {
