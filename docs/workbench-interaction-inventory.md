@@ -170,6 +170,7 @@ experience are out of scope for this change.
 | Collage Board | Choose collage type, orientation, resolution, and quality. |
 | Relight | Apply a prompt-driven lighting edit. |
 | Variations | Choose size, quality, and 1–10 candidates; select one candidate for the aggregate output. |
+| Multi-Run | Choose size, quality, PNG/WebP, images per press (1–150), images per call (1–10) and an images-per-minute cap (1–150, shared by every Multi-Run node, not part of the signature); one press sends the calls concurrently under the cap. A stopped, failed or cancelled press keeps what it paid for and the next press renders only the remainder. Select one candidate for the selected-image output. |
 | Image Markup | Paint freehand marks in six named colours (brush size, undo, clear, zoom/pan) over the input image; type one instruction per colour used. Outputs a transparent PNG of the marks at the input's exact size (for Image Edit's Markup port) and the matching prompt text. Zero API cost. |
 | Masked Edit | Draw rectangle/brush/polygon masks; undo/clear/apply. Runs only on the Sunburst edit path (no engine picker). |
 | Upscaler | Choose an upscale target and run a high-resolution edit. |

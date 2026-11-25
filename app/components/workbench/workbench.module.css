@@ -1106,6 +1106,12 @@
   border-color: #8b5cf6;
 }
 
+/* Multi-Run node: up to 150 candidates, so the grid scrolls inside the card. */
+.multiRunGrid {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
 /* Masked Edit node: region-selection modal (AC9). */
 .maskModalOverlay {
   position: fixed;

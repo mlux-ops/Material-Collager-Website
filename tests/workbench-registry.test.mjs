@@ -39,6 +39,7 @@ const DOM_WRAPPED_KINDS = new Set([
   "collageBoard",
   "relight",
   "variations",
+  "multiRun",
   "maskedEdit",
   "upscaler",
 ]);

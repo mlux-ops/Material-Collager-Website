@@ -16,6 +16,7 @@ import { Component as ImageGenerateComponent, execute as imageGenerateExecute } 
 import { Component as ImageMarkupComponent, execute as imageMarkupExecute } from "./imageMarkup";
 import { Component as LibraryPickComponent, execute as libraryPickExecute } from "./libraryPick";
 import { Component as MaskedEditComponent, execute as maskedEditExecute } from "./maskedEdit";
+import { Component as MultiRunComponent, execute as multiRunExecute } from "./multiRun";
 import { Component as NoteComponent } from "./note";
 import { Component as PatchComponent, execute as patchExecute } from "./patch";
 import { Component as PhotoComponent } from "./photo";
@@ -53,6 +54,7 @@ export const NODE_TYPES = {
   collageBoard: CollageBoardComponent,
   relight: RelightComponent,
   variations: VariationsComponent,
+  multiRun: MultiRunComponent,
   maskedEdit: MaskedEditComponent,
   upscaler: UpscalerComponent,
   aiAssistant: AiAssistantComponent,
@@ -88,6 +90,7 @@ const DOM_EXECUTES: Partial<Record<NodeKind, NodeExecute>> = {
   collageBoard: collageBoardExecute,
   relight: relightExecute,
   variations: variationsExecute,
+  multiRun: multiRunExecute,
   maskedEdit: maskedEditExecute,
   upscaler: upscalerExecute,
 };
