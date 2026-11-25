@@ -1,11 +1,12 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useState } from "react";
 import { putBlob } from "../blob-cache";
 import { activeRunOf, runIsComplete } from "../signature";
 import { useWorkbenchStore } from "../store";
 import styles from "../workbench.module.css";
 import type { ExecuteContext, ImageOutputMimeType, NodeOutputValue, WorkbenchNodeData } from "../types";
+import { CARD_PREVIEW_COUNT, previewSplit } from "./contact-sheet";
 import { decodeBase64Image, mimeTypeForFormat } from "./generation";
 import { realSleep, sharedIpmLimiter } from "./ipm-limiter";
 import {
@@ -36,6 +37,7 @@ import {
   useConnectedImageCount,
   type WorkbenchNodeProps,
 } from "./shared";
+import { ContactSheet } from "./multiRunSheet";
 import { useCandidatePicker } from "./variations";
 
 function clampInput(raw: string, max: number): number {
@@ -61,6 +63,9 @@ export const Component = memo(function MultiRunNode({ id, data }: WorkbenchNodeP
   const settings = multiRunSettings(data.params);
   const calls = Math.ceil(settings.total / settings.perCall);
   const running = data.status === "running";
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const imageCandidates = orderedCandidates.filter((value): value is Extract<NodeOutputValue, { kind: "image" }> => value.kind === "image");
+  const { shown: previewCandidates, hidden: hiddenCount } = previewSplit(imageCandidates, CARD_PREVIEW_COUNT);
 
   return (
     <NodeShell data={data} footer={<RunFooter id={id} data={data} inputImages={inputImages} />}>
@@ -107,21 +112,35 @@ export const Component = memo(function MultiRunNode({ id, data }: WorkbenchNodeP
       </p>
       <BurstStatus data={data} />
       <OutputPreview id={id} data={data} />
-      {orderedCandidates.length > 1 && (
-        <div className={`${styles.candidateGrid} ${styles.multiRunGrid}`}>
-          {orderedCandidates.map((value) => (
-            <button
-              key={value.cacheKey}
-              type="button"
-              className={`nodrag ${styles.candidateThumb} ${value.cacheKey === selectedCacheKey ? styles.candidateThumbActive : ""}`}
-              onClick={() => selectCandidate(value.cacheKey)}
-              disabled={running}
-              title={value.cacheKey === selectedCacheKey ? "Propagating downstream" : "Use this image downstream"}
-            >
-              <ThumbnailImage cacheKey={value.cacheKey} alt="Candidate" width={96} height={96} />
-            </button>
-          ))}
-        </div>
+      {imageCandidates.length > 1 && (
+        <>
+          <div className={styles.candidateGrid}>
+            {previewCandidates.map((value) => (
+              <button
+                key={value.cacheKey}
+                type="button"
+                className={`nodrag ${styles.candidateThumb} ${value.cacheKey === selectedCacheKey ? styles.candidateThumbActive : ""}`}
+                onClick={() => selectCandidate(value.cacheKey)}
+                disabled={running}
+                title={value.cacheKey === selectedCacheKey ? "Propagating downstream" : "Use this image downstream"}
+              >
+                <ThumbnailImage cacheKey={value.cacheKey} alt="Candidate" width={96} height={96} />
+              </button>
+            ))}
+          </div>
+          <button type="button" className={`nodrag ${styles.smallButton}`} onClick={() => setSheetOpen(true)}>
+            {hiddenCount > 0 ? `View all ${imageCandidates.length} (+${hiddenCount} more)` : `View all ${imageCandidates.length}`}
+          </button>
+        </>
+      )}
+      {sheetOpen && imageCandidates.length > 0 && (
+        <ContactSheet
+          candidates={imageCandidates}
+          selectedCacheKey={selectedCacheKey}
+          canPick={!running}
+          onPick={selectCandidate}
+          onClose={() => setSheetOpen(false)}
+        />
       )}
     </NodeShell>
   );
